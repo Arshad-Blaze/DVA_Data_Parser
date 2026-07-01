@@ -37,7 +37,7 @@ def storelevelvalidation(
     isimplied_dollars_test, isimplied_units_test,
     start_line=0, record_type=None,
     multiline_record_types=None, multiline_delimiter="|",
-    column_names=None,
+    column_names=None, header_prefix=None, header_layout=None,
 ):
     start_time = time.time()
 
@@ -52,6 +52,8 @@ def storelevelvalidation(
         multiline_record_types=multiline_record_types,
         multiline_delimiter=multiline_delimiter,
         column_names=column_names,
+        header_prefix=header_prefix,
+        header_layout=header_layout,
     )
 
     test_summary = stream_store_aggregate(
@@ -65,6 +67,8 @@ def storelevelvalidation(
         multiline_record_types=multiline_record_types,
         multiline_delimiter=multiline_delimiter,
         column_names=column_names,
+        header_prefix=header_prefix,
+        header_layout=header_layout,
     )
 
     if prod_summary.is_empty() and test_summary.is_empty():

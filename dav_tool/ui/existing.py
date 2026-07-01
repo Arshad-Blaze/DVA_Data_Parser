@@ -2,7 +2,8 @@ import os
 import streamlit as st
 import polars as pl
 from dav_tool._parsers import (
-    preview_raw, preview_flattened_multiline, load_layout,
+    preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
+    load_layout,
 )
 from dav_tool._aggregators import (
     stream_store_aggregate, stream_item_aggregate, generate_file_review,
@@ -10,7 +11,8 @@ from dav_tool._aggregators import (
 from dav_tool.validation.store import compare_files, storelevelvalidation
 from dav_tool.validation.item import run_item_validation
 from dav_tool.detection import (
-    is_multiline_record, detect_file_type, detect_record_types, has_header,
+    is_multiline_record, detect_file_type, detect_record_types,
+    detect_hdr_prefix, has_header,
 )
 from dav_tool.ui.helpers import clean_path, get_file_list, get_column_names
 
@@ -82,6 +84,11 @@ def _detect_and_set(file_paths, prefix):
     if is_multiline_record(file_paths[0]):
         st.warning(f"Multi-line structured file detected ({prefix})")
         st.session_state[f"{prefix}_type"] = "multiline"
+        hdr_prefixes = detect_hdr_prefix(file_paths[0])
+        if hdr_prefixes:
+            st.session_state[f"{prefix}_header_prefix"] = hdr_prefixes[0]
+        else:
+            st.session_state.pop(f"{prefix}_header_prefix", None)
     else:
         ftype, delim = detect_file_type(file_paths[0])
         if ftype == "delimited":
@@ -109,9 +116,7 @@ def _multiline_section(prod_paths, test_paths, prod_type, test_type):
             raw_p = preview_raw(prod_paths, "multiline", n_rows=5)
             if not raw_p.is_empty():
                 st.dataframe(raw_p.to_pandas(), height=150)
-            detected_p = detect_record_types(prod_paths[0])
-            rt_p_default = ",".join(detected_p) if detected_p else "H,D"
-            ml_rt_prod = st.text_input("BAU Record Type Flags", value=rt_p_default, key="ml_rt_prod")
+            _multiline_side_inputs(prod_paths, "prod")
 
     with mc2:
         if test_type == "multiline":
@@ -119,18 +124,16 @@ def _multiline_section(prod_paths, test_paths, prod_type, test_type):
             raw_t = preview_raw(test_paths, "multiline", n_rows=5)
             if not raw_t.is_empty():
                 st.dataframe(raw_t.to_pandas(), height=150)
-            detected_t = detect_record_types(test_paths[0])
-            rt_t_default = ",".join(detected_t) if detected_t else "H,D"
-            ml_rt_test = st.text_input("Test Record Type Flags", value=rt_t_default, key="ml_rt_test")
+            _multiline_side_inputs(test_paths, "test")
 
     ml_delim = st.selectbox("Multiline Delimiter", [",", "|", "\t", ";"], index=0, key="existing_ml_delim")
 
     if st.button("Flatten Records", key="existing_flatten"):
         st.session_state.ex_ml_delim = ml_delim
         if prod_type == "multiline":
-            st.session_state.ex_ml_rt_prod = [r.strip() for r in ml_rt_prod.split(",") if r.strip()]
+            _store_ml_config("prod")
         if test_type == "multiline":
-            st.session_state.ex_ml_rt_test = [r.strip() for r in ml_rt_test.split(",") if r.strip()]
+            _store_ml_config("test")
         st.session_state.ex_ml_flattened = True
         st.rerun()
 
@@ -140,20 +143,73 @@ def _multiline_section(prod_paths, test_paths, prod_type, test_type):
     return ml_delim
 
 
+def _multiline_side_inputs(file_paths, prefix):
+    if st.session_state.get(f"{prefix}_header_prefix"):
+        hp = st.session_state[f"{prefix}_header_prefix"]
+        st.info(f"HDR prefix: **{hp}**")
+        hf = st.text_input(f"{prefix.upper()} Header Layout CSV", key=f"ex_hdr_header_file_{prefix}")
+        df = st.text_input(f"{prefix.upper()} Detail Layout CSV", key=f"ex_hdr_detail_file_{prefix}")
+        if hf and os.path.exists(clean_path(hf)):
+            st.session_state[f"ex_hdr_header_layout_{prefix}"] = load_layout(clean_path(hf))
+            st.success("Header layout ready")
+        if df and os.path.exists(clean_path(df)):
+            st.session_state[f"ex_hdr_detail_layout_{prefix}"] = load_layout(clean_path(df))
+            st.success("Detail layout ready")
+    else:
+        detected = detect_record_types(file_paths[0])
+        rt_default = ",".join(detected) if detected else "H,D"
+        st.text_input(
+            f"{prefix.upper()} Record Type Flags", value=rt_default,
+            key=f"ml_rt_{prefix}"
+        )
+
+
+def _store_ml_config(prefix):
+    if st.session_state.get(f"{prefix}_header_prefix"):
+        st.session_state[f"ex_hdr_prefix_{prefix}"] = st.session_state[f"{prefix}_header_prefix"]
+        st.session_state[f"ex_hdr_header_layout_{prefix}"] = st.session_state.get(
+            f"ex_hdr_header_layout_{prefix}"
+        )
+        st.session_state[f"ex_hdr_detail_layout_{prefix}"] = st.session_state.get(
+            f"ex_hdr_detail_layout_{prefix}"
+        )
+    else:
+        rt_val = st.session_state.get(f"ml_rt_{prefix}", "")
+        st.session_state[f"ex_ml_rt_{prefix}"] = [r.strip() for r in rt_val.split(",") if r.strip()]
+
+
 def _flattened_preview_and_schema(prod_paths, test_paths, prod_type, test_type, ml_delim):
     mc1, mc2 = st.columns(2)
     with mc1:
         st.subheader("BAU Flattened Preview")
         if prod_type == "multiline":
-            rt_list = st.session_state.ex_ml_rt_prod
-            fp = preview_flattened_multiline(prod_paths, rt_list, ml_delim, n_rows=10)
+            if st.session_state.get("ex_hdr_prefix_prod"):
+                fp = preview_flattened_multiline_fixed(
+                    prod_paths,
+                    st.session_state.ex_hdr_prefix_prod,
+                    st.session_state.get("ex_hdr_header_layout_prod", []),
+                    st.session_state.get("ex_hdr_detail_layout_prod", []),
+                    n_rows=10,
+                )
+            else:
+                rt_list = st.session_state.get("ex_ml_rt_prod", [])
+                fp = preview_flattened_multiline(prod_paths, rt_list, ml_delim, n_rows=10)
             if not fp.is_empty():
                 st.dataframe(fp.to_pandas())
     with mc2:
         st.subheader("Test Flattened Preview")
         if test_type == "multiline":
-            rt_list = st.session_state.ex_ml_rt_test
-            fp = preview_flattened_multiline(test_paths, rt_list, ml_delim, n_rows=10)
+            if st.session_state.get("ex_hdr_prefix_test"):
+                fp = preview_flattened_multiline_fixed(
+                    test_paths,
+                    st.session_state.ex_hdr_prefix_test,
+                    st.session_state.get("ex_hdr_header_layout_test", []),
+                    st.session_state.get("ex_hdr_detail_layout_test", []),
+                    n_rows=10,
+                )
+            else:
+                rt_list = st.session_state.get("ex_ml_rt_test", [])
+                fp = preview_flattened_multiline(test_paths, rt_list, ml_delim, n_rows=10)
             if not fp.is_empty():
                 st.dataframe(fp.to_pandas())
 
@@ -163,8 +219,17 @@ def _flattened_preview_and_schema(prod_paths, test_paths, prod_type, test_type, 
     sc1, sc2 = st.columns(2)
     with sc1:
         if prod_type == "multiline":
-            rt_list = st.session_state.ex_ml_rt_prod
-            fp = preview_flattened_multiline(prod_paths, rt_list, ml_delim, n_rows=5)
+            if st.session_state.get("ex_hdr_prefix_prod"):
+                fp = preview_flattened_multiline_fixed(
+                    prod_paths,
+                    st.session_state.ex_hdr_prefix_prod,
+                    st.session_state.get("ex_hdr_header_layout_prod", []),
+                    st.session_state.get("ex_hdr_detail_layout_prod", []),
+                    n_rows=5,
+                )
+            else:
+                rt_list = st.session_state.get("ex_ml_rt_prod", [])
+                fp = preview_flattened_multiline(prod_paths, rt_list, ml_delim, n_rows=5)
             if not fp.is_empty():
                 st.markdown("**BAU Column Names**")
                 for i, col in enumerate(fp.columns):
@@ -173,8 +238,17 @@ def _flattened_preview_and_schema(prod_paths, test_paths, prod_type, test_type, 
                     )
     with sc2:
         if test_type == "multiline":
-            rt_list = st.session_state.ex_ml_rt_test
-            fp = preview_flattened_multiline(test_paths, rt_list, ml_delim, n_rows=5)
+            if st.session_state.get("ex_hdr_prefix_test"):
+                fp = preview_flattened_multiline_fixed(
+                    test_paths,
+                    st.session_state.ex_hdr_prefix_test,
+                    st.session_state.get("ex_hdr_header_layout_test", []),
+                    st.session_state.get("ex_hdr_detail_layout_test", []),
+                    n_rows=5,
+                )
+            else:
+                rt_list = st.session_state.get("ex_ml_rt_test", [])
+                fp = preview_flattened_multiline(test_paths, rt_list, ml_delim, n_rows=5)
             if not fp.is_empty():
                 st.markdown("**Test Column Names**")
                 for i, col in enumerate(fp.columns):
@@ -208,6 +282,20 @@ def _show_regular_previews(prod_paths, test_paths, prod_type, test_type,
                               n_rows=10, start_line=test_start_line, record_type=test_record_type)
             if not tv.is_empty():
                 st.table(tv.to_pandas().iloc[:10, :10].astype(str))
+
+
+def _get_hdr_params(side):
+    """Return (header_prefix, header_layout) for HDR fixed-width or (None, None)."""
+    prefix_key = f"ex_hdr_prefix_{side}"
+    layout_key = f"ex_hdr_header_layout_{side}"
+    if st.session_state.get(prefix_key):
+        return st.session_state[prefix_key], st.session_state.get(layout_key)
+    return None, None
+
+
+def _get_hdr_detail(side):
+    """Return detail layout for HDR fixed-width or None."""
+    return st.session_state.get(f"ex_hdr_detail_layout_{side}")
 
 
 def _run_column_mapping_and_validation(
@@ -246,10 +334,22 @@ def _run_column_mapping_and_validation(
         if test_type == "multiline" else test_record_type
     )
 
+    hdr_prefix_prod, hdr_header_prod = _get_hdr_params("prod")
+    hdr_prefix_test, hdr_header_test = _get_hdr_params("test")
+    hdr_detail_prod = _get_hdr_detail("prod")
+    hdr_detail_test = _get_hdr_detail("test")
+
+    eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
+    eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
+
     prod_cols = get_column_names(prod_paths, eff_prod_type, eff_delim_prod,
-                                  prod_layout_list, prod_start_line, eff_rt_prod)
+                                  eff_layout_prod_cols, prod_start_line, eff_rt_prod,
+                                  header_prefix=hdr_prefix_prod,
+                                  header_layout=hdr_header_prod)
     test_cols = get_column_names(test_paths, eff_test_type, eff_delim_test,
-                                  test_layout_list, test_start_line, eff_rt_test)
+                                  eff_layout_test_cols, test_start_line, eff_rt_test,
+                                  header_prefix=hdr_prefix_test,
+                                  header_layout=hdr_header_test)
 
     st.subheader("Column Mapping")
     c1, c2 = st.columns(2)
@@ -327,33 +427,45 @@ def _execute_validation(
     ml_schema_prod = st.session_state.get("ex_schema_prod")
     ml_schema_test = st.session_state.get("ex_schema_test")
 
+    hdr_prefix_prod, hdr_header_prod = _get_hdr_params("prod")
+    hdr_prefix_test, hdr_header_test = _get_hdr_params("test")
+    hdr_detail_prod = _get_hdr_detail("prod")
+    hdr_detail_test = _get_hdr_detail("test")
+
+    eff_layout_prod = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
+    eff_layout_test = hdr_detail_test if hdr_prefix_test else test_layout_list
+
     if run_store:
         store_df = storelevelvalidation(
             prod_paths, test_paths, prod_type, test_type,
-            prod_delim, test_delim, prod_layout_list, test_layout_list,
+            prod_delim, test_delim, eff_layout_prod, eff_layout_test,
             prod_store_col, prod_units_col, prod_price_col,
             test_store_col, test_units_col, test_price_col,
             price_type_bau, price_type_test,
             isimplied_dollars_prod, isimplied_units_prod,
             isimplied_dollars_test, isimplied_units_test,
             start_line=prod_start_line, record_type=prod_record_type,
-            multiline_record_types=ml_rt_prod if prod_type == "multiline" else None,
+            multiline_record_types=ml_rt_prod if prod_type == "multiline" and not hdr_prefix_prod else None,
             multiline_delimiter=ml_delim_val, column_names=ml_schema_prod,
+            header_prefix=hdr_prefix_prod or hdr_prefix_test,
+            header_layout=hdr_header_prod or hdr_header_test,
         )
         st.session_state.store_df = store_df
 
     if run_item:
         comparison_df, summary_df = run_item_validation(
             prod_paths, test_paths, prod_type, test_type,
-            prod_delim, test_delim, prod_layout_list, test_layout_list,
+            prod_delim, test_delim, eff_layout_prod, eff_layout_test,
             prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
             implied_units_bau=isimplied_units_prod,
             implied_dollars_bau=isimplied_dollars_prod,
             implied_units_test=isimplied_units_test,
             implied_dollars_test=isimplied_dollars_test,
             start_line=prod_start_line, record_type=prod_record_type,
-            multiline_record_types=ml_rt_prod if prod_type == "multiline" else None,
+            multiline_record_types=ml_rt_prod if prod_type == "multiline" and not hdr_prefix_prod else None,
             multiline_delimiter=ml_delim_val, column_names=ml_schema_prod,
+            header_prefix=hdr_prefix_prod or hdr_prefix_test,
+            header_layout=hdr_header_prod or hdr_header_test,
         )
         st.session_state.comparison_df = comparison_df
         st.session_state.summary_df = summary_df
@@ -361,17 +473,19 @@ def _execute_validation(
     if run_compare_existing:
         _compare_stores(
             prod_paths, test_paths, prod_type, test_type,
-            prod_delim, test_delim, prod_layout_list, test_layout_list,
+            prod_delim, test_delim, eff_layout_prod, eff_layout_test,
             prod_start_line, test_start_line, prod_record_type, test_record_type,
             prod_store_col, prod_units_col, prod_price_col,
             test_store_col, test_units_col, test_price_col,
             ml_delim_val, ml_rt_prod, ml_rt_test, ml_schema_prod, ml_schema_test,
+            hdr_prefix_prod, hdr_prefix_test,
+            hdr_header_prod, hdr_header_test,
         )
 
     if run_file_review_existing:
         _generate_file_reviews(
             prod_paths, test_paths, prod_type, test_type,
-            prod_delim, test_delim, prod_layout_list, test_layout_list,
+            prod_delim, test_delim, eff_layout_prod, eff_layout_test,
             prod_start_line, test_start_line, prod_record_type, test_record_type,
             prod_store_col, prod_upc_col, prod_units_col, prod_price_col,
             test_store_col, test_upc_col, test_units_col, test_price_col,
@@ -379,6 +493,8 @@ def _execute_validation(
             isimplied_dollars_prod, isimplied_units_prod,
             isimplied_dollars_test, isimplied_units_test,
             ml_delim_val, ml_rt_prod, ml_rt_test, ml_schema_prod, ml_schema_test,
+            hdr_prefix_prod, hdr_prefix_test,
+            hdr_header_prod, hdr_header_test,
         )
 
     st.session_state.validation_done = True
@@ -392,21 +508,27 @@ def _compare_stores(
     prod_store_col, prod_units_col, prod_price_col,
     test_store_col, test_units_col, test_price_col,
     ml_delim_val, ml_rt_prod, ml_rt_test, ml_schema_prod, ml_schema_test,
+    hdr_prefix_prod=None, hdr_prefix_test=None,
+    hdr_header_prod=None, hdr_header_test=None,
 ):
     prod_series = stream_store_aggregate(
         prod_paths, prod_type, prod_store_col, prod_units_col, prod_price_col,
         delimiter=prod_delim, layout=prod_layout_list,
         start_line=prod_start_line, record_type=prod_record_type,
-        multiline_record_types=ml_rt_prod if prod_type == "multiline" else None,
+        multiline_record_types=ml_rt_prod if prod_type == "multiline" and not hdr_prefix_prod else None,
         multiline_delimiter=ml_delim_val, column_names=ml_schema_prod,
+        header_prefix=hdr_prefix_prod,
+        header_layout=hdr_header_prod,
     ).select(["STORE_NUMBER"])
 
     test_series = stream_store_aggregate(
         test_paths, test_type, test_store_col, test_units_col, test_price_col,
         delimiter=test_delim, layout=test_layout_list,
         start_line=test_start_line, record_type=test_record_type,
-        multiline_record_types=ml_rt_test if test_type == "multiline" else None,
+        multiline_record_types=ml_rt_test if test_type == "multiline" and not hdr_prefix_test else None,
         multiline_delimiter=ml_delim_val, column_names=ml_schema_test,
+        header_prefix=hdr_prefix_test,
+        header_layout=hdr_header_test,
     ).select(["STORE_NUMBER"])
 
     if not prod_series.is_empty() and not test_series.is_empty():
@@ -429,6 +551,8 @@ def _generate_file_reviews(
     isimplied_dollars_prod, isimplied_units_prod,
     isimplied_dollars_test, isimplied_units_test,
     ml_delim_val, ml_rt_prod, ml_rt_test, ml_schema_prod, ml_schema_test,
+    hdr_prefix_prod=None, hdr_prefix_test=None,
+    hdr_header_prod=None, hdr_header_test=None,
 ):
     fr_prod = generate_file_review(
         prod_paths, prod_type, prod_store_col, prod_upc_col,
@@ -438,8 +562,10 @@ def _generate_file_reviews(
         implied_dollars=isimplied_dollars_prod,
         implied_units=isimplied_units_prod,
         start_line=prod_start_line, record_type=prod_record_type,
-        multiline_record_types=ml_rt_prod if prod_type == "multiline" else None,
+        multiline_record_types=ml_rt_prod if prod_type == "multiline" and not hdr_prefix_prod else None,
         multiline_delimiter=ml_delim_val, column_names=ml_schema_prod,
+        header_prefix=hdr_prefix_prod,
+        header_layout=hdr_header_prod,
     )
     fr_test = generate_file_review(
         test_paths, test_type, test_store_col, test_upc_col,
@@ -449,8 +575,10 @@ def _generate_file_reviews(
         implied_dollars=isimplied_dollars_test,
         implied_units=isimplied_units_test,
         start_line=test_start_line, record_type=test_record_type,
-        multiline_record_types=ml_rt_test if test_type == "multiline" else None,
+        multiline_record_types=ml_rt_test if test_type == "multiline" and not hdr_prefix_test else None,
         multiline_delimiter=ml_delim_val, column_names=ml_schema_test,
+        header_prefix=hdr_prefix_test,
+        header_layout=hdr_header_test,
     )
     st.session_state.fr_prod = fr_prod
     st.session_state.fr_test = fr_test

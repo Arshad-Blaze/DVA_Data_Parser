@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional, Union
 
 from dav_tool._parsers import (
     safe_numeric, scan_delimited, parse_fixed_width_chunks,
-    flatten_multiline_chunks,
+    flatten_multiline_chunks, flatten_multiline_fixed_width,
 )
 from dav_tool.config import DEFAULT_CHUNK_SIZE
 
@@ -84,6 +84,8 @@ def stream_store_aggregate(
     multiline_record_types: Optional[List[str]] = None,
     multiline_delimiter: str = "|",
     column_names: Optional[List[str]] = None,
+    header_prefix: Optional[str] = None,
+    header_layout: Optional[List[Dict]] = None,
 ) -> pl.DataFrame:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -114,7 +116,8 @@ def stream_store_aggregate(
 
     result = None
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
-                          record_type, multiline_record_types, multiline_delimiter)
+                          record_type, multiline_record_types, multiline_delimiter,
+                          header_prefix, header_layout)
 
     for chunk in chunks:
         if column_names and len(column_names) == len(chunk.columns):
@@ -149,6 +152,8 @@ def stream_item_aggregate(
     multiline_record_types: Optional[List[str]] = None,
     multiline_delimiter: str = "|",
     column_names: Optional[List[str]] = None,
+    header_prefix: Optional[str] = None,
+    header_layout: Optional[List[Dict]] = None,
 ) -> pl.DataFrame:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -178,7 +183,8 @@ def stream_item_aggregate(
 
     result = None
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
-                          record_type, multiline_record_types, multiline_delimiter)
+                          record_type, multiline_record_types, multiline_delimiter,
+                          header_prefix, header_layout)
 
     for chunk in chunks:
         if column_names and len(column_names) == len(chunk.columns):
@@ -225,6 +231,8 @@ def stream_upc_summary(
     multiline_record_types: Optional[List[str]] = None,
     multiline_delimiter: str = "|",
     column_names: Optional[List[str]] = None,
+    header_prefix: Optional[str] = None,
+    header_layout: Optional[List[Dict]] = None,
 ) -> pl.DataFrame:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -250,7 +258,8 @@ def stream_upc_summary(
 
     result = None
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
-                          record_type, multiline_record_types, multiline_delimiter)
+                          record_type, multiline_record_types, multiline_delimiter,
+                          header_prefix, header_layout)
 
     for chunk in chunks:
         if column_names and len(column_names) == len(chunk.columns):
@@ -276,10 +285,15 @@ def stream_upc_summary(
 
 
 def _iter_chunks(file_paths, file_type, layout, start_line,
-                 record_type, multiline_record_types, multiline_delimiter):
+                 record_type, multiline_record_types, multiline_delimiter,
+                 header_prefix=None, header_layout=None):
     if file_type == "fixed":
         return parse_fixed_width_chunks(file_paths, layout, start_line, record_type)
     elif file_type == "multiline":
+        if header_prefix and header_layout:
+            return flatten_multiline_fixed_width(
+                file_paths, header_prefix, header_layout, layout or []
+            )
         rtypes = multiline_record_types or ["H", "D"]
         return flatten_multiline_chunks(file_paths, rtypes, multiline_delimiter)
     return iter([])
@@ -303,6 +317,8 @@ def generate_file_review(
     multiline_record_types: Optional[List[str]] = None,
     multiline_delimiter: str = "|",
     column_names: Optional[List[str]] = None,
+    header_prefix: Optional[str] = None,
+    header_layout: Optional[List[Dict]] = None,
 ) -> pl.DataFrame:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -320,6 +336,8 @@ def generate_file_review(
             multiline_record_types=multiline_record_types,
             multiline_delimiter=multiline_delimiter,
             column_names=column_names,
+            header_prefix=header_prefix,
+            header_layout=header_layout,
         )
 
         ua = stream_upc_summary(
@@ -330,6 +348,8 @@ def generate_file_review(
             multiline_record_types=multiline_record_types,
             multiline_delimiter=multiline_delimiter,
             column_names=column_names,
+            header_prefix=header_prefix,
+            header_layout=header_layout,
         )
 
         store_count = sa.height if sa is not None and not sa.is_empty() else 0

@@ -13,7 +13,7 @@ def run_item_validation(
     implied_units_test=False, implied_dollars_test=False,
     start_line=0, record_type=None,
     multiline_record_types=None, multiline_delimiter="|",
-    column_names=None,
+    column_names=None, header_prefix=None, header_layout=None,
 ):
     start_time = time.time()
 
@@ -27,6 +27,8 @@ def run_item_validation(
         multiline_record_types=multiline_record_types,
         multiline_delimiter=multiline_delimiter,
         column_names=column_names,
+        header_prefix=header_prefix,
+        header_layout=header_layout,
     )
 
     test_summary = stream_item_aggregate(
@@ -39,6 +41,8 @@ def run_item_validation(
         multiline_record_types=multiline_record_types,
         multiline_delimiter=multiline_delimiter,
         column_names=column_names,
+        header_prefix=header_prefix,
+        header_layout=header_layout,
     )
 
     comparison = create_comparison(bau_summary, test_summary)

@@ -10,7 +10,7 @@ from dav_tool._aggregators import (
     stream_upc_summary,
     generate_file_review,
 )
-from dav_tool._parsers import load_layout
+from dav_tool._parsers import load_layout, flatten_multiline_fixed_width
 
 OUT = "/tmp/dav_test_results"
 os.makedirs(OUT, exist_ok=True)
@@ -202,7 +202,74 @@ report("MULTILINE FIXED-WIDTH MULTI-FILE — Store (UPC as store proxy)",
         layout=ml_layout, record_type="U"))
 
 # ============================================================
-# 8. FILE REVIEW REPORT (all types in one pass)
+# 8. HDR FIXED-WIDTH MULTILINE (multi-character prefix)
+# ============================================================
+hdr_header_layout_csv = os.path.join(TMP, "hdr_header_layout.csv")
+with open(hdr_header_layout_csv, "w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["From","Length","Field","Type"])
+    w.writerow(["4","5","Store","text"])
+    w.writerow(["12","8","Date","text"])
+hdr_header_layout = load_layout(hdr_header_layout_csv)
+
+hdr_detail_layout_csv = os.path.join(TMP, "hdr_detail_layout.csv")
+with open(hdr_detail_layout_csv, "w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["From","Length","Field","Type"])
+    w.writerow(["1","12","UPC","text"])
+    w.writerow(["13","21","Description","text"])
+    w.writerow(["34","2","Units","numeric"])
+    w.writerow(["36","8","Price","numeric"])
+hdr_detail_layout = load_layout(hdr_detail_layout_csv)
+
+def hdr_fixed_header(store, date):
+    # "HDR" + Store(5) + 3 spaces + Date(8) = 19 chars
+    return f"HDR{store:<5}   {date}\n"
+
+def hdr_fixed_detail(upc, desc, units, price):
+    # UPC(12) + Description(21) + Units(2) + Price(8) + Trailing(5) = 48 chars
+    return f"{upc:<12}{desc:<21}{units:>2}{price:>8}     \n"
+
+hdr1 = os.path.join(TMP, "hdr_fixed1.txt")
+with open(hdr1, "w") as f:
+    f.write(hdr_fixed_header("S001", "2024-01-15"))
+    f.write(hdr_fixed_detail("100001", "Widget A", "10", "99.90"))
+    f.write(hdr_fixed_detail("100002", "Gadget B", "5", "49.95"))
+    f.write(hdr_fixed_header("S002", "2024-01-15"))
+    f.write(hdr_fixed_detail("100001", "Widget A", "8", "79.92"))
+
+hdr2 = os.path.join(TMP, "hdr_fixed2.txt")
+with open(hdr2, "w") as f:
+    f.write(hdr_fixed_header("S003", "2024-01-16"))
+    f.write(hdr_fixed_detail("100003", "Doohickey", "20", "199.80"))
+    f.write(hdr_fixed_detail("100004", "New Item", "3", "29.97"))
+
+hdr_d_cols = ["Store","Date","UPC","Description","Units","Price"]
+
+report("HDR FIXED SINGLE — flattened preview",
+    next(iter(flatten_multiline_fixed_width(
+        [hdr1], "HDR", hdr_header_layout, hdr_detail_layout, chunk_size=10))).head(10))
+
+report("HDR FIXED SINGLE — Store Validation",
+    stream_store_aggregate(
+        [hdr1],"multiline","Store","Units","Price",
+        header_prefix="HDR", header_layout=hdr_header_layout,
+        layout=hdr_detail_layout, column_names=hdr_d_cols))
+
+report("HDR FIXED MULTI-FILE — Item Validation",
+    stream_item_aggregate(
+        [hdr1,hdr2],"multiline","UPC","Description","Units","Price",
+        header_prefix="HDR", header_layout=hdr_header_layout,
+        layout=hdr_detail_layout, column_names=hdr_d_cols))
+
+report("HDR FIXED MULTI-FILE — Store Validation",
+    stream_store_aggregate(
+        [hdr1,hdr2],"multiline","Store","Units","Price",
+        header_prefix="HDR", header_layout=hdr_header_layout,
+        layout=hdr_detail_layout, column_names=hdr_d_cols))
+
+# ============================================================
+# 9. FILE REVIEW REPORT (all types in one pass)
 # ============================================================
 review_delim = generate_file_review(
     [csv1,csv2],"delimited","Store","UPC","Units","Price",delimiter=",")
@@ -223,8 +290,14 @@ review_mlfw = generate_file_review(
     layout=ml_layout, record_type="U")
 report("FILE REVIEW — Multiline Fixed-Width", review_mlfw)
 
+review_hdr = generate_file_review(
+    [hdr1,hdr2],"multiline","Store","UPC","Units","Price",
+    header_prefix="HDR", header_layout=hdr_header_layout,
+    layout=hdr_detail_layout, column_names=hdr_d_cols)
+report("FILE REVIEW — HDR Fixed-Width", review_hdr)
+
 # ============================================================
-# 9. IMPLIED DECIMAL TEST
+# 10. IMPLIED DECIMAL TEST
 # ============================================================
 csv_implied = os.path.join(TMP, "implied.csv")
 with open(csv_implied, "w", newline="") as f:

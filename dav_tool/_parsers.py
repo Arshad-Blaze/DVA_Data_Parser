@@ -142,6 +142,66 @@ def flatten_multiline_chunks(
                 yield _fields_to_df(buffer)
 
 
+def flatten_multiline_fixed_width(
+    file_paths: Union[str, List[str]],
+    header_prefix: str,
+    header_layout: List[Dict[str, Any]],
+    detail_layout: List[Dict[str, Any]],
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> Iterator[pl.DataFrame]:
+    """Flatten HDR-fixed-width files: extract header fields, merge into detail rows.
+
+    Lines starting with *header_prefix* are parsed with *header_layout* and
+    their values carried forward to all subsequent detail (non-header) lines,
+    which are parsed with *detail_layout*.
+    """
+    if isinstance(file_paths, str):
+        file_paths = [file_paths]
+
+    for file_path in file_paths:
+        if not os.path.exists(file_path):
+            continue
+
+        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
+            buffer = []
+            current_header: Dict[str, str] = {}
+
+            for line in f:
+                line = line.rstrip("\n\r")
+                if not line:
+                    continue
+
+                if line.startswith(header_prefix):
+                    current_header = {}
+                    for col in header_layout:
+                        raw = line[col["start"] : col["end"]].strip()
+                        if col["type"] == "numeric":
+                            raw = raw.lstrip("0") or "0"
+                        elif col["type"] == "date" and len(raw) == 6:
+                            raw = f"20{raw[:2]}-{raw[2:4]}-{raw[4:6]}"
+                        current_header[col["field"]] = raw
+                else:
+                    if not current_header:
+                        continue
+                    record = dict(current_header)
+                    for col in detail_layout:
+                        end = min(col["end"], len(line))
+                        raw = line[col["start"] : end].strip()
+                        if col["type"] == "numeric":
+                            raw = raw.lstrip("0") or "0"
+                        elif col["type"] == "date" and len(raw) == 6:
+                            raw = f"20{raw[:2]}-{raw[2:4]}-{raw[4:6]}"
+                        record[col["field"]] = raw
+                    buffer.append(record)
+
+                    if len(buffer) >= chunk_size:
+                        yield pl.DataFrame(buffer)
+                        buffer.clear()
+
+            if buffer:
+                yield pl.DataFrame(buffer)
+
+
 def preview_raw(
     file_paths: Union[str, List[str]],
     file_type: str,
@@ -227,6 +287,20 @@ def preview_flattened_multiline(
 ) -> pl.DataFrame:
     for chunk in flatten_multiline_chunks(
         file_paths, record_types, delimiter, chunk_size=n_rows
+    ):
+        return chunk.head(n_rows)
+    return pl.DataFrame()
+
+
+def preview_flattened_multiline_fixed(
+    file_paths: Union[str, List[str]],
+    header_prefix: str,
+    header_layout: List[Dict[str, Any]],
+    detail_layout: List[Dict[str, Any]],
+    n_rows: int = 20,
+) -> pl.DataFrame:
+    for chunk in flatten_multiline_fixed_width(
+        file_paths, header_prefix, header_layout, detail_layout, chunk_size=n_rows
     ):
         return chunk.head(n_rows)
     return pl.DataFrame()

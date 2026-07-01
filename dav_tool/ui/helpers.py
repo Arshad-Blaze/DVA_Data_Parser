@@ -3,6 +3,7 @@ import glob
 import polars as pl
 from dav_tool._parsers import (
     parse_fixed_width_chunks, preview_flattened_multiline,
+    preview_flattened_multiline_fixed,
 )
 from dav_tool.io import safe_read_csv
 
@@ -30,7 +31,8 @@ def load_storelist(path, delimiter):
     return safe_read_csv(path, separator=delimiter)
 
 
-def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0, record_type=None):
+def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
+                     record_type=None, header_prefix=None, header_layout=None):
     if not paths:
         return []
     try:
@@ -42,8 +44,13 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
             if chunks:
                 return chunks[0].columns
         elif file_type == "multiline":
-            rt_list = record_type.split(",") if record_type else ["H", "D"]
-            flat = preview_flattened_multiline(paths, rt_list, delimiter, n_rows=5)
+            if header_prefix and header_layout:
+                flat = preview_flattened_multiline_fixed(
+                    paths, header_prefix, header_layout, layout or [], n_rows=5
+                )
+            else:
+                rt_list = record_type.split(",") if record_type else ["H", "D"]
+                flat = preview_flattened_multiline(paths, rt_list, delimiter, n_rows=5)
             if not flat.is_empty():
                 return flat.columns
     except Exception:

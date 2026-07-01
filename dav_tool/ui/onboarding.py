@@ -1,10 +1,13 @@
 import os
 import streamlit as st
 import polars as pl
-from dav_tool._parsers import preview_raw, preview_flattened_multiline
+from dav_tool._parsers import (
+    preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
+    load_layout,
+)
 from dav_tool._aggregators import stream_store_aggregate, stream_item_aggregate, generate_file_review
 from dav_tool.validation.store import compare_files
-from dav_tool.detection import is_multiline_record, detect_file_type, detect_record_types
+from dav_tool.detection import is_multiline_record, detect_file_type, detect_record_types, detect_hdr_prefix
 from dav_tool.io import safe_read_csv
 from dav_tool.ui.helpers import clean_path, get_file_list, load_storelist, get_column_names
 
@@ -69,6 +72,15 @@ def run():
 
 
 def _multiline_flow(file_paths):
+    hdr_prefixes = detect_hdr_prefix(file_paths[0])
+
+    if hdr_prefixes:
+        _hdr_fixed_flow(file_paths, hdr_prefixes)
+    else:
+        _delimited_ml_flow(file_paths)
+
+
+def _delimited_ml_flow(file_paths):
     st.subheader("Raw Preview (with record-type prefixes)")
     raw_preview = preview_raw(file_paths, "multiline", n_rows=10)
     if not raw_preview.is_empty():
@@ -94,25 +106,90 @@ def _multiline_flow(file_paths):
             st.rerun()
 
     if st.session_state.get("onb_ml_flattened"):
-        st.subheader("Flattened Preview")
-        rt_list = st.session_state.onb_ml_rt
-        flat_preview = preview_flattened_multiline(
-            file_paths, rt_list, st.session_state.onb_ml_delim, n_rows=10
-        )
-        if not flat_preview.is_empty():
-            st.dataframe(flat_preview.to_pandas())
-            st.session_state.onb_ml_delim = st.session_state.onb_ml_delim
+        _show_ml_preview_and_schema(file_paths)
 
-        st.subheader("Define Column Schema")
-        default_cols = flat_preview.columns
-        schema_names = {}
-        for i, col in enumerate(default_cols):
-            schema_names[col] = st.text_input(
-                f"Rename '{col}' to:", value=col, key=f"onb_schema_{i}"
-            )
-        if st.button("Apply Schema", key="onb_apply_schema"):
-            st.session_state.onb_schema = list(schema_names.values())
+
+def _hdr_fixed_flow(file_paths, hdr_prefixes):
+    prefix = hdr_prefixes[0]
+    st.warning(f"HDR fixed-width file detected (prefix: {prefix})")
+
+    st.subheader("Raw Preview")
+    raw_preview = preview_raw(file_paths, "multiline", n_rows=10)
+    if not raw_preview.is_empty():
+        st.dataframe(raw_preview.to_pandas())
+
+    st.subheader("Header Layout CSV")
+    header_layout_file = st.text_input("Header Layout CSV Path", key="onb_hdr_header_layout")
+    hdr_header_layout = None
+    if header_layout_file:
+        hl = clean_path(header_layout_file)
+        if os.path.exists(hl):
+            hdr_header_layout = load_layout(hl)
+            st.success(f"Header layout loaded ({len(hdr_header_layout)} fields)")
+
+    st.subheader("Detail Layout CSV")
+    detail_layout_file = st.text_input("Detail Layout CSV Path", key="onb_hdr_detail_layout")
+    hdr_detail_layout = None
+    if detail_layout_file:
+        dl = clean_path(detail_layout_file)
+        if os.path.exists(dl):
+            hdr_detail_layout = load_layout(dl)
+            st.success(f"Detail layout loaded ({len(hdr_detail_layout)} fields)")
+
+    if st.button("Flatten Records", key="onb_hdr_flatten"):
+        if hdr_header_layout and hdr_detail_layout:
+            st.session_state.onb_header_prefix = prefix
+            st.session_state.onb_header_layout = hdr_header_layout
+            st.session_state.onb_detail_layout = hdr_detail_layout
+            st.session_state.onb_ml_flattened = True
             st.rerun()
+
+    if st.session_state.get("onb_ml_flattened"):
+        _show_hdr_fixed_preview_and_schema(file_paths, prefix)
+
+
+def _show_ml_preview_and_schema(file_paths):
+    st.subheader("Flattened Preview")
+    rt_list = st.session_state.onb_ml_rt
+    flat_preview = preview_flattened_multiline(
+        file_paths, rt_list, st.session_state.onb_ml_delim, n_rows=10
+    )
+    if not flat_preview.is_empty():
+        st.dataframe(flat_preview.to_pandas())
+        st.session_state.onb_ml_delim = st.session_state.onb_ml_delim
+
+    st.subheader("Define Column Schema")
+    default_cols = flat_preview.columns
+    schema_names = {}
+    for i, col in enumerate(default_cols):
+        schema_names[col] = st.text_input(
+            f"Rename '{col}' to:", value=col, key=f"onb_schema_{i}"
+        )
+    if st.button("Apply Schema", key="onb_apply_schema"):
+        st.session_state.onb_schema = list(schema_names.values())
+        st.rerun()
+
+
+def _show_hdr_fixed_preview_and_schema(file_paths, prefix):
+    st.subheader("Flattened Preview")
+    hdr_header_layout = st.session_state.onb_header_layout
+    hdr_detail_layout = st.session_state.onb_detail_layout
+    flat_preview = preview_flattened_multiline_fixed(
+        file_paths, prefix, hdr_header_layout, hdr_detail_layout, n_rows=10
+    )
+    if not flat_preview.is_empty():
+        st.dataframe(flat_preview.to_pandas())
+
+    st.subheader("Define Column Schema")
+    default_cols = flat_preview.columns
+    schema_names = {}
+    for i, col in enumerate(default_cols):
+        schema_names[col] = st.text_input(
+            f"Rename '{col}' to:", value=col, key=f"onb_hdr_schema_{i}"
+        )
+    if st.button("Apply Schema", key="onb_hdr_apply_schema"):
+        st.session_state.onb_schema = list(schema_names.values())
+        st.rerun()
 
 
 def _get_onb_cols():
@@ -154,7 +231,9 @@ def _validation_section(file_paths, file_type, prod_delim, layout_list,
         _run_validation(file_paths, file_type, prod_delim, layout_list,
                         start_line, record_type, cols,
                         storelist_path, storelist_delim, storelist_store_col,
-                        run_onb_compare, run_upc_summary, run_onb_file_review)
+                        run_onb_compare, run_upc_summary, run_onb_file_review,
+                        header_prefix=st.session_state.get("onb_header_prefix"),
+                        header_layout=st.session_state.get("onb_header_layout"))
 
     if st.session_state.get("onb_done"):
         _display_results()
@@ -163,7 +242,8 @@ def _validation_section(file_paths, file_type, prod_delim, layout_list,
 def _run_validation(file_paths, file_type, prod_delim, layout_list,
                     start_line, record_type, cols,
                     storelist_path, storelist_delim, storelist_store_col,
-                    run_onb_compare, run_upc_summary, run_onb_file_review):
+                    run_onb_compare, run_upc_summary, run_onb_file_review,
+                    header_prefix=None, header_layout=None):
     if not any([run_onb_compare, run_upc_summary]):
         st.warning("Select at least one validation")
         st.stop()
@@ -185,6 +265,8 @@ def _run_validation(file_paths, file_type, prod_delim, layout_list,
             start_line=start_line, record_type=record_type,
             multiline_record_types=ml_rt, multiline_delimiter=ml_delim,
             column_names=ml_schema,
+            header_prefix=header_prefix,
+            header_layout=header_layout,
         ).select(["STORE_NUMBER"])
 
         if not prod_series.is_empty():
@@ -206,6 +288,8 @@ def _run_validation(file_paths, file_type, prod_delim, layout_list,
             start_line=start_line, record_type=record_type,
             multiline_record_types=ml_rt, multiline_delimiter=ml_delim,
             column_names=ml_schema,
+            header_prefix=header_prefix,
+            header_layout=header_layout,
         )
         st.session_state.onb_upc = upc_summary
 
@@ -217,6 +301,8 @@ def _run_validation(file_paths, file_type, prod_delim, layout_list,
             start_line=start_line, record_type=record_type,
             multiline_record_types=ml_rt, multiline_delimiter=ml_delim,
             column_names=ml_schema,
+            header_prefix=header_prefix,
+            header_layout=header_layout,
         )
         st.session_state.onb_file_review = fr
 

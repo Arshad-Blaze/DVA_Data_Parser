@@ -21,6 +21,7 @@ def detect_file_type(file_path):
 
 
 def is_multiline_record(file_path):
+    """Detect delimited multiline (H|D|) or fixed-width HDR multiline."""
     try:
         with open(file_path, "r", encoding="cp1252", errors="ignore") as f:
             lines = [f.readline().strip() for _ in range(10)]
@@ -29,6 +30,7 @@ def is_multiline_record(file_path):
         if not lines:
             return False
 
+        # Check delimited multiline: 2+ single-letter prefixes (H|, D|, etc.)
         alpha_prefixes = set()
         for line in lines:
             if len(line) >= 2 and line[0].isalpha() and line[1] in ",|\t;":
@@ -37,10 +39,48 @@ def is_multiline_record(file_path):
         if len(alpha_prefixes) >= 2:
             return True
 
+        # Check backslash continuations
         backslash = sum(line.rstrip().endswith("\\") for line in lines)
-        return backslash >= 5
+        if backslash >= 5:
+            return True
+
+        # Check fixed-width HDR multiline: some lines start with alphabetic
+        # prefix (2+ letters) followed by digits — the rest are plain data lines
+        text_prefixes = set()
+        data_count = 0
+        for line in lines:
+            if len(line) >= 3 and line[:2].isalpha() and line[2].isdigit():
+                text_prefixes.add(line[:3])
+            elif line and line[0].isdigit():
+                data_count += 1
+
+        if len(text_prefixes) >= 1 and data_count >= 2:
+            return True
+
+        return False
     except Exception:
         return False
+
+
+def detect_hdr_prefix(file_path, sample_lines=20):
+    """Detect multi-character HDR prefix (e.g. HDR) in fixed-width multiline."""
+    try:
+        with open(file_path, "r", encoding="cp1252", errors="ignore") as f:
+            lines = [f.readline().strip() for _ in range(sample_lines)]
+
+        prefixes = set()
+        for line in lines:
+            if not line:
+                continue
+            # Look for 2+ alpha chars followed by digit — common HDR pattern
+            for i in range(2, min(6, len(line))):
+                if line[:i].isalpha() and i < len(line) and line[i].isdigit():
+                    prefixes.add(line[:i])
+                    break
+
+        return sorted(prefixes, key=len, reverse=True)
+    except Exception:
+        return []
 
 
 def detect_record_types(file_path, delimiter=None, sample_lines=50):

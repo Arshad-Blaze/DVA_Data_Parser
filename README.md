@@ -20,12 +20,23 @@ DAV Tool compares retail/POS data files (BAU vs Test) to find differences in sal
 |---|---|
 | **Delimited** | CSV, pipe-delimited, tab-delimited, semicolon (auto-detected) |
 | **Fixed-width** | Columns at fixed character positions (requires a layout CSV) |
-| **Multi-line HDR** | POS data with record-type prefixes (e.g. `H\|store\|date`, `D\|upc\|desc\|units\|price`) |
+| **Multi-line HDR (delimited)** | POS data with record-type prefixes (e.g. `H\|store\|date`, `D\|upc\|desc\|units\|price`) |
+| **Multi-line HDR (fixed-width)** | POS data with multi-character header prefix (e.g. `HDR`) followed by fixed-width records; requires **two** layout CSVs (header + detail) |
 
 ### How to run
 ```
 streamlit run dav_tool/ui/app.py
 ```
+
+### Before you run: get input specs from your data team
+DAV Tool needs to know the structure of your files before it can process them. Before running, confirm with your data team:
+- **Layout CSV** for any fixed-width file (column positions)
+- **Header + Detail layout CSVs** for HDR fixed-width files (separate layouts for header and detail records)
+- **Delimiter** for delimited files (comma, pipe, tab, semicolon)
+- **Record-type prefixes** for multiline files (e.g. `H`, `D`, `U`)
+- **Column mapping** — which columns hold Store, UPC, Description, Units, Price
+- **Implied decimals** — whether `9999` means `99.99` (divide by 100)
+- **Price type** — Total Price or Unit Price (multiplied by units sold)
 
 ---
 
@@ -78,11 +89,14 @@ python full_test.py                  # Integration test (all formats + file revi
 ## Workflow Overview
 
 ```
-1. Select page: Onboarding (single file) or Existing (BAU vs Test)
-2. Point to file(s) — format is auto-detected
-3. For multiline files: flatten, preview, name columns
-4. For fixed-width: provide layout CSV, set start line / record type
-5. Map columns (Store, UPC, Description, Units, Price)
-6. Choose validations and run
-7. Review results and download CSVs
+1. Get input specs from data team (layout CSVs, column mapping, delimiter, etc.)
+2. Select page: Onboarding (single file) or Existing (BAU vs Test)
+3. Point to file(s) — format is auto-detected
+4. For multiline files: flatten, preview, name columns
+   - Delimited: set record-type flags and delimiter → flatten → rename schema
+   - HDR fixed-width: provide header + detail layout CSVs → flatten → rename schema
+5. For fixed-width: provide layout CSV, set start line / record type
+6. Map columns (Store, UPC, Description, Units, Price)
+7. Choose validations and run
+8. Review results and download CSVs
 ```

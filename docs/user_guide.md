@@ -15,6 +15,22 @@ It works with common data formats used in retail/POS systems and can handle larg
 
 ## Getting Started
 
+### Before you run: get input specs from your data team
+
+DAV Tool needs to know the structure of your files before it can process them. Ask your data team for:
+
+| What you need | Why |
+|---|---|
+| **Layout CSV** | For fixed-width files — describes each column's position |
+| **Header + Detail layout CSVs** | For HDR fixed-width files — separate layouts for header and detail records |
+| **Delimiter** | For delimited files — comma, pipe, tab, or semicolon |
+| **Record-type prefixes** | For multiline files — which letters prefix each record type (e.g. H, D) |
+| **Column mapping** | Which column is Store, UPC, Description, Units, Price |
+| **Implied decimals** | Whether `9999` means `99.99` (divide by 100) |
+| **Price type** | Total Price (already aggregated) or Unit Price (multiply by units) |
+
+Get these details first so you can set up the tool quickly when you launch it.
+
 ### Launching the app
 
 Open a terminal and run:
@@ -43,11 +59,12 @@ For when you have a single data file.
 Enter the folder path or file path. DAV Tool will automatically detect whether it's:
 - **Delimited** (CSV, pipe, tab) — shown in green
 - **Fixed-width** — shown with a warning, you'll need a layout CSV
-- **Multi-line** — shown with a warning, you'll see record-type prefixes
+- **Multi-line HDR (delimited)** — shown with a warning, you'll see record-type prefixes like `H|` and `D|`
+- **Multi-line HDR (fixed-width)** — shown with a warning; the HDR prefix (e.g. `HDR`) is auto-detected
 
 ### Step 2 (Multi-line only): Flatten the data
 
-If your file uses record-type prefixes (like `H|` for headers, `D|` for details):
+**For delimited multiline files** (prefixes like `H|`, `D|`):
 
 1. Look at the **Raw Preview** to see the prefixes
 2. DAV Tool auto-detects the prefixes — adjust if needed
@@ -55,6 +72,16 @@ If your file uses record-type prefixes (like `H|` for headers, `D|` for details)
 4. Review the **Flattened Preview**
 5. Rename the generic column names (Column_0, Column_1, etc.) to meaningful names
 6. Click **Apply Schema**
+
+**For HDR fixed-width files** (prefixes like `HDR`):
+
+1. Look at the **Raw Preview** to see the raw lines
+2. DAV Tool shows `HDR prefix detected: HDR`
+3. Enter the **Header Layout CSV** path (describes header fields like Store, Date)
+4. Enter the **Detail Layout CSV** path (describes detail fields like UPC, Description, Units, Price)
+5. Click **Flatten Records**
+6. Review the **Flattened Preview** — header fields are carried into each detail row
+7. Rename columns and click **Apply Schema**
 
 ### Step 3: Preview and set options
 
@@ -175,7 +202,7 @@ From,Length,Field,Type
 - **Field** — name you give the column
 - **Type** — `text`, `numeric`, or `date`
 
-### Multi-line HDR files
+### Multi-line HDR files (delimited)
 
 POS export files where each line starts with a letter indicating its record type:
 
@@ -189,6 +216,37 @@ D|100002|Gadget B|5|49.95
 - **D** records = detail (UPC, description, units, price)
 
 DAV Tool flattens these by filtering to one record type at a time. You name the columns after flattening.
+
+### Multi-line HDR files (fixed-width)
+
+POS export files with a multi-character header prefix (e.g. `HDR`) followed by fixed-width records:
+
+```
+HDRS001   2024-01-15
+100001     Widget A            1099.90
+100002     Gadget B             549.95
+```
+
+- Lines starting with `HDR` are **header** records — they carry store and date fields
+- Remaining lines are **detail** records with UPC, description, units, and price
+- Each record type has its own fixed-width **layout CSV**
+- Header fields (store, date) are automatically carried into every detail row during flattening
+- You need **two** layout CSVs: one for the header record, one for the detail record
+
+### Layout CSV format
+
+Both header and detail layout CSVs use the same format:
+
+```csv
+From,Length,Field,Type
+1,6,Store,text
+7,10,UPC,numeric
+```
+
+- **From** — starting position (1 = first character)
+- **Length** — how many characters this field occupies
+- **Field** — name you give the column
+- **Type** — `text`, `numeric`, or `date`
 
 ---
 
