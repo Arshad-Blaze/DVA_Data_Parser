@@ -16,7 +16,7 @@ from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
     detect_hdr_prefix,
 )
-from dav_tool.ui.helpers import clean_path, get_file_list, get_column_names, display_execution_summary
+from dav_tool.ui.helpers import clean_path, get_file_list, get_column_names, display_execution_summary, display_dev_diagnostics
 from dav_tool.processing_context import ProcessingContext, ExistingContext
 
 
@@ -33,6 +33,10 @@ def run():
     if "ex_ctx" not in st.session_state:
         st.session_state.ex_ctx = ExistingContext()
     ctx = st.session_state.ex_ctx
+
+    dev_mode = st.sidebar.checkbox("Developer Mode", key="ex_dev_mode")
+    if dev_mode:
+        display_dev_diagnostics(ctx)
 
     _phase0_detection_and_preview(ctx)
     if ctx.phase >= 1:

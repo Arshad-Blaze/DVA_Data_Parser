@@ -10,7 +10,7 @@ from dav_tool._reports import generate_file_review
 from dav_tool._observability import ProcessingTimer, log_phase, setup_logging
 from dav_tool.validation.store import compare_files
 from dav_tool.detection import is_multiline_record, detect_file_type, detect_record_types, detect_hdr_prefix
-from dav_tool.ui.helpers import clean_path, get_file_list, load_storelist, get_column_names, display_execution_summary
+from dav_tool.ui.helpers import clean_path, get_file_list, load_storelist, get_column_names, display_execution_summary, display_dev_diagnostics
 from dav_tool.processing_context import ProcessingContext
 
 
@@ -27,6 +27,10 @@ def run():
     if "onb_ctx" not in st.session_state:
         st.session_state.onb_ctx = ProcessingContext()
     ctx = st.session_state.onb_ctx
+
+    dev_mode = st.sidebar.checkbox("Developer Mode", key="onb_dev_mode")
+    if dev_mode:
+        display_dev_diagnostics(ctx)
 
     _phase0_parsing_and_preview(ctx)
     if ctx.phase >= 1:

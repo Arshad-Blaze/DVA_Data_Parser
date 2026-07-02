@@ -39,6 +39,30 @@ def display_execution_summary(metrics):
             st.caption(f":x: {e}")
 
 
+def display_dev_diagnostics(ctx):
+    st.sidebar.divider()
+    st.sidebar.markdown("### Developer Diagnostics")
+    m = ctx.metrics
+    st.sidebar.markdown(f"**Phase:** {ctx.phase}")
+    st.sidebar.markdown(f"**Parser Type:** {getattr(ctx, 'file_type', 'N/A')}")
+    if hasattr(ctx, 'prod') and hasattr(ctx, 'test'):
+        st.sidebar.markdown(f"**BAU Type:** {ctx.prod.file_type or '—'}")
+        st.sidebar.markdown(f"**Test Type:** {ctx.test.file_type or '—'}")
+    layout = getattr(ctx, 'layout', None) or getattr(ctx, 'schema', None)
+    if layout:
+        st.sidebar.markdown(f"**Schema/Columns:** {layout}")
+    st.sidebar.markdown(f"**Current Memory:** {m.current_memory:.1f} MB")
+    st.sidebar.markdown(f"**Peak Memory:** {m.peak_memory:.1f} MB")
+    st.sidebar.markdown(f"**Current CPU:** {m.current_cpu:.1f}%")
+    st.sidebar.markdown(f"**Chunks Processed:** {m.chunks_processed}")
+    if hasattr(ctx, 'store_agg') and ctx.store_agg is not None and not ctx.store_agg.is_empty():
+        st.sidebar.markdown(f"**Store Agg:** {len(ctx.store_agg)} rows")
+    if hasattr(ctx, 'item_agg') and ctx.item_agg is not None and not ctx.item_agg.is_empty():
+        st.sidebar.markdown(f"**Item Agg:** {len(ctx.item_agg)} rows")
+    done = getattr(ctx, 'done', None) or getattr(ctx, 'validation_done', None)
+    st.sidebar.markdown(f"**Validation Done:** {bool(done)}")
+
+
 def clean_path(path):
     if not path:
         return path
