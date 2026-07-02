@@ -52,6 +52,8 @@ def _phase0_parsing_and_preview(ctx):
     cols = []
 
     if prod_txt and file_paths:
+        log_phase(f"Folder Selected — {prod_txt} ({len(file_paths)} files)")
+        log_phase("Detection Started")
         if is_multiline_record(file_paths[0]):
             st.warning("Multi-line structured file detected")
             file_type = "multiline"
@@ -85,6 +87,9 @@ def _phase0_parsing_and_preview(ctx):
         if not df_preview.is_empty():
             st.dataframe(df_preview.to_pandas().head(10))
 
+    if file_type:
+        log_phase(f"Detection Completed — {file_type}")
+
     if file_type and file_type == "multiline":
         if ctx.ml_flattened and ctx.schema:
             cols = ctx.schema
@@ -93,6 +98,9 @@ def _phase0_parsing_and_preview(ctx):
     elif file_type and file_paths:
         cols = get_column_names(file_paths, file_type, prod_delim or ",", layout_list,
                                  start_line, record_type)
+
+    if cols:
+        log_phase(f"Schema Generated — {len(cols)} columns")
 
     parsing_ready = bool(cols)
     if not parsing_ready:
@@ -380,6 +388,7 @@ def _run_validation(
     header_prefix=None, header_layout=None,
 ):
     ctx = st.session_state.onb_ctx
+    log_phase("Validation Started")
 
     if not any([run_onb_compare, run_upc_summary]):
         st.warning("Select at least one validation")
@@ -424,7 +433,13 @@ def _run_validation(
                 header_layout=header_layout,
             )
         ctx.file_review = fr
+        log_phase("Reports Generated")
 
+    log_phase("Validation Completed")
+    log_phase(f"Execution Summary — {ctx.metrics.rows_processed} rows, "
+              f"{ctx.metrics.total_execution_time:.2f}s, "
+              f"{ctx.metrics.peak_memory:.1f}MB peak, "
+              f"{len(ctx.metrics.warnings)} warnings, {len(ctx.metrics.errors)} errors")
     ctx.done = True
     st.rerun()
 

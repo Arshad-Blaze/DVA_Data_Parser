@@ -55,6 +55,7 @@ def _phase0_detection_and_preview(ctx):
         prod_txt = clean_path(st.text_input("BAU Folder Path"))
         prod_file_paths = get_file_list(prod_txt)
         if prod_txt and prod_file_paths:
+            log_phase(f"BAU Folder Selected — {prod_txt} ({len(prod_file_paths)} files)")
             _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod")
 
     with col2:
@@ -62,6 +63,7 @@ def _phase0_detection_and_preview(ctx):
         test_txt = clean_path(st.text_input("Test Folder Path"))
         test_file_paths = get_file_list(test_txt)
         if test_txt and test_file_paths:
+            log_phase(f"Test Folder Selected — {test_txt} ({len(test_file_paths)} files)")
             _detect_and_set(test_file_paths, ctx.test, "Test", "test")
 
     if ctx.prod.file_type == "fixed" or ctx.test.file_type == "fixed":
@@ -375,6 +377,7 @@ def _phase2_validation(ctx):
 
 
 def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = ""):
+    log_phase(f"Detection Started — {side_label}")
     if is_multiline_record(file_paths[0]):
         st.warning(f"Multi-line structured file detected ({side_label})")
         side_ctx.file_type = "multiline"
@@ -398,6 +401,7 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
                 if os.path.exists(layout_file):
                     side_ctx.layout = load_layout(layout_file)
                     st.success("Layout loaded")
+    log_phase(f"Detection Completed — {side_label}: {side_ctx.file_type}")
 
 
 def _multiline_section(prod_paths, test_paths):
@@ -586,6 +590,7 @@ def _execute_validation(
     run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
 ):
     ctx = st.session_state.ex_ctx
+    log_phase("Validation Started")
 
     if not any([run_store, run_item, run_compare_existing, run_summary]):
         st.warning("Please select at least one validation option")
@@ -669,7 +674,13 @@ def _execute_validation(
                 hdr_prefix_prod, hdr_prefix_test,
                 hdr_header_prod, hdr_header_test,
             )
+        log_phase("Reports Generated")
 
+    log_phase("Validation Completed")
+    log_phase(f"Execution Summary — {ctx.metrics.rows_processed} rows, "
+              f"{ctx.metrics.total_execution_time:.2f}s, "
+              f"{ctx.metrics.peak_memory:.1f}MB peak, "
+              f"{len(ctx.metrics.warnings)} warnings, {len(ctx.metrics.errors)} errors")
     ctx.validation_done = True
     st.rerun()
 
