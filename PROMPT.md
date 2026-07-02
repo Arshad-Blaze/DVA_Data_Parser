@@ -1,224 +1,162 @@
-# Regression Investigation Sprint
+# Runtime Regression Investigation
 
-STOP ALL FEATURE DEVELOPMENT.
+STOP ALL DEVELOPMENT.
 
 Do NOT implement new features.
 
-Do NOT optimize performance.
+Do NOT refactor.
 
-Do NOT refactor architecture.
+Do NOT optimize.
 
 Do NOT clean up code.
 
-The objective is ONLY to restore the application to a fully working state.
+The architecture is considered complete.
 
-The recent architecture changes (Canonical Data Layer, ProcessingContext, Reports, Observability, etc.) are complete.
+The application currently does not function correctly.
 
-However, the application workflow has regressed.
-
-==========================================================
-MISSION
-==========================================================
-
-Investigate every regression introduced after the architecture refactoring.
-
-Think like a senior debugging engineer.
-
-Do NOT assume.
-
-Trace the actual execution.
-
-Only after identifying the root cause should code be modified.
+Your ONLY objective is to determine why the runtime behaviour has regressed.
 
 ==========================================================
-KNOWN ISSUES
+REAL OBSERVATIONS
 ==========================================================
 
-Issue 1
+These observations come from actual execution.
 
-The UI is significantly slower than before.
+Observation 1
 
-Symptoms
+Onboarding
 
-- Slow page transitions.
-- Streamlit reruns frequently.
-- Long waits between phases.
-
-Investigate
-
-- unnecessary reruns
-- unnecessary dataframe copies
-- repeated aggregation
-- repeated parsing
-- ProcessingContext recreation
-- excessive session_state updates
-- excessive logging
-- expensive UI rendering
-
-==========================================================
-
-Issue 2
-
-ONBOARDING FLOW
-
-Expected
-
-Upload
+User selects file.
 
 ↓
+
+Detection executes.
+
+↓
+
+Preview is generated.
+
+↓
+
+Nothing appears in the UI afterwards.
+
+↓
+
+Terminal becomes idle.
+
+↓
+
+After approximately 5 seconds
+
+↓
+
+The entire machine freezes or reboots.
+
+----------------------------------------------------------
+
+Observation 2
+
+The terminal shows
+
+File received
+
+File type detection
 
 Detection
 
-↓
+Preview generation
 
-Preview
+executing THREE TIMES.
 
-↓
+This should only happen ONCE.
 
-Column Mapping
+----------------------------------------------------------
 
-↓
+Observation 3
 
-Save Mapping
+After the third execution
 
-↓
+nothing more happens.
 
-Process Files
+No exception.
 
-↓
+No traceback.
 
-Aggregation
+No Streamlit error.
 
-↓
+The terminal simply stops.
 
-Validation Selection
+A few seconds later
 
-↓
+the system crashes.
 
-Validation Results
+----------------------------------------------------------
 
-Actual
+Observation 4
 
-Upload
-
-↓
-
-Detection
-
-↓
-
-Preview
-
-↓
-
-Workflow stops.
-
-No next phase appears.
-
-Investigate
-
-- ProcessingContext lifecycle
-- current processing phase
-- session_state values
-- button callbacks
-- Streamlit reruns
-- hidden exceptions
-- UI conditional rendering
-
-Questions
-
-Where exactly does execution stop?
-
-Which condition prevents the next screen?
-
-Which state variable is incorrect?
-
-Which architectural change introduced the problem?
-
-==========================================================
-
-Issue 3
-
-EXISTING FLOW
-
-Expected
-
-Upload Production
-
-↓
-
-Upload Test
-
-↓
-
-Detection
-
-↓
-
-Preview
-
-↓
-
-Column Mapping
-
-↓
-
-Save Mapping
-
-↓
-
-Process Files
-
-↓
-
-Validation Selection
-
-↓
-
-Validation Results
-
-Actual
+Existing workflow
 
 Immediately after column mapping
 
-↓
+an error appears.
 
-An error appears.
+Even after correctly mapping every column
 
-Even after correctly mapping every required column
+the error remains.
 
-↓
+==========================================================
+YOUR TASK
+==========================================================
 
-The error remains.
+Do NOT guess.
 
-Investigate
+Trace the actual execution path.
 
-- validation trigger timing
-- ProcessingContext state
-- canonical data availability
-- aggregation cache
-- session_state
-- validation prerequisites
+I want to know WHY detection executes three times.
 
-Questions
+==========================================================
+PART 1
 
-Why does validation execute before processing?
-
-Why does the error persist?
-
-Is validation using stale state?
-
-Is ProcessingContext being recreated?
+STREAMLIT RERUN ANALYSIS
 
 ==========================================================
 
-PROCESSING CONTEXT REVIEW
+Find
+
+Every location that causes
+
+- st.rerun()
+
+- implicit reruns
+
+- callback reruns
+
+- widget reruns
+
+- session_state updates
+
+For every rerun explain
+
+What triggered it.
+
+Why it occurred.
+
+Which functions execute again.
+
+==========================================================
+PART 2
+
+EXECUTION TRACE
 
 ==========================================================
 
-Trace the entire lifecycle.
+Trace the onboarding workflow.
 
 Application Start
+
+↓
+
+Upload
 
 ↓
 
@@ -250,65 +188,82 @@ Reports
 
 For every phase report
 
-Current ProcessingContext fields
+Current function
 
-Current session_state keys
+Current ProcessingContext
 
-Current UI components
+Current session_state
+
+Current callback
+
+Current button
 
 Current rerun
 
-Current callbacks
+==========================================================
+PART 3
 
-Current buttons
+PROCESSING CONTEXT
+
+==========================================================
+
+Review the lifecycle.
+
+Determine
+
+How many ProcessingContext objects are created.
+
+When they are recreated.
+
+When they are discarded.
+
+Whether they survive reruns.
+
+Whether they are accidentally replaced.
+
+==========================================================
+PART 4
+
+SESSION STATE
+
+==========================================================
+
+Audit every session_state write.
 
 Identify
 
-missing values
+State recreated
 
-incorrect values
+State overwritten
 
-unexpected resets
+State deleted
+
+State copied
+
+Large DataFrames stored
+
+Large DataFrames duplicated
+
+Expensive objects recreated
+
+==========================================================
+PART 5
+
+PERFORMANCE TRACE
 
 ==========================================================
 
-SESSION STATE REVIEW
+Find every expensive operation.
 
-==========================================================
-
-Audit ALL Streamlit session_state variables.
-
-Identify
-
-unused variables
-
-duplicated state
-
-state overwritten
-
-state cleared unexpectedly
-
-variables recreated every rerun
-
-variables with inconsistent naming
-
-Recommend cleanup.
-
-==========================================================
-
-PERFORMANCE REVIEW
-
-==========================================================
-
-Profile
+Examples
 
 Detection
 
 Preview
 
-Column Mapping
+Parser
 
-Processing
+Normalizer
 
 Aggregation
 
@@ -316,173 +271,168 @@ Validation
 
 Reports
 
-For every stage report
+Metrics
 
-Execution Time
+Logging
 
-Memory Usage
+Determine
 
-Number of reruns
+How many times each executes
 
-DataFrame copies
+during ONE upload.
+
+Expected
+
+Detection
+
+1
+
+Preview
+
+1
+
+Parser
+
+1
+
+Aggregation
+
+1
+
+Validation
+
+1
+
+Report
+
+1
+
+If any executes multiple times
+
+identify why.
+
+==========================================================
+PART 6
+
+MEMORY TRACE
+
+==========================================================
+
+Find
+
+Large DataFrames
 
 LazyFrame collections
 
-Repeated processing
+collect()
 
-Repeated rendering
+write_csv()
+
+concat()
+
+group_by()
+
+join()
+
+session_state storage
+
+ProcessingContext storage
+
+Determine
+
+Whether memory continually increases
+
+between reruns.
+
+==========================================================
+PART 7
+
+DEBUG INSTRUMENTATION
 
 ==========================================================
 
-DEBUG LOGGING
+Temporarily instrument the application.
+
+Every rerun should print
+
+==================================================
+STREAMLIT RERUN
+==================================================
+
+Timestamp
+
+Current Phase
+
+Current ProcessingContext id()
+
+Current Session id
+
+Current File
+
+Current Callback
+
+Current Button
+
+Current Memory
+
+Peak Memory
+
+--------------------------------------------------
+
+Every expensive function should print
+
+ENTER
+
+EXIT
+
+Elapsed Time
+
+Rows
+
+Memory
+
+==========================================================
+PART 8
+
+ROOT CAUSE
 
 ==========================================================
 
-Temporarily add detailed debug logging.
+After tracing everything
 
-Log
+identify
 
-Application Started
+Why detection runs three times.
 
-Session Created
+Why onboarding never advances.
 
-Session Restored
+Why Existing errors immediately.
 
-Detection Started
+Why the machine eventually crashes.
 
-Detection Completed
-
-Preview Generated
-
-Mapping Saved
-
-ProcessingContext Updated
-
-Aggregation Started
-
-Aggregation Finished
-
-Validation Started
-
-Validation Finished
-
-Reports Generated
-
-Every Streamlit rerun
-
-Every button click
-
-Every ProcessingContext update
-
-Every session_state update
-
-Every exception
-
-These logs are temporary.
-
-They should help locate the regression.
+==========================================================
+IMPLEMENTATION
 
 ==========================================================
 
-IMPLEMENTATION STRATEGY
+DO NOT FIX YET.
 
-==========================================================
+First provide
 
-FIRST
+Root Cause
 
-Investigate.
+Evidence
 
-SECOND
+Affected Files
 
-Explain the root cause.
+Smallest Possible Fix
 
-THIRD
+Risk
 
-List affected files.
+Only after identifying the exact regression
 
-FOURTH
+should code be modified.
 
-Describe the smallest possible fix.
+Do not implement speculative fixes.
 
-FIFTH
-
-Wait for confirmation.
-
-Do NOT immediately modify code.
-
-==========================================================
-
-WHEN IMPLEMENTING
-
-==========================================================
-
-Once root causes are confirmed
-
-Fix ONLY the regression.
-
-Do NOT redesign architecture.
-
-Do NOT refactor unrelated code.
-
-Do NOT introduce new abstractions.
-
-Do NOT optimize anything unrelated.
-
-Keep the fixes as small as possible.
-
-==========================================================
-
-AFTER FIXING
-
-==========================================================
-
-Run
-
-- all unit tests
-- integration tests
-- onboarding workflow
-- existing workflow
-
-Verify
-
-✓ Detection works
-
-✓ Preview works
-
-✓ Column Mapping works
-
-✓ Process Files works
-
-✓ Aggregation works
-
-✓ Validation works
-
-✓ Reports work
-
-✓ Metrics work
-
-✓ Observability works
-
-Verify that both Onboarding and Existing complete end-to-end without manual intervention.
-
-==========================================================
-
-FINAL REPORT
-
-==========================================================
-
-Provide
-
-1. Root cause for every issue.
-
-2. Files modified.
-
-3. Why the regression occurred.
-
-4. Why the fix works.
-
-5. Remaining risks.
-
-6. Recommended follow-up improvements (if any).
-
-Only after all regressions are resolved should we continue feature development.
+Think like a debugging engineer, not a feature developer.
