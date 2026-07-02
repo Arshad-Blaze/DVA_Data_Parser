@@ -1,408 +1,488 @@
-Release Engineering Sprint
+# Regression Investigation Sprint
 
-The core architecture is now complete.
+STOP ALL FEATURE DEVELOPMENT.
 
-Completed
+Do NOT implement new features.
 
-✓ Detection Layer
+Do NOT optimize performance.
 
-✓ Parsing Layer
+Do NOT refactor architecture.
 
-✓ Canonical Data Layer
+Do NOT clean up code.
 
-✓ ProcessingContext
+The objective is ONLY to restore the application to a fully working state.
 
-✓ Aggregation Layer
+The recent architecture changes (Canonical Data Layer, ProcessingContext, Reports, Observability, etc.) are complete.
 
-✓ Validation Layer
-
-✓ Reports Layer
-
-✓ Observability Layer
-
-✓ Benchmark Suite
-
-✓ Configuration Layer
-
-✓ Regression Tests
-
-The objective is now to stabilize the application and prepare it for production use as an internal desktop application.
+However, the application workflow has regressed.
 
 ==========================================================
-GENERAL RULES
+MISSION
 ==========================================================
 
-You are acting as the lead software engineer.
+Investigate every regression introduced after the architecture refactoring.
 
-Do not redesign the architecture.
+Think like a senior debugging engineer.
 
-Do not introduce new frameworks.
+Do NOT assume.
 
-Do not rewrite working code.
+Trace the actual execution.
 
-Do not remove features.
-
-Make only targeted improvements.
-
-Every change must preserve existing behaviour.
-
-Run all tests after every change.
-
-Update technical documentation whenever necessary.
+Only after identifying the root cause should code be modified.
 
 ==========================================================
-TASK 1
-Fix Known Bugs
+KNOWN ISSUES
 ==========================================================
 
-Review the engineering report.
+Issue 1
 
-Fix every confirmed bug.
+The UI is significantly slower than before.
 
-Current known items include
+Symptoms
 
-- Unit Price bug in normalize_store_chunk()
+- Slow page transitions.
+- Streamlit reruns frequently.
+- Long waits between phases.
 
-- Any confirmed regression discovered during benchmarks
+Investigate
 
-Do not introduce behavioural changes.
-
-Explain the root cause before implementing.
-
-==========================================================
-TASK 2
-Code Cleanup
-==========================================================
-
-Remove
-
-- dead code
-
-- unused imports
-
-- obsolete helper functions
-
-- abandoned dataclasses
-
-- duplicate code
-
-Only remove code that is confirmed unused.
+- unnecessary reruns
+- unnecessary dataframe copies
+- repeated aggregation
+- repeated parsing
+- ProcessingContext recreation
+- excessive session_state updates
+- excessive logging
+- expensive UI rendering
 
 ==========================================================
-TASK 3
-Refactor Large Modules
-==========================================================
 
-Review
+Issue 2
 
-ui/existing.py
+ONBOARDING FLOW
 
-ui/onboarding.py
+Expected
 
-Split overly large functions into smaller helpers.
+Upload
 
-Keep behaviour identical.
+↓
 
-Do not move business logic into UI.
+Detection
 
-==========================================================
-TASK 4
-Execution Summary
-==========================================================
+↓
 
-After processing completes,
+Preview
 
-display an Execution Summary inside Streamlit.
+↓
 
-Include
+Column Mapping
 
-Files Processed
+↓
 
-Rows Processed
+Save Mapping
 
-Unique Stores
+↓
 
-Unique UPCs
+Process Files
 
-Parse Time
+↓
 
-Aggregation Time
+Aggregation
 
-Validation Time
+↓
 
-Report Time
+Validation Selection
 
-Total Execution Time
+↓
 
-Peak Memory
+Validation Results
 
-Peak CPU
+Actual
 
-Warnings
+Upload
 
-Errors
+↓
 
-==========================================================
-TASK 5
-Developer Diagnostics
-==========================================================
+Detection
 
-Create a Developer Mode.
+↓
 
-When enabled
+Preview
 
-show
+↓
 
-Current Phase
+Workflow stops.
 
-Current File
+No next phase appears.
 
-Current Chunk
+Investigate
 
-Parser Type
+- ProcessingContext lifecycle
+- current processing phase
+- session_state values
+- button callbacks
+- Streamlit reruns
+- hidden exceptions
+- UI conditional rendering
 
-Detected Layout
+Questions
 
-Canonical Schema
+Where exactly does execution stop?
 
-ProcessingContext
+Which condition prevents the next screen?
 
-Current Memory
+Which state variable is incorrect?
 
-Peak Memory
-
-Current CPU
-
-Aggregations
-
-Validation Status
-
-When disabled
-
-hide all diagnostics.
+Which architectural change introduced the problem?
 
 ==========================================================
-TASK 6
-Terminal Execution Log
+
+Issue 3
+
+EXISTING FLOW
+
+Expected
+
+Upload Production
+
+↓
+
+Upload Test
+
+↓
+
+Detection
+
+↓
+
+Preview
+
+↓
+
+Column Mapping
+
+↓
+
+Save Mapping
+
+↓
+
+Process Files
+
+↓
+
+Validation Selection
+
+↓
+
+Validation Results
+
+Actual
+
+Immediately after column mapping
+
+↓
+
+An error appears.
+
+Even after correctly mapping every required column
+
+↓
+
+The error remains.
+
+Investigate
+
+- validation trigger timing
+- ProcessingContext state
+- canonical data availability
+- aggregation cache
+- session_state
+- validation prerequisites
+
+Questions
+
+Why does validation execute before processing?
+
+Why does the error persist?
+
+Is validation using stale state?
+
+Is ProcessingContext being recreated?
+
 ==========================================================
 
-The terminal used to launch Streamlit should display live execution progress.
+PROCESSING CONTEXT REVIEW
+
+==========================================================
+
+Trace the entire lifecycle.
+
+Application Start
+
+↓
+
+Detection
+
+↓
+
+Preview
+
+↓
+
+Mapping
+
+↓
+
+Processing
+
+↓
+
+Aggregation
+
+↓
+
+Validation
+
+↓
+
+Reports
+
+For every phase report
+
+Current ProcessingContext fields
+
+Current session_state keys
+
+Current UI components
+
+Current rerun
+
+Current callbacks
+
+Current buttons
+
+Identify
+
+missing values
+
+incorrect values
+
+unexpected resets
+
+==========================================================
+
+SESSION STATE REVIEW
+
+==========================================================
+
+Audit ALL Streamlit session_state variables.
+
+Identify
+
+unused variables
+
+duplicated state
+
+state overwritten
+
+state cleared unexpectedly
+
+variables recreated every rerun
+
+variables with inconsistent naming
+
+Recommend cleanup.
+
+==========================================================
+
+PERFORMANCE REVIEW
+
+==========================================================
+
+Profile
+
+Detection
+
+Preview
+
+Column Mapping
+
+Processing
+
+Aggregation
+
+Validation
+
+Reports
+
+For every stage report
+
+Execution Time
+
+Memory Usage
+
+Number of reruns
+
+DataFrame copies
+
+LazyFrame collections
+
+Repeated processing
+
+Repeated rendering
+
+==========================================================
+
+DEBUG LOGGING
+
+==========================================================
+
+Temporarily add detailed debug logging.
 
 Log
 
 Application Started
 
-Session Started
+Session Created
 
-Folder Selected
-
-Files Found
+Session Restored
 
 Detection Started
 
 Detection Completed
 
-Schema Generated
+Preview Generated
 
-Column Mapping Saved
+Mapping Saved
 
-Processing File X of N
+ProcessingContext Updated
 
-Current Chunk
+Aggregation Started
 
-Rows Parsed
-
-Rows Aggregated
+Aggregation Finished
 
 Validation Started
 
-Validation Completed
+Validation Finished
 
 Reports Generated
 
-Execution Summary
+Every Streamlit rerun
 
-Display
+Every button click
 
-Current Time
+Every ProcessingContext update
 
-Current Phase
+Every session_state update
 
-Elapsed Time
+Every exception
 
-Rows Processed
+These logs are temporary.
 
-Current Memory
-
-Peak Memory
-
-CPU Usage
-
-Warnings
-
-Errors
-
-Keep logs readable.
-
-Avoid excessive verbosity.
+They should help locate the regression.
 
 ==========================================================
-TASK 7
-Processing History
-==========================================================
 
-Maintain a Processing History.
-
-Store the last 10 executions.
-
-Each execution should include
-
-Timestamp
-
-Files Processed
-
-Rows Processed
-
-Execution Time
-
-Peak Memory
-
-Peak CPU
-
-Warnings
-
-Errors
-
-Allow viewing history from the UI.
+IMPLEMENTATION STRATEGY
 
 ==========================================================
-TASK 8
-Large Dataset Validation
-==========================================================
 
-Benchmark using progressively larger datasets.
+FIRST
 
-Measure
+Investigate.
 
-100 MB
+SECOND
 
-500 MB
+Explain the root cause.
 
-1 GB
+THIRD
 
-5 GB
+List affected files.
 
-Folders containing many files
+FOURTH
 
-Record
+Describe the smallest possible fix.
 
-Parse Time
+FIFTH
 
-Aggregation Time
+Wait for confirmation.
 
-Validation Time
-
-Report Time
-
-Rows Per Second
-
-Peak Memory
-
-Peak CPU
-
-Document the results.
+Do NOT immediately modify code.
 
 ==========================================================
-TASK 9
-Final Code Review
-==========================================================
 
-Review the entire repository.
-
-Identify
-
-Critical
-
-High
-
-Medium
-
-Low
-
-issues.
-
-For each issue provide
-
-- File
-- Description
-- Risk
-- Suggested Fix
-
-Only implement Critical and High issues.
-
-Leave Medium and Low as recommendations.
+WHEN IMPLEMENTING
 
 ==========================================================
-TASK 10
-Release Candidate Review
-==========================================================
 
-When all work is complete,
+Once root causes are confirmed
 
-produce a Release Candidate report.
+Fix ONLY the regression.
 
-Include
+Do NOT redesign architecture.
 
-Architecture Summary
+Do NOT refactor unrelated code.
 
-Performance Summary
+Do NOT introduce new abstractions.
 
-Benchmark Results
+Do NOT optimize anything unrelated.
 
-Memory Behaviour
-
-Test Results
-
-Remaining Technical Debt
-
-Known Limitations
-
-Future Improvements
-
-Overall Quality Score
-
-Production Readiness Score
-
-Recommendation
-
-Ready for Internal Release
-
-or
-
-Requires Further Work
+Keep the fixes as small as possible.
 
 ==========================================================
-WORKFLOW
+
+AFTER FIXING
+
 ==========================================================
 
-For every task
+Run
 
-1. Review the current implementation.
+- all unit tests
+- integration tests
+- onboarding workflow
+- existing workflow
 
-2. Explain the implementation plan.
+Verify
 
-3. Implement.
+✓ Detection works
 
-4. Run tests.
+✓ Preview works
 
-5. Run benchmarks where applicable.
+✓ Column Mapping works
 
-6. Update documentation.
+✓ Process Files works
 
-7. Summarize changes.
+✓ Aggregation works
 
-8. Wait before moving to the next task.
+✓ Validation works
 
-Never perform multiple tasks simultaneously.
+✓ Reports work
 
-Keep every commit focused and reversible.
+✓ Metrics work
+
+✓ Observability works
+
+Verify that both Onboarding and Existing complete end-to-end without manual intervention.
+
+==========================================================
+
+FINAL REPORT
+
+==========================================================
+
+Provide
+
+1. Root cause for every issue.
+
+2. Files modified.
+
+3. Why the regression occurred.
+
+4. Why the fix works.
+
+5. Remaining risks.
+
+6. Recommended follow-up improvements (if any).
+
+Only after all regressions are resolved should we continue feature development.

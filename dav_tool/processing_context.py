@@ -45,6 +45,7 @@ class ProcessingContext:
     price_type: str = "Total Price"
     implied_dollars: bool = False
     implied_units: bool = False
+    mapping_confirmed: bool = False
 
     # === Effective Config (frozen at Save Mapping) ===
     eff_type: Optional[str] = None

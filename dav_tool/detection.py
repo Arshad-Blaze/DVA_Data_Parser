@@ -5,6 +5,17 @@ from dav_tool.config import DEFAULT_ENCODING
 logger = logging.getLogger(__name__)
 
 
+def _count_delimiters_outside_quotes(line: str, delimiter: str) -> int:
+    count = 0
+    in_quotes = False
+    for ch in line:
+        if ch == '"':
+            in_quotes = not in_quotes
+        elif ch == delimiter and not in_quotes:
+            count += 1
+    return count
+
+
 def detect_file_type(file_path):
     try:
         ext = os.path.splitext(file_path)[1].lower()
@@ -14,7 +25,7 @@ def detect_file_type(file_path):
             lines = [f.readline() for _ in range(5)]
 
         delimiters = [",", "|", "\t", ";"]
-        scores = {d: sum(line.count(d) for line in lines) for d in delimiters}
+        scores = {d: sum(_count_delimiters_outside_quotes(line, d) for line in lines) for d in delimiters}
         best = max(scores, key=scores.get)
 
         if scores[best] > 0:

@@ -1,3 +1,5 @@
+import logging
+
 import polars as pl
 from typing import List, Dict, Optional, Union
 
@@ -14,6 +16,8 @@ from dav_tool._parsers import (
     scan_delimited, parse_fixed_width_chunks,
     flatten_multiline_chunks, flatten_multiline_fixed_width,
 )
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -97,6 +101,7 @@ def stream_store_aggregate(
     for chunk in chunks:
         chunk = apply_column_names(chunk, column_names)
         if store_col not in chunk.columns:
+            logger.warning("Skipping chunk: column '%s' not found (available: %s)", store_col, chunk.columns)
             continue
 
         c = normalize_store_chunk(chunk, store_col, units_col, price_col,
@@ -153,6 +158,7 @@ def stream_item_aggregate(
     for chunk in chunks:
         chunk = apply_column_names(chunk, column_names)
         if upc_col not in chunk.columns:
+            logger.warning("Skipping chunk: column '%s' not found (available: %s)", upc_col, chunk.columns)
             continue
 
         c = normalize_item_chunk(chunk, upc_col, desc_col, units_col, dollars_col,
@@ -209,6 +215,7 @@ def stream_upc_summary(
     for chunk in chunks:
         chunk = apply_column_names(chunk, column_names)
         if upc_col not in chunk.columns:
+            logger.warning("Skipping chunk: column '%s' not found (available: %s)", upc_col, chunk.columns)
             continue
 
         c = normalize_upc_chunk(chunk, upc_col, units_col, dollars_col,
@@ -234,4 +241,4 @@ def _iter_chunks(file_paths, file_type, layout, start_line,
             )
         rtypes = multiline_record_types or ["H", "D"]
         return flatten_multiline_chunks(file_paths, rtypes, multiline_delimiter)
-    return iter([])
+    raise ValueError(f"Unsupported file type: {file_type}")

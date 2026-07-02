@@ -6,6 +6,8 @@ requires-python = ">=3.10"
 dependencies = [
     "polars>=1.0",
     "streamlit>=1.28",
+    "psutil>=5.9",
+    "openpyxl>=3.1",
 ]
 
 [build-system]

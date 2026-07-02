@@ -10,28 +10,8 @@ if "page" not in st.session_state:
 st.markdown(
     """
     <style>
-    div.toggle-container {
-        display: flex;
-        border: 2px solid #4CAF50;
-        border-radius: 6px;
-        overflow: hidden;
-        width: 320px;
-        margin-bottom: 10px;
-    }
-    div.toggle-container button {
-        flex: 1;
-        padding: 8px 0;
+    div.row-widget.stButton button {
         font-weight: 600;
-        border: none;
-        cursor: pointer;
-    }
-    .active {
-        background-color: #1E88E5;
-        color: white;
-    }
-    .inactive {
-        background-color: white;
-        color: #1E88E5;
     }
     </style>
     """,
@@ -48,24 +28,6 @@ with col_toggle:
 
     if c2.button("Existing", key="btn_existing", use_container_width=True):
         st.session_state.page = "existing"
-
-    active_page = st.session_state.page
-    st.markdown(
-        f"""
-        <script>
-        const buttons = window.parent.document.querySelectorAll('button');
-        buttons.forEach(btn => {{
-            if (btn.innerText === "Onboarding") {{
-                btn.className = btn.innerText === "{active_page.capitalize()}" ? "active" : "inactive";
-            }}
-            if (btn.innerText === "Existing") {{
-                btn.className = btn.innerText === "{active_page.capitalize()}" ? "active" : "inactive";
-            }}
-        }});
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
 
 if st.session_state.page == "onboarding":
     run_onboarding()

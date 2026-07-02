@@ -42,7 +42,10 @@ def run():
 def _phase0_parsing_and_preview(ctx):
     st.markdown("### Phase 1: File Parsing & Preview")
 
-    prod_txt = clean_path(st.text_input("Folder Path"))
+    if ctx.phase >= 1 and ctx.file_paths and ctx.columns:
+        return
+
+    prod_txt = clean_path(st.text_input("Folder Path", key="onb_folder_path"))
     file_paths = get_file_list(prod_txt)
     file_type = None
     prod_delim = None
@@ -125,6 +128,9 @@ def _phase0_parsing_and_preview(ctx):
 
 
 def _phase1_column_mapping(ctx):
+    if ctx.phase >= 2:
+        return
+
     st.divider()
     st.markdown("### Phase 2: Column Mapping")
 
@@ -160,41 +166,47 @@ def _phase1_column_mapping(ctx):
             storelist_store_col = st.selectbox("Storelist Store Column", storelist_df.columns)
 
     if ctx.phase == 1:
-        if st.button("Save Mapping & Proceed to Validation  ->", use_container_width=True):
-            log_phase("Column Mapping Saved")
-            ctx.store_col = prod_store_col
-            ctx.upc_col = prod_upc_col
-            ctx.desc_col = prod_desc_col
-            ctx.units_col = prod_units_col
-            ctx.price_col = prod_price_col
-            ctx.storelist_path = storelist_path
-            ctx.storelist_delim = storelist_delim
-            ctx.storelist_store_col = storelist_store_col
+        if not ctx.mapping_confirmed:
+            if st.button("Confirm Mapping", use_container_width=True):
+                log_phase("Column Mapping Confirmed")
+                ctx.store_col = prod_store_col
+                ctx.upc_col = prod_upc_col
+                ctx.desc_col = prod_desc_col
+                ctx.units_col = prod_units_col
+                ctx.price_col = prod_price_col
+                ctx.storelist_path = storelist_path
+                ctx.storelist_delim = storelist_delim
+                ctx.storelist_store_col = storelist_store_col
+                ctx.mapping_confirmed = True
+                st.rerun()
+        else:
+            st.success("Column mapping confirmed. Ready to process.")
+            if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
+                log_phase("Processing Started")
+                with ProcessingTimer(ctx.metrics, "aggregation", "stream_store_aggregate"):
+                    store_agg = stream_store_aggregate(
+                        fp, ft, ctx.store_col, ctx.units_col, ctx.price_col,
+                        delimiter=pd, layout=ll,
+                        start_line=sl, record_type=rt,
+                        multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
+                        column_names=ctx.schema,
+                        header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                    )
+                with ProcessingTimer(ctx.metrics, "aggregation", "stream_item_aggregate"):
+                    item_agg = stream_item_aggregate(
+                        fp, ft,
+                        ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
+                        delimiter=pd, layout=ll,
+                        start_line=sl, record_type=rt,
+                        multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
+                        column_names=ctx.schema,
+                        header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                    )
 
-            with ProcessingTimer(ctx.metrics, "aggregation", "stream_store_aggregate"):
-                store_agg = stream_store_aggregate(
-                    fp, ft, prod_store_col, prod_units_col, prod_price_col,
-                    delimiter=pd, layout=ll,
-                    start_line=sl, record_type=rt,
-                    multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                    column_names=ctx.schema,
-                    header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                )
-            with ProcessingTimer(ctx.metrics, "aggregation", "stream_item_aggregate"):
-                item_agg = stream_item_aggregate(
-                    fp, ft,
-                    prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
-                    delimiter=pd, layout=ll,
-                    start_line=sl, record_type=rt,
-                    multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                    column_names=ctx.schema,
-                    header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                )
-
-            ctx.store_agg = store_agg
-            ctx.item_agg = item_agg
-            ctx.phase = 2
-            st.rerun()
+                ctx.store_agg = store_agg
+                ctx.item_agg = item_agg
+                ctx.phase = 2
+                st.rerun()
 
 
 def _phase2_validation(ctx):

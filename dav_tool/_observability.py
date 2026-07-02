@@ -64,12 +64,14 @@ def _monitor_mem(pid: int, stop: threading.Event, peak: List[float], interval: f
             mem = proc.memory_info().rss
             if mem > peak[0]:
                 peak[0] = mem
-        except (psutil.NoSuchProcess, ProcessLookupError):
+        except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError):
             break
         stop.wait(interval)
 
 
 def setup_logging(level=None):
+    if _LOG.hasHandlers():
+        return
     if level is None:
         level = getattr(logging, DEFAULT_LOG_LEVEL.upper(), logging.INFO)
     handler = logging.StreamHandler()

@@ -57,7 +57,8 @@ def parse_fixed_width_chunks(
 
                 record = {}
                 for col in layout:
-                    raw = line[col["start"] : col["end"]].strip()
+                    end = min(col["end"], len(line))
+                    raw = line[col["start"] : end].strip()
                     if col["type"] == "numeric":
                         raw = raw.lstrip("0") or "0"
                     elif col["type"] == "date" and len(raw) == 6:
