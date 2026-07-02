@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
-import psutil
+from dav_tool._observability import _monitor_mem
 
 
 @dataclass
@@ -15,18 +15,6 @@ class StageResult:
     peak_rss_mb: float
     rows_processed: int
     rows_per_sec: float
-
-
-def _monitor_mem(pid: int, stop: threading.Event, peak: List[float], interval: float = 0.01):
-    proc = psutil.Process(pid)
-    while not stop.is_set():
-        try:
-            mem = proc.memory_info().rss
-            if mem > peak[0]:
-                peak[0] = mem
-        except (psutil.NoSuchProcess, ProcessLookupError):
-            break
-        stop.wait(interval)
 
 
 def benchmark(

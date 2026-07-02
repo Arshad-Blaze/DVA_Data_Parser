@@ -19,10 +19,6 @@ def _pick_weighted(pool, rng):
     return pool[rng.randint(0, len(pool) - 1)]
 
 
-def _row(rng, store, upc, desc, units, price):
-    return f"{store},{upc},{desc},{units},{price}\n"
-
-
 def estimate_rows(target_bytes: int) -> int:
     return math.ceil(target_bytes / _ESTIMATED_BYTES_PER_ROW)
 

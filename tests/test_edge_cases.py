@@ -3,7 +3,6 @@ import polars as pl
 import csv
 from dav_tool.io import safe_read_csv
 from dav_tool._aggregators import stream_store_aggregate, stream_item_aggregate
-from dav_tool._parsers import scan_delimited, parse_fixed_width_chunks
 from dav_tool.validation.store import compare_files, storelevelvalidation_from_df
 
 

@@ -1,144 +1,128 @@
-PROJECT ROADMAP
+Release Engineering Sprint
 
-The core architecture of this project is now complete.
+The core architecture is now complete.
 
 Completed
 
 ✓ Detection Layer
 
+✓ Parsing Layer
+
 ✓ Canonical Data Layer
 
 ✓ ProcessingContext
 
-✓ Single Normalization Layer
+✓ Aggregation Layer
 
-✓ Aggregation Cache
+✓ Validation Layer
 
-✓ Validation consumes canonical data
+✓ Reports Layer
 
-✓ All tests passing
+✓ Observability Layer
 
-The objective now is to make the application production-quality while preserving the architecture.
+✓ Benchmark Suite
+
+✓ Configuration Layer
+
+✓ Regression Tests
+
+The objective is now to stabilize the application and prepare it for production use as an internal desktop application.
 
 ==========================================================
-
 GENERAL RULES
-
 ==========================================================
 
-You are now acting as the lead software engineer for this project.
+You are acting as the lead software engineer.
 
-Before every sprint
+Do not redesign the architecture.
 
-1. Review current implementation.
+Do not introduce new frameworks.
 
-2. Explain current architecture.
+Do not rewrite working code.
 
-3. Identify affected modules.
+Do not remove features.
 
-4. Explain implementation strategy.
+Make only targeted improvements.
 
-5. Estimate risks.
+Every change must preserve existing behaviour.
 
-6. Wait for approval if assumptions are required.
+Run all tests after every change.
 
-Never
-
-- rewrite working code
-
-- change architecture unnecessarily
-
-- introduce unnecessary dependencies
-
-- change UI behaviour unless required
-
-- remove existing functionality
-
-Always
-
-- preserve backward compatibility
-
-- make small incremental changes
-
-- run all tests
-
-- update documentation
-
-- update architecture documentation if required
+Update technical documentation whenever necessary.
 
 ==========================================================
-
-SPRINT 4
-
-REPORTS LAYER
-
+TASK 1
+Fix Known Bugs
 ==========================================================
 
-Goal
+Review the engineering report.
 
-Create a dedicated Reports layer.
+Fix every confirmed bug.
 
-Move all report-generation responsibilities from Aggregator into Reports.
+Current known items include
 
-Requirements
+- Unit Price bug in normalize_store_chunk()
 
-- No behaviour changes
+- Any confirmed regression discovered during benchmarks
 
-- Same API
+Do not introduce behavioural changes.
 
-- Same outputs
-
-- All tests pass
+Explain the root cause before implementing.
 
 ==========================================================
+TASK 2
+Code Cleanup
+==========================================================
 
-SPRINT 5
+Remove
 
-PERFORMANCE OPTIMIZATION
+- dead code
 
+- unused imports
+
+- obsolete helper functions
+
+- abandoned dataclasses
+
+- duplicate code
+
+Only remove code that is confirmed unused.
+
+==========================================================
+TASK 3
+Refactor Large Modules
 ==========================================================
 
 Review
 
-_merge_accumulate()
+ui/existing.py
 
-Chunk merging
+ui/onboarding.py
 
-DataFrame concatenation
+Split overly large functions into smaller helpers.
 
-Lazy execution
+Keep behaviour identical.
 
-Streaming
-
-Memory allocations
-
-Optimize only after benchmarking.
-
-Avoid premature optimization.
+Do not move business logic into UI.
 
 ==========================================================
-
-SPRINT 6
-
-BENCHMARK SUITE
-
+TASK 4
+Execution Summary
 ==========================================================
 
-Create benchmark utilities.
+After processing completes,
 
-Benchmark
+display an Execution Summary inside Streamlit.
 
-100 MB
+Include
 
-500 MB
+Files Processed
 
-1 GB
+Rows Processed
 
-5 GB
+Unique Stores
 
-Folder Processing
-
-Measure
+Unique UPCs
 
 Parse Time
 
@@ -148,99 +132,63 @@ Validation Time
 
 Report Time
 
+Total Execution Time
+
 Peak Memory
 
 Peak CPU
-
-Rows Per Second
-
-Generate benchmark reports.
-
-==========================================================
-
-SPRINT 7
-
-OBSERVABILITY LAYER
-
-==========================================================
-
-Create a centralized observability framework.
-
-This sprint includes
-
-Logging
-
-Metrics
-
-Progress Reporting
-
-Performance Timing
-
-Memory Tracking
-
-CPU Tracking
 
 Warnings
 
 Errors
 
-All processing stages should automatically report their execution.
-
-Create
-
-ProcessingMetrics
-
-Fields
-
-files_processed
-
-rows_processed
-
-stores_processed
-
-upcs_processed
-
-chunks_processed
-
-parse_time
-
-aggregation_time
-
-validation_time
-
-report_time
-
-total_execution_time
-
-peak_memory
-
-current_memory
-
-peak_cpu
-
-current_cpu
-
-warnings
-
-errors
-
-files_failed
-
-rows_failed
-
-Expose ProcessingMetrics through ProcessingContext.
-
+==========================================================
+TASK 5
+Developer Diagnostics
 ==========================================================
 
-COMMAND PROMPT OUTPUT
+Create a Developer Mode.
+
+When enabled
+
+show
+
+Current Phase
+
+Current File
+
+Current Chunk
+
+Parser Type
+
+Detected Layout
+
+Canonical Schema
+
+ProcessingContext
+
+Current Memory
+
+Peak Memory
+
+Current CPU
+
+Aggregations
+
+Validation Status
+
+When disabled
+
+hide all diagnostics.
 
 ==========================================================
+TASK 6
+Terminal Execution Log
+==========================================================
 
-While Streamlit is running,
+The terminal used to launch Streamlit should display live execution progress.
 
-the terminal from which Streamlit was launched should continuously display progress.
-
-Examples
+Log
 
 Application Started
 
@@ -248,7 +196,7 @@ Session Started
 
 Folder Selected
 
-Files Discovered
+Files Found
 
 Detection Started
 
@@ -258,7 +206,9 @@ Schema Generated
 
 Column Mapping Saved
 
-Processing File 1 of N
+Processing File X of N
+
+Current Chunk
 
 Rows Parsed
 
@@ -272,19 +222,15 @@ Reports Generated
 
 Execution Summary
 
-The command prompt should act as a live execution log.
+Display
 
-It should clearly show
+Current Time
 
 Current Phase
 
-Current File
-
-Current Chunk
+Elapsed Time
 
 Rows Processed
-
-Elapsed Time
 
 Current Memory
 
@@ -296,190 +242,167 @@ Warnings
 
 Errors
 
-Completed Tasks
+Keep logs readable.
 
-Avoid excessive spam.
-
-Use structured logging.
+Avoid excessive verbosity.
 
 ==========================================================
-
-STREAMLIT UI
-
+TASK 7
+Processing History
 ==========================================================
 
-Keep Streamlit responsive.
+Maintain a Processing History.
 
-Continue showing
+Store the last 10 executions.
 
-Progress Bars
+Each execution should include
 
-Status Text
+Timestamp
 
-Current File
+Files Processed
 
-Completion Percentage
+Rows Processed
 
-Execution Summary
+Execution Time
 
-The terminal logging should complement the UI,
+Peak Memory
 
-not replace it.
+Peak CPU
 
-==========================================================
+Warnings
 
-SPRINT 8
+Errors
 
-CONFIGURATION MANAGEMENT
-
-==========================================================
-
-Centralize configuration.
-
-Review
-
-Chunk Size
-
-Encoding
-
-Memory Limits
-
-Logging Level
-
-Benchmark Settings
-
-Validation Thresholds
-
-Parser Defaults
-
-Avoid hardcoded values.
+Allow viewing history from the UI.
 
 ==========================================================
-
-SPRINT 9
-
-REGRESSION TESTING
-
+TASK 8
+Large Dataset Validation
 ==========================================================
 
-Expand testing.
+Benchmark using progressively larger datasets.
+
+Measure
+
+100 MB
+
+500 MB
+
+1 GB
+
+5 GB
+
+Folders containing many files
+
+Record
+
+Parse Time
+
+Aggregation Time
+
+Validation Time
+
+Report Time
+
+Rows Per Second
+
+Peak Memory
+
+Peak CPU
+
+Document the results.
+
+==========================================================
+TASK 9
+Final Code Review
+==========================================================
+
+Review the entire repository.
+
+Identify
+
+Critical
+
+High
+
+Medium
+
+Low
+
+issues.
+
+For each issue provide
+
+- File
+- Description
+- Risk
+- Suggested Fix
+
+Only implement Critical and High issues.
+
+Leave Medium and Low as recommendations.
+
+==========================================================
+TASK 10
+Release Candidate Review
+==========================================================
+
+When all work is complete,
+
+produce a Release Candidate report.
 
 Include
 
-Large Files
+Architecture Summary
 
-Large Folders
+Performance Summary
 
-Corrupt Files
+Benchmark Results
 
-Invalid Layouts
+Memory Behaviour
 
-Mixed Encodings
+Test Results
 
-Duplicate Stores
+Remaining Technical Debt
 
-Duplicate UPCs
+Known Limitations
 
-Empty Files
+Future Improvements
 
-Empty Folders
-
-Memory Regression
-
-ProcessingContext
-
-Canonical Layer
-
-Reports
-
-Observability
-
-Benchmark Utilities
-
-==========================================================
-
-SPRINT 10
-
-FINAL ENGINEERING REVIEW
-
-==========================================================
-
-Perform a complete engineering review.
-
-Evaluate
-
-Architecture
-
-Performance
-
-Scalability
-
-Maintainability
-
-Memory
-
-Code Quality
-
-Observability
-
-Testing
-
-Documentation
-
-Technical Debt
-
-Provide
-
-Overall Score
+Overall Quality Score
 
 Production Readiness Score
 
-Strengths
+Recommendation
 
-Weaknesses
+Ready for Internal Release
 
-Future Roadmap
+or
 
-Do not implement anything.
-
-Only produce the final review.
+Requires Further Work
 
 ==========================================================
-
 WORKFLOW
+==========================================================
 
-For every sprint
+For every task
 
-Review
+1. Review the current implementation.
 
-↓
+2. Explain the implementation plan.
 
-Explain
+3. Implement.
 
-↓
+4. Run tests.
 
-Implement
+5. Run benchmarks where applicable.
 
-↓
+6. Update documentation.
 
-Run Tests
+7. Summarize changes.
 
-↓
+8. Wait before moving to the next task.
 
-Benchmark (if applicable)
+Never perform multiple tasks simultaneously.
 
-↓
-
-Update Documentation
-
-↓
-
-Summarize
-
-↓
-
-Recommend Next Sprint
-
-Only work on one sprint at a time.
-
-Do not automatically continue to the next sprint without confirmation.
+Keep every commit focused and reversible.

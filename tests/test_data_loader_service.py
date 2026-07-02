@@ -1,5 +1,4 @@
 import polars as pl
-import os
 
 from dav_tool.io import safe_read_csv
 

@@ -14,7 +14,7 @@ from dav_tool.validation.store import compare_files, storelevelvalidation
 from dav_tool.validation.item import run_item_validation
 from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
-    detect_hdr_prefix, has_header,
+    detect_hdr_prefix,
 )
 from dav_tool.ui.helpers import clean_path, get_file_list, get_column_names
 from dav_tool.processing_context import ProcessingContext, ExistingContext

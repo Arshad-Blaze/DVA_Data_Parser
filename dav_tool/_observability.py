@@ -4,7 +4,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 import psutil
 from dav_tool.config import DEFAULT_LOG_LEVEL
@@ -42,7 +42,7 @@ _PHASE_MAP = {
 }
 
 
-def _monitor_mem(pid: int, stop: threading.Event, peak: List[float]):
+def _monitor_mem(pid: int, stop: threading.Event, peak: List[float], interval: float = 0.01):
     proc = psutil.Process(pid)
     while not stop.is_set():
         try:
@@ -51,7 +51,7 @@ def _monitor_mem(pid: int, stop: threading.Event, peak: List[float]):
                 peak[0] = mem
         except (psutil.NoSuchProcess, ProcessLookupError):
             break
-        stop.wait(0.01)
+        stop.wait(interval)
 
 
 def setup_logging(level=None):
