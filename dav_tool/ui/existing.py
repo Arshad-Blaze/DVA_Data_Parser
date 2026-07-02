@@ -34,9 +34,14 @@ def run():
         st.session_state.ex_ctx = ExistingContext()
     ctx = st.session_state.ex_ctx
 
-    # ========================================================================
-    # Phase 0: File Detection & Preview
-    # ========================================================================
+    _phase0_detection_and_preview(ctx)
+    if ctx.phase >= 1:
+        _phase1_column_mapping(ctx)
+    if ctx.phase >= 2:
+        _phase2_validation(ctx)
+
+
+def _phase0_detection_and_preview(ctx):
     st.markdown("### Phase 1: File Detection & Preview")
 
     col1, col2 = st.columns(2)
@@ -59,11 +64,11 @@ def run():
         st.subheader("Fixed Width Settings")
         colA, colB = st.columns(2)
         with colA:
-            prod_start_line = st.number_input("BAU Start Line", min_value=0, value=0, key="fw_start_prod")
-            prod_record_type = st.text_input("BAU Record Type", value="", key="fw_rec_prod")
+            st.number_input("BAU Start Line", min_value=0, value=0, key="fw_start_prod")
+            st.text_input("BAU Record Type", value="", key="fw_rec_prod")
         with colB:
-            test_start_line = st.number_input("Test Start Line", min_value=0, value=0, key="fw_start_test")
-            test_record_type = st.text_input("Test Record Type", value="", key="fw_rec_test")
+            st.number_input("Test Start Line", min_value=0, value=0, key="fw_start_test")
+            st.text_input("Test Record Type", value="", key="fw_rec_test")
 
     ml_delim = "|"
     if ctx.prod.file_type == "multiline" or ctx.test.file_type == "multiline":
@@ -95,278 +100,274 @@ def run():
             ctx.phase = 1
             st.rerun()
 
-    # ========================================================================
-    # Phase 1: Column Mapping
-    # ========================================================================
-    if ctx.phase >= 1:
-        st.divider()
-        st.markdown("### Phase 2: Column Mapping")
 
-        prod_paths = ctx.prod.file_paths
-        test_paths = ctx.test.file_paths
-        prod_type = ctx.prod.file_type
-        test_type = ctx.test.file_type
-        prod_delim = ctx.prod.delimiter
-        test_delim = ctx.test.delimiter
-        prod_layout_list = ctx.prod.layout
-        test_layout_list = ctx.test.layout
+def _phase1_column_mapping(ctx):
+    st.divider()
+    st.markdown("### Phase 2: Column Mapping")
 
-        prod_start_line = st.session_state.get("fw_start_prod", 0)
-        test_start_line = st.session_state.get("fw_start_test", 0)
-        prod_record_type = st.session_state.get("fw_rec_prod", "")
-        test_record_type = st.session_state.get("fw_rec_test", "")
+    prod_paths = ctx.prod.file_paths
+    test_paths = ctx.test.file_paths
+    prod_type = ctx.prod.file_type
+    test_type = ctx.test.file_type
+    prod_delim = ctx.prod.delimiter
+    test_delim = ctx.test.delimiter
+    prod_layout_list = ctx.prod.layout
+    test_layout_list = ctx.test.layout
 
-        ml_delim_val = ctx.ml_delimiter
+    prod_start_line = st.session_state.get("fw_start_prod", 0)
+    test_start_line = st.session_state.get("fw_start_test", 0)
+    prod_record_type = st.session_state.get("fw_rec_prod", "")
+    test_record_type = st.session_state.get("fw_rec_test", "")
 
-        eff_prod_type = (
-            "multiline" if prod_type == "multiline" and ctx.prod.ml_flattened
-            else prod_type
-        )
-        eff_test_type = (
-            "multiline" if test_type == "multiline" and ctx.test.ml_flattened
-            else test_type
-        )
+    ml_delim_val = ctx.ml_delimiter
 
-        eff_delim_prod = ml_delim_val if prod_type == "multiline" else (prod_delim or ",")
-        eff_delim_test = ml_delim_val if test_type == "multiline" else (test_delim or ",")
+    eff_prod_type = (
+        "multiline" if prod_type == "multiline" and ctx.prod.ml_flattened
+        else prod_type
+    )
+    eff_test_type = (
+        "multiline" if test_type == "multiline" and ctx.test.ml_flattened
+        else test_type
+    )
 
-        eff_rt_prod = (
-            ",".join(ctx.prod.ml_record_types or [])
-            if prod_type == "multiline" else prod_record_type
-        )
-        eff_rt_test = (
-            ",".join(ctx.test.ml_record_types or [])
-            if test_type == "multiline" else test_record_type
-        )
+    eff_delim_prod = ml_delim_val if prod_type == "multiline" else (prod_delim or ",")
+    eff_delim_test = ml_delim_val if test_type == "multiline" else (test_delim or ",")
 
-        hdr_prefix_prod, hdr_header_prod = _get_hdr_params(ctx.prod)
-        hdr_prefix_test, hdr_header_test = _get_hdr_params(ctx.test)
-        hdr_detail_prod = ctx.prod.detail_layout
-        hdr_detail_test = ctx.test.detail_layout
+    eff_rt_prod = (
+        ",".join(ctx.prod.ml_record_types or [])
+        if prod_type == "multiline" else prod_record_type
+    )
+    eff_rt_test = (
+        ",".join(ctx.test.ml_record_types or [])
+        if test_type == "multiline" else test_record_type
+    )
 
-        eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
-        eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
+    hdr_prefix_prod, hdr_header_prod = _get_hdr_params(ctx.prod)
+    hdr_prefix_test, hdr_header_test = _get_hdr_params(ctx.test)
+    hdr_detail_prod = ctx.prod.detail_layout
+    hdr_detail_test = ctx.test.detail_layout
 
-        prod_cols = get_column_names(
-            prod_paths, eff_prod_type, eff_delim_prod,
-            eff_layout_prod_cols, prod_start_line, eff_rt_prod,
-            header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-        )
-        test_cols = get_column_names(
-            test_paths, eff_test_type, eff_delim_test,
-            eff_layout_test_cols, test_start_line, eff_rt_test,
-            header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-        )
+    eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
+    eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
 
-        st.subheader("Column Mapping")
-        c1, c2 = st.columns(2)
-        with c1:
-            prod_store_col = st.selectbox("Store (BAU)", prod_cols, key="store_prod")
-            prod_units_col = st.selectbox("Units (BAU)", prod_cols, key="units_prod")
-            prod_price_col = st.selectbox("Price (BAU)", prod_cols, key="price_prod")
-            prod_upc_col = st.selectbox("UPC (BAU)", prod_cols, key="upc_prod")
-            prod_desc_col = st.selectbox("Description (BAU)", prod_cols, key="desc_prod")
-            price_type_bau = st.radio("Price Type (BAU)", ["Total Price", "Unit Price"], key="price_bau")
-            st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
-            isimplied_dollars_prod = st.checkbox("Implied dollars (BAU)", key="imp_dol_prod")
-            isimplied_units_prod = st.checkbox("Implied units (BAU)", key="imp_unt_prod")
+    prod_cols = get_column_names(
+        prod_paths, eff_prod_type, eff_delim_prod,
+        eff_layout_prod_cols, prod_start_line, eff_rt_prod,
+        header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+    )
+    test_cols = get_column_names(
+        test_paths, eff_test_type, eff_delim_test,
+        eff_layout_test_cols, test_start_line, eff_rt_test,
+        header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+    )
 
-        with c2:
-            test_store_col = st.selectbox("Store (Test)", test_cols, key="store_test")
-            test_units_col = st.selectbox("Units (Test)", test_cols, key="units_test")
-            test_price_col = st.selectbox("Price (Test)", test_cols, key="price_test")
-            test_upc_col = st.selectbox("UPC (Test)", test_cols, key="upc_test")
-            test_desc_col = st.selectbox("Description (Test)", test_cols, key="desc_test")
-            price_type_test = st.radio("Price Type (Test)", ["Total Price", "Unit Price"], key="price_test")
-            st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
-            isimplied_dollars_test = st.checkbox("Implied dollars (Test)", key="imp_dol_test")
-            isimplied_units_test = st.checkbox("Implied units (Test)", key="imp_unt_test")
+    st.subheader("Column Mapping")
+    c1, c2 = st.columns(2)
+    with c1:
+        prod_store_col = st.selectbox("Store (BAU)", prod_cols, key="store_prod")
+        prod_units_col = st.selectbox("Units (BAU)", prod_cols, key="units_prod")
+        prod_price_col = st.selectbox("Price (BAU)", prod_cols, key="price_prod")
+        prod_upc_col = st.selectbox("UPC (BAU)", prod_cols, key="upc_prod")
+        prod_desc_col = st.selectbox("Description (BAU)", prod_cols, key="desc_prod")
+        price_type_bau = st.radio("Price Type (BAU)", ["Total Price", "Unit Price"], key="price_bau")
+        st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
+        isimplied_dollars_prod = st.checkbox("Implied dollars (BAU)", key="imp_dol_prod")
+        isimplied_units_prod = st.checkbox("Implied units (BAU)", key="imp_unt_prod")
 
-        if ctx.phase == 1:
-            if st.button("Save Mapping & Proceed to Validation  ->", use_container_width=True):
-                log_phase("Column Mapping Saved")
-                ctx.prod.store_col = prod_store_col
-                ctx.prod.units_col = prod_units_col
-                ctx.prod.price_col = prod_price_col
-                ctx.prod.upc_col = prod_upc_col
-                ctx.prod.desc_col = prod_desc_col
-                ctx.prod.price_type = price_type_bau
-                ctx.prod.implied_dollars = isimplied_dollars_prod
-                ctx.prod.implied_units = isimplied_units_prod
-                ctx.test.store_col = test_store_col
-                ctx.test.units_col = test_units_col
-                ctx.test.price_col = test_price_col
-                ctx.test.upc_col = test_upc_col
-                ctx.test.desc_col = test_desc_col
-                ctx.test.price_type = price_type_test
-                ctx.test.implied_dollars = isimplied_dollars_test
-                ctx.test.implied_units = isimplied_units_test
+    with c2:
+        test_store_col = st.selectbox("Store (Test)", test_cols, key="store_test")
+        test_units_col = st.selectbox("Units (Test)", test_cols, key="units_test")
+        test_price_col = st.selectbox("Price (Test)", test_cols, key="price_test")
+        test_upc_col = st.selectbox("UPC (Test)", test_cols, key="upc_test")
+        test_desc_col = st.selectbox("Description (Test)", test_cols, key="desc_test")
+        price_type_test = st.radio("Price Type (Test)", ["Total Price", "Unit Price"], key="price_test")
+        st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
+        isimplied_dollars_test = st.checkbox("Implied dollars (Test)", key="imp_dol_test")
+        isimplied_units_test = st.checkbox("Implied units (Test)", key="imp_unt_test")
 
-                ctx.prod.eff_type = eff_prod_type
-                ctx.test.eff_type = eff_test_type
-                ctx.prod.eff_delimiter = eff_delim_prod
-                ctx.test.eff_delimiter = eff_delim_test
-                ctx.prod.eff_record_type = eff_rt_prod
-                ctx.test.eff_record_type = eff_rt_test
-                ctx.prod.header_prefix = hdr_prefix_prod
-                ctx.test.header_prefix = hdr_prefix_test
-                ctx.prod.header_layout = hdr_header_prod
-                ctx.test.header_layout = hdr_header_test
-                ctx.prod.eff_layout = eff_layout_prod_cols
-                ctx.test.eff_layout = eff_layout_test_cols
+    if ctx.phase == 1:
+        if st.button("Save Mapping & Proceed to Validation  ->", use_container_width=True):
+            log_phase("Column Mapping Saved")
+            ctx.prod.store_col = prod_store_col
+            ctx.prod.units_col = prod_units_col
+            ctx.prod.price_col = prod_price_col
+            ctx.prod.upc_col = prod_upc_col
+            ctx.prod.desc_col = prod_desc_col
+            ctx.prod.price_type = price_type_bau
+            ctx.prod.implied_dollars = isimplied_dollars_prod
+            ctx.prod.implied_units = isimplied_units_prod
+            ctx.test.store_col = test_store_col
+            ctx.test.units_col = test_units_col
+            ctx.test.price_col = test_price_col
+            ctx.test.upc_col = test_upc_col
+            ctx.test.desc_col = test_desc_col
+            ctx.test.price_type = price_type_test
+            ctx.test.implied_dollars = isimplied_dollars_test
+            ctx.test.implied_units = isimplied_units_test
 
-                with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_store_aggregate"):
-                    prod_store_agg = stream_store_aggregate(
-                        prod_paths, prod_type,
-                        prod_store_col, prod_units_col, prod_price_col,
-                        delimiter=prod_delim, layout=prod_layout_list,
-                        price_type=price_type_bau,
-                        implied_dollars=isimplied_dollars_prod,
-                        implied_units=isimplied_units_prod,
-                        start_line=prod_start_line, record_type=prod_record_type,
-                        multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
-                        multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
-                        header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-                    )
-                with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_store_aggregate"):
-                    test_store_agg = stream_store_aggregate(
-                        test_paths, test_type,
-                        test_store_col, test_units_col, test_price_col,
-                        delimiter=test_delim, layout=test_layout_list,
-                        price_type=price_type_test,
-                        implied_dollars=isimplied_dollars_test,
-                        implied_units=isimplied_units_test,
-                        start_line=test_start_line, record_type=test_record_type,
-                        multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
-                        multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
-                        header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-                    )
-                with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_item_aggregate"):
-                    prod_item_agg = stream_item_aggregate(
-                        prod_paths, prod_type,
-                        prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
-                        delimiter=prod_delim, layout=prod_layout_list,
-                        implied_units=isimplied_units_prod,
-                        implied_dollars=isimplied_dollars_prod,
-                        start_line=prod_start_line, record_type=prod_record_type,
-                        multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
-                        multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
-                        header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-                    )
-                with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_item_aggregate"):
-                    test_item_agg = stream_item_aggregate(
-                        test_paths, test_type,
-                        test_upc_col, test_desc_col, test_units_col, test_price_col,
-                        delimiter=test_delim, layout=test_layout_list,
-                        implied_units=isimplied_units_test,
-                        implied_dollars=isimplied_dollars_test,
-                        start_line=test_start_line, record_type=test_record_type,
-                        multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
-                        multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
-                        header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-                    )
+            ctx.prod.eff_type = eff_prod_type
+            ctx.test.eff_type = eff_test_type
+            ctx.prod.eff_delimiter = eff_delim_prod
+            ctx.test.eff_delimiter = eff_delim_test
+            ctx.prod.eff_record_type = eff_rt_prod
+            ctx.test.eff_record_type = eff_rt_test
+            ctx.prod.header_prefix = hdr_prefix_prod
+            ctx.test.header_prefix = hdr_prefix_test
+            ctx.prod.header_layout = hdr_header_prod
+            ctx.test.header_layout = hdr_header_test
+            ctx.prod.eff_layout = eff_layout_prod_cols
+            ctx.test.eff_layout = eff_layout_test_cols
 
-                ctx.prod.store_agg = prod_store_agg
-                ctx.test.store_agg = test_store_agg
-                ctx.prod.item_agg = prod_item_agg
-                ctx.test.item_agg = test_item_agg
-                ctx.phase = 2
-                st.rerun()
+            with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_store_aggregate"):
+                prod_store_agg = stream_store_aggregate(
+                    prod_paths, prod_type,
+                    prod_store_col, prod_units_col, prod_price_col,
+                    delimiter=prod_delim, layout=prod_layout_list,
+                    price_type=price_type_bau,
+                    implied_dollars=isimplied_dollars_prod,
+                    implied_units=isimplied_units_prod,
+                    start_line=prod_start_line, record_type=prod_record_type,
+                    multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
+                    multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
+                    header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+                )
+            with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_store_aggregate"):
+                test_store_agg = stream_store_aggregate(
+                    test_paths, test_type,
+                    test_store_col, test_units_col, test_price_col,
+                    delimiter=test_delim, layout=test_layout_list,
+                    price_type=price_type_test,
+                    implied_dollars=isimplied_dollars_test,
+                    implied_units=isimplied_units_test,
+                    start_line=test_start_line, record_type=test_record_type,
+                    multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
+                    multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
+                    header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+                )
+            with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_item_aggregate"):
+                prod_item_agg = stream_item_aggregate(
+                    prod_paths, prod_type,
+                    prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
+                    delimiter=prod_delim, layout=prod_layout_list,
+                    implied_units=isimplied_units_prod,
+                    implied_dollars=isimplied_dollars_prod,
+                    start_line=prod_start_line, record_type=prod_record_type,
+                    multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
+                    multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
+                    header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+                )
+            with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_item_aggregate"):
+                test_item_agg = stream_item_aggregate(
+                    test_paths, test_type,
+                    test_upc_col, test_desc_col, test_units_col, test_price_col,
+                    delimiter=test_delim, layout=test_layout_list,
+                    implied_units=isimplied_units_test,
+                    implied_dollars=isimplied_dollars_test,
+                    start_line=test_start_line, record_type=test_record_type,
+                    multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
+                    multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
+                    header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+                )
 
-    # ========================================================================
-    # Phase 2: Validation
-    # ========================================================================
-    if ctx.phase >= 2:
-        st.divider()
-        st.markdown("### Phase 3: Validation")
-
-        prod_paths = ctx.prod.file_paths
-        test_paths = ctx.test.file_paths
-        prod_type = ctx.prod.file_type
-        test_type = ctx.test.file_type
-        prod_delim = ctx.prod.delimiter
-        test_delim = ctx.test.delimiter
-        prod_layout_list = ctx.prod.layout
-        test_layout_list = ctx.test.layout
-        prod_start_line = st.session_state.get("fw_start_prod", 0)
-        test_start_line = st.session_state.get("fw_start_test", 0)
-        prod_record_type = st.session_state.get("fw_rec_prod", "")
-        test_record_type = st.session_state.get("fw_rec_test", "")
-
-        prod_store_col = ctx.prod.store_col
-        prod_units_col = ctx.prod.units_col
-        prod_price_col = ctx.prod.price_col
-        prod_upc_col = ctx.prod.upc_col
-        prod_desc_col = ctx.prod.desc_col
-        test_store_col = ctx.test.store_col
-        test_units_col = ctx.test.units_col
-        test_price_col = ctx.test.price_col
-        test_upc_col = ctx.test.upc_col
-        test_desc_col = ctx.test.desc_col
-
-        st.info(
-            f"BAU columns mapped — Store: {prod_store_col}, UPC: {prod_upc_col}, "
-            f"Units: {prod_units_col}, Price: {prod_price_col}"
-        )
-        st.info(
-            f"Test columns mapped — Store: {test_store_col}, UPC: {test_upc_col}, "
-            f"Units: {test_units_col}, Price: {test_price_col}"
-        )
-
-        with st.expander("Aggregated Data Preview", expanded=False):
-            cc = st.columns(2)
-            with cc[0]:
-                st.subheader("BAU Store-Level")
-                sa = ctx.prod.store_agg
-                if sa is not None and not sa.is_empty():
-                    st.dataframe(sa.to_pandas().head(10))
-
-                st.subheader("BAU UPC-Level")
-                ia = ctx.prod.item_agg
-                if ia is not None and not ia.is_empty():
-                    st.dataframe(ia.to_pandas().head(10))
-
-            with cc[1]:
-                st.subheader("Test Store-Level")
-                sa = ctx.test.store_agg
-                if sa is not None and not sa.is_empty():
-                    st.dataframe(sa.to_pandas().head(10))
-
-                st.subheader("Test UPC-Level")
-                ia = ctx.test.item_agg
-                if ia is not None and not ia.is_empty():
-                    st.dataframe(ia.to_pandas().head(10))
-
-        st.subheader("Select Validations")
-        colA, colB = st.columns(2)
-        with colA:
-            run_store = st.checkbox("Store Level Validation", value=True)
-            run_item = st.checkbox("Item Level Validation", value=True)
-        with colB:
-            run_compare_existing = st.checkbox("Compare Store List", value=True)
-            run_summary = st.checkbox("Summary (requires Item)", value=True)
-            run_file_review_existing = st.checkbox("File Review Report", value=False)
-
-        if st.button("Validate", use_container_width=True, type="primary"):
-            _execute_validation(
-                prod_paths, test_paths, prod_type, test_type,
-                prod_delim, test_delim,
-                ctx.prod.eff_layout, ctx.test.eff_layout,
-                prod_start_line, test_start_line, prod_record_type, test_record_type,
-                prod_store_col, prod_units_col, prod_price_col, prod_upc_col, prod_desc_col,
-                test_store_col, test_units_col, test_price_col, test_upc_col, test_desc_col,
-                ctx.prod.price_type, ctx.test.price_type,
-                ctx.prod.implied_dollars, ctx.prod.implied_units,
-                ctx.test.implied_dollars, ctx.test.implied_units,
-                run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
-            )
-
-        if ctx.validation_done:
-            _display_results()
-
-        if st.button("Start Over", use_container_width=True):
-            _reset_phase()
+            ctx.prod.store_agg = prod_store_agg
+            ctx.test.store_agg = test_store_agg
+            ctx.prod.item_agg = prod_item_agg
+            ctx.test.item_agg = test_item_agg
+            ctx.phase = 2
             st.rerun()
+
+
+def _phase2_validation(ctx):
+    st.divider()
+    st.markdown("### Phase 3: Validation")
+
+    prod_paths = ctx.prod.file_paths
+    test_paths = ctx.test.file_paths
+    prod_type = ctx.prod.file_type
+    test_type = ctx.test.file_type
+    prod_delim = ctx.prod.delimiter
+    test_delim = ctx.test.delimiter
+    prod_layout_list = ctx.prod.layout
+    test_layout_list = ctx.test.layout
+    prod_start_line = st.session_state.get("fw_start_prod", 0)
+    test_start_line = st.session_state.get("fw_start_test", 0)
+    prod_record_type = st.session_state.get("fw_rec_prod", "")
+    test_record_type = st.session_state.get("fw_rec_test", "")
+
+    prod_store_col = ctx.prod.store_col
+    prod_units_col = ctx.prod.units_col
+    prod_price_col = ctx.prod.price_col
+    prod_upc_col = ctx.prod.upc_col
+    prod_desc_col = ctx.prod.desc_col
+    test_store_col = ctx.test.store_col
+    test_units_col = ctx.test.units_col
+    test_price_col = ctx.test.price_col
+    test_upc_col = ctx.test.upc_col
+    test_desc_col = ctx.test.desc_col
+
+    st.info(
+        f"BAU columns mapped — Store: {prod_store_col}, UPC: {prod_upc_col}, "
+        f"Units: {prod_units_col}, Price: {prod_price_col}"
+    )
+    st.info(
+        f"Test columns mapped — Store: {test_store_col}, UPC: {test_upc_col}, "
+        f"Units: {test_units_col}, Price: {test_price_col}"
+    )
+
+    with st.expander("Aggregated Data Preview", expanded=False):
+        cc = st.columns(2)
+        with cc[0]:
+            st.subheader("BAU Store-Level")
+            sa = ctx.prod.store_agg
+            if sa is not None and not sa.is_empty():
+                st.dataframe(sa.to_pandas().head(10))
+
+            st.subheader("BAU UPC-Level")
+            ia = ctx.prod.item_agg
+            if ia is not None and not ia.is_empty():
+                st.dataframe(ia.to_pandas().head(10))
+
+        with cc[1]:
+            st.subheader("Test Store-Level")
+            sa = ctx.test.store_agg
+            if sa is not None and not sa.is_empty():
+                st.dataframe(sa.to_pandas().head(10))
+
+            st.subheader("Test UPC-Level")
+            ia = ctx.test.item_agg
+            if ia is not None and not ia.is_empty():
+                st.dataframe(ia.to_pandas().head(10))
+
+    st.subheader("Select Validations")
+    colA, colB = st.columns(2)
+    with colA:
+        run_store = st.checkbox("Store Level Validation", value=True)
+        run_item = st.checkbox("Item Level Validation", value=True)
+    with colB:
+        run_compare_existing = st.checkbox("Compare Store List", value=True)
+        run_summary = st.checkbox("Summary (requires Item)", value=True)
+        run_file_review_existing = st.checkbox("File Review Report", value=False)
+
+    if st.button("Validate", use_container_width=True, type="primary"):
+        _execute_validation(
+            prod_paths, test_paths, prod_type, test_type,
+            prod_delim, test_delim,
+            ctx.prod.eff_layout, ctx.test.eff_layout,
+            prod_start_line, test_start_line, prod_record_type, test_record_type,
+            prod_store_col, prod_units_col, prod_price_col, prod_upc_col, prod_desc_col,
+            test_store_col, test_units_col, test_price_col, test_upc_col, test_desc_col,
+            ctx.prod.price_type, ctx.test.price_type,
+            ctx.prod.implied_dollars, ctx.prod.implied_units,
+            ctx.test.implied_dollars, ctx.test.implied_units,
+            run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
+        )
+
+    if ctx.validation_done:
+        _display_results()
+
+    if st.button("Start Over", use_container_width=True):
+        _reset_phase()
+        st.rerun()
 
 
 def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = ""):
