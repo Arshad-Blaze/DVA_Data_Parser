@@ -10,7 +10,7 @@ from dav_tool._reports import generate_file_review
 from dav_tool._observability import ProcessingTimer, log_phase, setup_logging
 from dav_tool.validation.store import compare_files
 from dav_tool.detection import is_multiline_record, detect_file_type, detect_record_types, detect_hdr_prefix
-from dav_tool.ui.helpers import clean_path, get_file_list, load_storelist, get_column_names
+from dav_tool.ui.helpers import clean_path, get_file_list, load_storelist, get_column_names, display_execution_summary
 from dav_tool.processing_context import ProcessingContext
 
 
@@ -444,3 +444,5 @@ def _display_results():
             if not fr.is_empty():
                 st.dataframe(fr.to_pandas())
                 st.download_button("Download File Review", fr.write_csv(), "file_review.csv")
+
+    display_execution_summary(ctx.metrics)

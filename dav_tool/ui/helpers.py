@@ -1,6 +1,7 @@
 import os
 import glob
 import logging
+import streamlit as st
 import polars as pl
 from dav_tool._parsers import (
     parse_fixed_width_chunks, preview_flattened_multiline,
@@ -10,6 +11,32 @@ from dav_tool.config import FALLBACK_ENCODING
 from dav_tool.io import safe_read_csv
 
 logger = logging.getLogger(__name__)
+
+
+def display_execution_summary(metrics):
+    st.divider()
+    st.markdown("### Execution Summary")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Files Processed", metrics.files_processed)
+        st.metric("Rows Processed", f"{metrics.rows_processed:,}")
+        st.metric("Unique Stores", f"{metrics.stores_processed:,}")
+        st.metric("Unique UPCs", f"{metrics.upcs_processed:,}")
+    with c2:
+        st.metric("Parse Time", f"{metrics.parse_time:.2f}s")
+        st.metric("Aggregation Time", f"{metrics.aggregation_time:.2f}s")
+        st.metric("Validation Time", f"{metrics.validation_time:.2f}s")
+        st.metric("Report Time", f"{metrics.report_time:.2f}s")
+    with c3:
+        st.metric("Total Time", f"{metrics.total_execution_time:.2f}s")
+        st.metric("Peak Memory", f"{metrics.peak_memory:.1f} MB")
+        st.metric("Peak CPU", f"{metrics.peak_cpu:.1f}%")
+    if metrics.warnings:
+        for w in metrics.warnings:
+            st.caption(f":warning: {w}")
+    if metrics.errors:
+        for e in metrics.errors:
+            st.caption(f":x: {e}")
 
 
 def clean_path(path):
