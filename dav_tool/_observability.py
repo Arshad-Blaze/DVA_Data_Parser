@@ -1,4 +1,5 @@
 """Centralized observability: metrics, timing, terminal logging."""
+import datetime
 import logging
 import os
 import threading
@@ -10,6 +11,20 @@ import psutil
 from dav_tool.config import DEFAULT_LOG_LEVEL
 
 _LOG = logging.getLogger("dva")
+
+MAX_HISTORY = 10
+
+
+@dataclass
+class ProcessingRecord:
+    timestamp: str = ""
+    files_processed: int = 0
+    rows_processed: int = 0
+    execution_time: float = 0.0
+    peak_memory: float = 0.0
+    peak_cpu: float = 0.0
+    warnings: int = 0
+    errors: int = 0
 
 
 @dataclass

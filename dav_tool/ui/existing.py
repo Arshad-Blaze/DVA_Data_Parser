@@ -16,7 +16,7 @@ from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
     detect_hdr_prefix,
 )
-from dav_tool.ui.helpers import clean_path, get_file_list, get_column_names, display_execution_summary, display_dev_diagnostics
+from dav_tool.ui.helpers import clean_path, get_file_list, get_column_names, display_execution_summary, display_dev_diagnostics, record_execution, display_processing_history
 from dav_tool.processing_context import ProcessingContext, ExistingContext
 
 
@@ -371,6 +371,8 @@ def _phase2_validation(ctx):
     if ctx.validation_done:
         _display_results()
 
+    display_processing_history()
+
     if st.button("Start Over", use_container_width=True):
         _reset_phase()
         st.rerun()
@@ -676,6 +678,7 @@ def _execute_validation(
             )
         log_phase("Reports Generated")
 
+    record_execution(ctx.metrics)
     log_phase("Validation Completed")
     log_phase(f"Execution Summary — {ctx.metrics.rows_processed} rows, "
               f"{ctx.metrics.total_execution_time:.2f}s, "

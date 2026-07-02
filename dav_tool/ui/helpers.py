@@ -1,3 +1,4 @@
+import datetime
 import os
 import glob
 import logging
@@ -7,6 +8,7 @@ from dav_tool._parsers import (
     parse_fixed_width_chunks, preview_flattened_multiline,
     preview_flattened_multiline_fixed,
 )
+from dav_tool._observability import ProcessingRecord, MAX_HISTORY
 from dav_tool.config import FALLBACK_ENCODING
 from dav_tool.io import safe_read_csv
 
@@ -111,3 +113,39 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
     except Exception as e:
         logger.warning("Could not determine column names: %s", e)
     return []
+
+
+def record_execution(metrics):
+    if "execution_history" not in st.session_state:
+        st.session_state.execution_history = []
+    history = st.session_state.execution_history
+    history.append(ProcessingRecord(
+        timestamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        files_processed=metrics.files_processed,
+        rows_processed=metrics.rows_processed,
+        execution_time=round(metrics.total_execution_time, 2),
+        peak_memory=round(metrics.peak_memory, 1),
+        peak_cpu=round(metrics.peak_cpu, 1),
+        warnings=len(metrics.warnings),
+        errors=len(metrics.errors),
+    ))
+    if len(history) > MAX_HISTORY:
+        st.session_state.execution_history = history[-MAX_HISTORY:]
+
+
+def display_processing_history():
+    if "execution_history" not in st.session_state:
+        return
+    history = st.session_state.execution_history
+    if not history:
+        return
+    with st.expander("Processing History (last 10 executions)", expanded=False):
+        for r in reversed(history):
+            st.markdown(
+                f"- **{r.timestamp}** — {r.files_processed} files, "
+                f"{r.rows_processed:,} rows, "
+                f"{r.execution_time}s, "
+                f"{r.peak_memory}MB peak, "
+                f"{r.peak_cpu}% CPU, "
+                f"{r.warnings}w, {r.errors}e"
+            )
