@@ -35,39 +35,21 @@ def test_compare_files_normalization():
 
 
 def test_store_validation_basic():
-    prod = pl.DataFrame({"store": ["A"], "units": [10], "price": [100]})
-    test = pl.DataFrame({"store": ["A"], "units": [10], "price": [100]})
-    result = storelevelvalidation_from_df(
-        prod, test,
-        "store", "units", "price",
-        "store", "units", "price",
-        "Total Price", "Total Price",
-        False, False, False, False
-    )
+    prod = pl.DataFrame({"STORE_NUMBER": ["A"], "Units": [10.0], "Totalprice": [100.0]})
+    test = pl.DataFrame({"STORE_NUMBER": ["A"], "Units": [10.0], "Totalprice": [100.0]})
+    result = storelevelvalidation_from_df(prod, test)
     assert not result.is_empty()
 
 
 def test_store_validation_units_mismatch():
-    prod = pl.DataFrame({"store": ["A"], "units": [10], "price": [100]})
-    test = pl.DataFrame({"store": ["A"], "units": [5], "price": [100]})
-    result = storelevelvalidation_from_df(
-        prod, test,
-        "store", "units", "price",
-        "store", "units", "price",
-        "Total Price", "Total Price",
-        False, False, False, False
-    )
+    prod = pl.DataFrame({"STORE_NUMBER": ["A"], "Units": [10.0], "Totalprice": [100.0]})
+    test = pl.DataFrame({"STORE_NUMBER": ["A"], "Units": [5.0], "Totalprice": [100.0]})
+    result = storelevelvalidation_from_df(prod, test)
     assert not result.is_empty()
 
 
 def test_store_validation_price_mismatch():
-    prod = pl.DataFrame({"store": ["A"], "units": [10], "price": [100]})
-    test = pl.DataFrame({"store": ["A"], "units": [10], "price": [200]})
-    result = storelevelvalidation_from_df(
-        prod, test,
-        "store", "units", "price",
-        "store", "units", "price",
-        "Total Price", "Total Price",
-        False, False, False, False
-    )
+    prod = pl.DataFrame({"STORE_NUMBER": ["A"], "Units": [10.0], "Totalprice": [100.0]})
+    test = pl.DataFrame({"STORE_NUMBER": ["A"], "Units": [10.0], "Totalprice": [200.0]})
+    result = storelevelvalidation_from_df(prod, test)
     assert not result.is_empty()

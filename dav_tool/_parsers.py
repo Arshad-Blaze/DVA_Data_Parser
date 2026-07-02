@@ -2,7 +2,7 @@ import os
 import polars as pl
 from typing import Iterator, List, Dict, Any, Optional, Union
 
-from dav_tool.config import DEFAULT_ENCODING, DEFAULT_CHUNK_SIZE
+from dav_tool.config import DEFAULT_ENCODING, FALLBACK_ENCODING, DEFAULT_CHUNK_SIZE, DEFAULT_PREVIEW_ROWS
 
 
 def safe_numeric(column: str) -> pl.Expr:
@@ -84,7 +84,7 @@ def scan_delimited(
     scans = []
     for f in file_paths:
         scan = pl.scan_csv(
-            f, separator=delimiter, encoding="utf8-lossy",
+            f, separator=delimiter, encoding=FALLBACK_ENCODING,
             infer_schema_length=0, low_memory=True,
         )
         scans.append(scan)
@@ -207,7 +207,7 @@ def preview_raw(
     file_type: str,
     delimiter: str = ",",
     layout: Optional[List[Dict]] = None,
-    n_rows: int = 20,
+    n_rows: int = DEFAULT_PREVIEW_ROWS,
     start_line: int = 0,
     record_type: Optional[str] = None,
 ) -> pl.DataFrame:
@@ -283,7 +283,7 @@ def preview_flattened_multiline(
     file_paths: Union[str, List[str]],
     record_types: List[str],
     delimiter: str = "|",
-    n_rows: int = 20,
+    n_rows: int = DEFAULT_PREVIEW_ROWS,
 ) -> pl.DataFrame:
     for chunk in flatten_multiline_chunks(
         file_paths, record_types, delimiter, chunk_size=n_rows
@@ -297,7 +297,7 @@ def preview_flattened_multiline_fixed(
     header_prefix: str,
     header_layout: List[Dict[str, Any]],
     detail_layout: List[Dict[str, Any]],
-    n_rows: int = 20,
+    n_rows: int = DEFAULT_PREVIEW_ROWS,
 ) -> pl.DataFrame:
     for chunk in flatten_multiline_fixed_width(
         file_paths, header_prefix, header_layout, detail_layout, chunk_size=n_rows

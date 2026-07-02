@@ -17,7 +17,11 @@
 │                Aggregation Layer                     │
 │  dav_tool/_aggregators.py                           │
 │  (stream_store_aggregate, stream_item_aggregate,    │
-│   stream_upc_summary, generate_file_review)         │
+│   stream_upc_summary)                               │
+├─────────────────────────────────────────────────────┤
+│                   Reports Layer                      │
+│  dav_tool/_reports.py                               │
+│  (generate_file_review)                             │
 ├─────────────────────────────────────────────────────┤
 │                   Parser Layer                       │
 │  dav_tool/_parsers.py                               │
@@ -26,9 +30,15 @@
 │   preview_flattened_multiline, load_layout,         │
 │   safe_numeric)                                     │
 ├─────────────────────────────────────────────────────┤
+│              Observability Layer                     │
+│  dav_tool/_observability.py                         │
+│  (ProcessingMetrics, ProcessingTimer)               │
+├─────────────────────────────────────────────────────┤
 │              Support Modules                         │
 │  dav_tool/detection.py    dav_tool/io.py            │
 │  dav_tool/config.py       dav_tool/types.py         │
+│  dav_tool/processing_context.py                     │
+│  dav_tool/_normalizer.py                            │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -38,6 +48,7 @@
 File(s) → Parser Layer (chunked generators)
          → Aggregation Layer (Polars group_by / streaming collect)
          → Validation Layer (join / diff / merge)
+         → Reports Layer (per-file summary)
          → UI Layer (Streamlit display)
 ```
 
@@ -70,7 +81,7 @@ Three streaming aggregate functions follow the same pattern:
 2. **Fixed-width path** — iterates `parse_fixed_width_chunks` → rename → numeric cast → group_by → accumulate via `_merge_accumulate*`
 3. **Multiline path** — iterates `flatten_multiline_chunks` (delimited) or `flatten_multiline_fixed_width` (HDR fixed-width) → optional column_names rename → same pipeline as fixed-width
 
-All aggregate functions (`stream_store_aggregate`, `stream_item_aggregate`, `stream_upc_summary`, `generate_file_review`) accept optional `header_prefix` and `header_layout` params. When provided for a multiline file, `_iter_chunks` dispatches to `flatten_multiline_fixed_width` instead of `flatten_multiline_chunks`.
+All aggregate functions (`stream_store_aggregate`, `stream_item_aggregate`, `stream_upc_summary`) accept optional `header_prefix` and `header_layout` params. When provided for a multiline file, `_iter_chunks` dispatches to `flatten_multiline_fixed_width` instead of `flatten_multiline_chunks`.
 
 | Function | Grouping | Output Columns |
 |---|---|---|
@@ -80,13 +91,19 @@ All aggregate functions (`stream_store_aggregate`, `stream_item_aggregate`, `str
 
 **Helper functions:**
 
-- `_apply_numeric_units_dollars()` — applies `safe_numeric`, implied decimal division, unit-price multiplication
+- (Normalization now handled by `dav_tool/_normalizer.py` — `store_normalize_exprs`, `normalize_store_chunk`, `item_normalize_exprs`, `normalize_item_chunk`, `upc_normalize_exprs`, `normalize_upc_chunk`)
 - `_merge_accumulate()` — concat + group_by re-accumulation across chunks
 - `_iter_chunks()` — dispatches to the correct chunk iterator based on file_type; when `header_prefix` + `header_layout` are provided for multiline, uses `flatten_multiline_fixed_width`
 
-### `generate_file_review()`
+---
 
-Iterates each file individually, calls `stream_store_aggregate` and `stream_upc_summary` once per file, and collects per-file stats into a DataFrame.
+## Reports Layer
+
+### `dav_tool/_reports.py`
+
+| Function | Description |
+|---|---|
+| `generate_file_review(...)` | Iterates each file individually, calls `stream_store_aggregate` and `stream_upc_summary` once per file, and collects per-file stats (store_count, upc_count, total_units, total_dollars) into a DataFrame. |
 
 ---
 
@@ -216,6 +233,93 @@ cat /tmp/dav_test_results/full_test_report.txt
 1. Add aggregation logic to `_aggregators.py` or reuse existing `stream_store_aggregate`
 2. Add validation/comparison function in `validation/`
 3. Wire into `ui/onboarding.py` or `ui/existing.py` with checkbox + results display
+
+---
+
+## Observability Layer
+
+### `dav_tool/_observability.py`
+
+| Component | Purpose |
+|---|---|
+| `ProcessingMetrics` | Dataclass with 19 fields: files/rows/chunks/stores/upcs processed, parse/aggregation/validation/report time, peak/current memory, peak/current CPU, warnings, errors |
+| `ProcessingTimer` | Context manager that logs STARTED/COMPLETED to terminal, times execution, tracks peak RSS via polling thread, updates `ProcessingMetrics` |
+| `setup_logging()` | Configures Python `logging` with `[DVA] [HH:MM:SS] [Phase] message` format to `stderr` |
+| `log_phase()` | Structured log line at phase transitions |
+
+### Integration
+
+`ProcessingMetrics` is exposed through `ProcessingContext` (and `ExistingContext`). The UI layer wraps each pipeline call:
+
+```python
+with ProcessingTimer(ctx.metrics, "aggregation", "stream_store_aggregate"):
+    store_agg = stream_store_aggregate(...)
+```
+
+Terminal output:
+```
+[DVA] [14:30:00] [Phase] stream_store_aggregate STARTED
+[DVA] [14:30:04] [Phase] stream_store_aggregate COMPLETED (4.23s, peak=142.1MB)
+```
+
+Phase group maps to the tracked time field:
+| Phase group | Metric field |
+|---|---|
+| `aggregation` | `aggregation_time` |
+| `validation` | `validation_time` |
+| `report` | `report_time` |
+| `parse` | `parse_time` |
+
+---
+
+## Benchmark Suite
+
+Located in `benchmarks/`.
+
+| Module | Purpose |
+|---|---|
+| `benchmarks/data_gen.py` | Generates CSV test data at target byte sizes (100 MB, 500 MB, etc.) |
+| `benchmarks/runner.py` | Times execution and tracks peak RSS via polling thread |
+| `benchmarks/report.py` | Formats `StageResult` into tables |
+
+### Running
+
+```bash
+python3 run_benchmarks.py          # Full suite (100 MB, 500 MB)
+python3 run_benchmarks.py --size 100  # Single size
+python3 run_benchmarks.py --quick     # Quick smoke test (50 MB)
+```
+
+### Measured stages
+
+- `stream_store_aggregate`
+- `stream_item_aggregate`
+- `generate_file_review`
+- `storelevelvalidation`
+
+### Metrics
+
+| Metric | Source |
+|---|---|
+| Elapsed time | `time.perf_counter()` |
+| Peak RSS | `psutil.Process().memory_info().rss` (10 ms polling) |
+| Rows/sec | Total rows / elapsed time |
+
+---
+
+### Configuration
+
+Centralized in `dav_tool/config.py`:
+
+| Variable | Default | Used By |
+|---|---|---|
+| `DEFAULT_ENCODING` | `"cp1252"` | `detection.py`, `io.py` |
+| `FALLBACK_ENCODING` | `"utf8-lossy"` | `_parsers.py`, `io.py`, `ui/helpers.py` |
+| `DEFAULT_CHUNK_SIZE` | `100_000` | `_parsers.py` |
+| `DEFAULT_PREVIEW_ROWS` | `20` | `_parsers.py` (preview functions) |
+| `DELIMITERS` | `[",", "\|", "\t", ";"]` | `detection.py` |
+| `MULTILINE_CHARS` | `",\|\t;"` | (reserved) |
+| `DEFAULT_LOG_LEVEL` | `"INFO"` | `_observability.py` |
 
 ### Polars version compatibility
 

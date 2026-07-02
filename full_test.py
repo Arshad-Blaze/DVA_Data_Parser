@@ -8,8 +8,8 @@ from dav_tool._aggregators import (
     stream_store_aggregate,
     stream_item_aggregate,
     stream_upc_summary,
-    generate_file_review,
 )
+from dav_tool._reports import generate_file_review
 from dav_tool._parsers import load_layout, flatten_multiline_fixed_width
 
 OUT = "/tmp/dav_test_results"

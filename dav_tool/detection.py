@@ -1,4 +1,8 @@
 import os
+import logging
+from dav_tool.config import DEFAULT_ENCODING
+
+logger = logging.getLogger(__name__)
 
 
 def detect_file_type(file_path):
@@ -6,7 +10,7 @@ def detect_file_type(file_path):
         ext = os.path.splitext(file_path)[1].lower()
         if ext in (".xlsx", ".xls"):
             return "excel", None
-        with open(file_path, "r", encoding="cp1252", errors="ignore") as f:
+        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
             lines = [f.readline() for _ in range(5)]
 
         delimiters = [",", "|", "\t", ";"]
@@ -16,14 +20,15 @@ def detect_file_type(file_path):
         if scores[best] > 0:
             return "delimited", best
         return "fixed", None
-    except Exception:
+    except Exception as e:
+        logger.warning("Could not detect file type for %s: %s", file_path, e)
         return None, None
 
 
 def is_multiline_record(file_path):
     """Detect delimited multiline (H|D|) or fixed-width HDR multiline."""
     try:
-        with open(file_path, "r", encoding="cp1252", errors="ignore") as f:
+        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
             lines = [f.readline().strip() for _ in range(10)]
 
         lines = [l for l in lines if l]
@@ -58,14 +63,15 @@ def is_multiline_record(file_path):
             return True
 
         return False
-    except Exception:
+    except Exception as e:
+        logger.warning("Could not detect multiline record for %s: %s", file_path, e)
         return False
 
 
 def detect_hdr_prefix(file_path, sample_lines=20):
     """Detect multi-character HDR prefix (e.g. HDR) in fixed-width multiline."""
     try:
-        with open(file_path, "r", encoding="cp1252", errors="ignore") as f:
+        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
             lines = [f.readline().strip() for _ in range(sample_lines)]
 
         prefixes = set()
@@ -79,13 +85,14 @@ def detect_hdr_prefix(file_path, sample_lines=20):
                     break
 
         return sorted(prefixes, key=len, reverse=True)
-    except Exception:
+    except Exception as e:
+        logger.warning("Could not detect HDR prefix for %s: %s", file_path, e)
         return []
 
 
 def detect_record_types(file_path, delimiter=None, sample_lines=50):
     try:
-        with open(file_path, "r", encoding="cp1252", errors="ignore") as f:
+        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
             lines = [f.readline().strip() for _ in range(sample_lines)]
 
         prefixes = set()
@@ -99,13 +106,14 @@ def detect_record_types(file_path, delimiter=None, sample_lines=50):
                     prefixes.add(first)
 
         return sorted(prefixes)
-    except Exception:
+    except Exception as e:
+        logger.warning("Could not detect record types for %s: %s", file_path, e)
         return []
 
 
 def has_header(file_path, delimiter=","):
     try:
-        with open(file_path, "r", encoding="cp1252", errors="ignore") as f:
+        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
             first_line = f.readline().strip()
 
         if not first_line:
@@ -114,5 +122,6 @@ def has_header(file_path, delimiter=","):
         values = first_line.split(delimiter)
         alpha_count = sum(any(c.isalpha() for c in v) for v in values)
         return alpha_count >= len(values) / 2
-    except Exception:
+    except Exception as e:
+        logger.warning("Could not detect header for %s: %s", file_path, e)
         return False

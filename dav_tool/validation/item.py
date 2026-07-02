@@ -1,6 +1,7 @@
 import time
 import polars as pl
 from dav_tool._aggregators import stream_item_aggregate
+from dav_tool.validation._utils import _pct_expr
 
 
 def run_item_validation(
@@ -14,36 +15,39 @@ def run_item_validation(
     start_line=0, record_type=None,
     multiline_record_types=None, multiline_delimiter="|",
     column_names=None, header_prefix=None, header_layout=None,
+    bau_summary=None, test_summary=None,
 ):
     start_time = time.time()
 
-    bau_summary = stream_item_aggregate(
-        bau_paths, bau_type,
-        upc_col, desc_col, units_col, dollars_col,
-        delimiter=bau_delim, layout=bau_layout,
-        implied_units=implied_units_bau,
-        implied_dollars=implied_dollars_bau,
-        start_line=start_line, record_type=record_type,
-        multiline_record_types=multiline_record_types,
-        multiline_delimiter=multiline_delimiter,
-        column_names=column_names,
-        header_prefix=header_prefix,
-        header_layout=header_layout,
-    )
+    if bau_summary is None:
+        bau_summary = stream_item_aggregate(
+            bau_paths, bau_type,
+            upc_col, desc_col, units_col, dollars_col,
+            delimiter=bau_delim, layout=bau_layout,
+            implied_units=implied_units_bau,
+            implied_dollars=implied_dollars_bau,
+            start_line=start_line, record_type=record_type,
+            multiline_record_types=multiline_record_types,
+            multiline_delimiter=multiline_delimiter,
+            column_names=column_names,
+            header_prefix=header_prefix,
+            header_layout=header_layout,
+        )
 
-    test_summary = stream_item_aggregate(
-        test_paths, test_type,
-        upc_col, desc_col, units_col, dollars_col,
-        delimiter=test_delim, layout=test_layout,
-        implied_units=implied_units_test,
-        implied_dollars=implied_dollars_test,
-        start_line=start_line, record_type=record_type,
-        multiline_record_types=multiline_record_types,
-        multiline_delimiter=multiline_delimiter,
-        column_names=column_names,
-        header_prefix=header_prefix,
-        header_layout=header_layout,
-    )
+    if test_summary is None:
+        test_summary = stream_item_aggregate(
+            test_paths, test_type,
+            upc_col, desc_col, units_col, dollars_col,
+            delimiter=test_delim, layout=test_layout,
+            implied_units=implied_units_test,
+            implied_dollars=implied_dollars_test,
+            start_line=start_line, record_type=record_type,
+            multiline_record_types=multiline_record_types,
+            multiline_delimiter=multiline_delimiter,
+            column_names=column_names,
+            header_prefix=header_prefix,
+            header_layout=header_layout,
+        )
 
     comparison = create_comparison(bau_summary, test_summary)
     summary = comparison.group_by("Present In").agg([
@@ -53,15 +57,6 @@ def run_item_validation(
 
     print(f"Time taken for item validation {time.time() - start_time}")
     return comparison, summary
-
-
-def _pct_expr(base, comp):
-    return (
-        pl.when((pl.col(base) == 0) & (pl.col(comp) == 0)).then(0.0)
-        .when(pl.col(base) == 0).then(-100.0)
-        .when(pl.col(comp) == 0).then(100.0)
-        .otherwise((pl.col(base) - pl.col(comp)) / pl.col(base) * 100)
-    )
 
 
 def create_comparison(bau_df, test_df):

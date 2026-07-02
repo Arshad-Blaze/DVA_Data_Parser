@@ -1,11 +1,15 @@
 import os
 import glob
+import logging
 import polars as pl
 from dav_tool._parsers import (
     parse_fixed_width_chunks, preview_flattened_multiline,
     preview_flattened_multiline_fixed,
 )
+from dav_tool.config import FALLBACK_ENCODING
 from dav_tool.io import safe_read_csv
+
+logger = logging.getLogger(__name__)
 
 
 def clean_path(path):
@@ -37,7 +41,7 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
         return []
     try:
         if file_type == "delimited":
-            df = pl.read_csv(paths[0], separator=delimiter, encoding="utf8-lossy", n_rows=5)
+            df = pl.read_csv(paths[0], separator=delimiter, encoding=FALLBACK_ENCODING, n_rows=5)
             return df.columns
         elif file_type == "fixed" and layout:
             chunks = list(parse_fixed_width_chunks(paths[:1], layout, start_line, record_type, chunk_size=5))
@@ -53,6 +57,6 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
                 flat = preview_flattened_multiline(paths, rt_list, delimiter, n_rows=5)
             if not flat.is_empty():
                 return flat.columns
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Could not determine column names: %s", e)
     return []
