@@ -192,7 +192,7 @@ def _phase1_column_mapping(ctx):
         test_price_col = st.selectbox("Price (Test)", test_cols, key="price_test")
         test_upc_col = st.selectbox("UPC (Test)", test_cols, key="upc_test")
         test_desc_col = st.selectbox("Description (Test)", test_cols, key="desc_test")
-        price_type_test = st.radio("Price Type (Test)", ["Total Price", "Unit Price"], key="price_test")
+        price_type_test = st.radio("Price Type (Test)", ["Total Price", "Unit Price"], key="price_type_test")
         st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
         isimplied_dollars_test = st.checkbox("Implied dollars (Test)", key="imp_dol_test")
         isimplied_units_test = st.checkbox("Implied units (Test)", key="imp_unt_test")

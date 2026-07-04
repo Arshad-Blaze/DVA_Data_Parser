@@ -1,160 +1,240 @@
-# Runtime Regression Investigation
+# Runtime Stabilization Sprint 1
 
-STOP ALL DEVELOPMENT.
+Read the entire repository before making any modifications.
 
-Do NOT implement new features.
+The architecture is COMPLETE.
 
-Do NOT refactor.
+Do NOT redesign the application.
 
-Do NOT optimize.
+Do NOT refactor modules.
 
-Do NOT clean up code.
+Do NOT add new features.
 
-The architecture is considered complete.
+Do NOT optimize code unless it directly fixes a runtime issue.
 
-The application currently does not function correctly.
+Your objective is ONLY to restore application stability.
 
-Your ONLY objective is to determine why the runtime behaviour has regressed.
+---
 
-==========================================================
-REAL OBSERVATIONS
-==========================================================
+## Current Status
 
-These observations come from actual execution.
+The application runs but has runtime regressions.
 
-Observation 1
+The same runtime issues occur on:
 
-Onboarding
+- Linux Mint
+- Windows 11
+- 16 GB RAM machine
 
-User selects file.
+Therefore this is NOT a hardware or operating system issue.
 
-↓
+Treat this as an application runtime debugging task.
 
-Detection executes.
+---
 
-↓
+## Known Runtime Issues
 
-Preview is generated.
+1.
 
-↓
+Duplicate Streamlit widget keys.
 
-Nothing appears in the UI afterwards.
+Example:
 
-↓
+StreamlitDuplicateElementKey
 
-Terminal becomes idle.
+key="price_test"
 
-↓
+2.
 
-After approximately 5 seconds
+Onboarding sometimes stops after Preview.
 
-↓
+The UI never advances.
 
-The entire machine freezes or reboots.
+3.
 
-----------------------------------------------------------
+Heavy parsing appears to happen repeatedly.
 
-Observation 2
+4.
 
-The terminal shows
+Preview appears to regenerate multiple times.
 
-File received
+5.
 
-File type detection
+Existing workflow throws errors after column mapping.
 
-Detection
+6.
 
-Preview generation
+Application eventually crashes during execution.
 
-executing THREE TIMES.
+---
 
-This should only happen ONCE.
-
-----------------------------------------------------------
-
-Observation 3
-
-After the third execution
-
-nothing more happens.
-
-No exception.
-
-No traceback.
-
-No Streamlit error.
-
-The terminal simply stops.
-
-A few seconds later
-
-the system crashes.
-
-----------------------------------------------------------
-
-Observation 4
-
-Existing workflow
-
-Immediately after column mapping
-
-an error appears.
-
-Even after correctly mapping every column
-
-the error remains.
-
-==========================================================
-YOUR TASK
-==========================================================
+# IMPORTANT
 
 Do NOT guess.
 
-Trace the actual execution path.
+Trace the runtime.
 
-I want to know WHY detection executes three times.
+Understand why each issue happens before modifying code.
 
-==========================================================
-PART 1
+Every fix must be minimal.
 
-STREAMLIT RERUN ANALYSIS
+Every fix must preserve the existing architecture.
 
-==========================================================
+---
 
-Find
+# Runtime Stabilization Order
 
-Every location that causes
+## TASK 1
 
-- st.rerun()
+Duplicate Widget Keys
 
-- implicit reruns
+Review every Streamlit widget.
 
-- callback reruns
+Check
 
-- widget reruns
+- radio
+- selectbox
+- checkbox
+- button
+- text_input
+- text_area
+- multiselect
+- file_uploader
+- number_input
 
-- session_state updates
+Requirements
 
-For every rerun explain
+Find duplicate keys.
 
-What triggered it.
+Rename only duplicated keys.
 
-Why it occurred.
+Do not rename unrelated keys.
 
-Which functions execute again.
+Run Streamlit.
 
-==========================================================
-PART 2
+Verify
 
-EXECUTION TRACE
+No duplicate key errors remain.
 
-==========================================================
+STOP.
 
-Trace the onboarding workflow.
+Wait for my testing.
 
-Application Start
+---
+
+## TASK 2
+
+Detection Execution
+
+Trace
+
+detect_file_type()
+
+Expected
+
+Detection executes exactly ONE time per upload.
+
+If detection executes multiple times
+
+identify
+
+- caller
+- reason
+- rerun trigger
+
+Fix only the rerun issue.
+
+Run Streamlit.
+
+Verify.
+
+STOP.
+
+Wait for my testing.
+
+---
+
+## TASK 3
+
+Preview Generation
+
+Trace
+
+preview_raw()
+
+Expected
+
+Preview generated exactly ONCE.
+
+Preview cached.
+
+Every rerun must reuse cached preview.
+
+Never reread the uploaded file.
+
+Never regenerate preview unless user uploads another file.
+
+Run Streamlit.
+
+Verify.
+
+STOP.
+
+Wait for my testing.
+
+---
+
+## TASK 4
+
+Parser Execution
+
+Parser must execute exactly once.
+
+Current flow should be
+
+Upload
 
 ↓
+
+Detection
+
+↓
+
+Schema
+
+↓
+
+Parse
+
+↓
+
+Canonical Data
+
+↓
+
+Aggregation
+
+↓
+
+Validation
+
+Parser must never rerun during Streamlit reruns.
+
+Verify.
+
+STOP.
+
+Wait for testing.
+
+---
+
+## TASK 5
+
+Onboarding State Machine
+
+Review every onboarding phase.
+
+Expected
 
 Upload
 
@@ -168,7 +248,7 @@ Preview
 
 ↓
 
-Mapping
+Column Mapping
 
 ↓
 
@@ -184,255 +264,200 @@ Validation
 
 ↓
 
-Reports
+Results
 
-For every phase report
+Find where state progression stops.
 
-Current function
+Fix only that transition.
 
-Current ProcessingContext
+Run Streamlit.
 
-Current session_state
+Verify.
 
-Current callback
+STOP.
 
-Current button
+---
 
-Current rerun
+## TASK 6
 
-==========================================================
-PART 3
+Existing Workflow
 
-PROCESSING CONTEXT
+Verify
 
-==========================================================
+Production
 
-Review the lifecycle.
+↓
 
-Determine
+Test
 
-How many ProcessingContext objects are created.
-
-When they are recreated.
-
-When they are discarded.
-
-Whether they survive reruns.
-
-Whether they are accidentally replaced.
-
-==========================================================
-PART 4
-
-SESSION STATE
-
-==========================================================
-
-Audit every session_state write.
-
-Identify
-
-State recreated
-
-State overwritten
-
-State deleted
-
-State copied
-
-Large DataFrames stored
-
-Large DataFrames duplicated
-
-Expensive objects recreated
-
-==========================================================
-PART 5
-
-PERFORMANCE TRACE
-
-==========================================================
-
-Find every expensive operation.
-
-Examples
+↓
 
 Detection
 
-Preview
-
-Parser
-
-Normalizer
-
-Aggregation
-
-Validation
-
-Reports
-
-Metrics
-
-Logging
-
-Determine
-
-How many times each executes
-
-during ONE upload.
-
-Expected
-
-Detection
-
-1
+↓
 
 Preview
 
-1
+↓
 
-Parser
+Column Mapping
 
-1
+↓
 
-Aggregation
+Processing
 
-1
+↓
 
 Validation
 
-1
+↓
 
-Report
+Results
 
-1
+No validation should start before processing completes.
 
-If any executes multiple times
+No stale mappings.
 
-identify why.
+No duplicate widgets.
 
-==========================================================
-PART 6
+Run Streamlit.
 
-MEMORY TRACE
+Verify.
 
-==========================================================
+STOP.
 
-Find
+---
 
-Large DataFrames
+## TASK 7
 
-LazyFrame collections
+Memory Review
 
-collect()
+Do NOT optimize.
 
-write_csv()
+Only inspect.
 
-concat()
+Identify whether
 
-group_by()
+ProcessingContext
 
-join()
+session_state
 
-session_state storage
+or any cache
 
-ProcessingContext storage
+stores
 
-Determine
+- raw DataFrames
+- preview DataFrames
+- duplicated DataFrames
 
-Whether memory continually increases
+If yes
 
-between reruns.
+report
 
-==========================================================
-PART 7
+- object
+- estimated size
+- reason
 
-DEBUG INSTRUMENTATION
+Do NOT change it yet.
 
-==========================================================
+Wait for approval.
 
-Temporarily instrument the application.
+---
 
-Every rerun should print
+## Runtime Instrumentation
 
-==================================================
-STREAMLIT RERUN
-==================================================
-
-Timestamp
+Temporarily print
 
 Current Phase
 
-Current ProcessingContext id()
-
-Current Session id
-
-Current File
-
-Current Callback
-
-Current Button
-
-Current Memory
-
-Peak Memory
-
---------------------------------------------------
-
-Every expensive function should print
-
-ENTER
-
-EXIT
+Current Function
 
 Elapsed Time
 
-Rows
+Memory Usage
 
-Memory
+Current Session State Keys
 
-==========================================================
-PART 8
+Current ProcessingContext Phase
 
-ROOT CAUSE
+Expected Output
 
-==========================================================
+------------------------------------------------
 
-After tracing everything
+Upload Started
 
-identify
+------------------------------------------------
 
-Why detection runs three times.
+Detection Started
 
-Why onboarding never advances.
+Detection Finished
 
-Why Existing errors immediately.
+------------------------------------------------
 
-Why the machine eventually crashes.
+Preview Started
 
-==========================================================
-IMPLEMENTATION
+Preview Finished
 
-==========================================================
+------------------------------------------------
 
-DO NOT FIX YET.
+Parser Started
 
-First provide
+Parser Finished
 
-Root Cause
+------------------------------------------------
 
-Evidence
+Aggregation Started
 
-Affected Files
+Aggregation Finished
 
-Smallest Possible Fix
+------------------------------------------------
 
-Risk
+Validation Started
 
-Only after identifying the exact regression
+Validation Finished
 
-should code be modified.
+------------------------------------------------
 
-Do not implement speculative fixes.
+Workflow Completed
 
-Think like a debugging engineer, not a feature developer.
+------------------------------------------------
+
+---
+
+## Rules
+
+Never modify more than ONE runtime issue at a time.
+
+After every fix
+
+Run tests.
+
+Launch Streamlit.
+
+Verify functionality.
+
+Then STOP.
+
+Wait for my confirmation before proceeding.
+
+---
+
+## Deliverables after each task
+
+Provide
+
+1. Root Cause
+
+2. Files Modified
+
+3. Functions Modified
+
+4. Why the issue occurred
+
+5. Why the fix is correct
+
+6. Tests executed
+
+7. Remaining runtime issues
+
+Then STOP.
