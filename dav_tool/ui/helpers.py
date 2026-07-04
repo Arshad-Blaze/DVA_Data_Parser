@@ -94,7 +94,7 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
         return []
     try:
         if file_type == "delimited":
-            df = pl.read_csv(paths[0], separator=delimiter, encoding=FALLBACK_ENCODING, n_rows=5)
+            df = safe_read_csv(paths[0], separator=delimiter, n_rows=5)
             return df.columns
         elif file_type == "fixed" and layout:
             chunks = list(parse_fixed_width_chunks(paths[:1], layout, start_line, record_type, chunk_size=5))

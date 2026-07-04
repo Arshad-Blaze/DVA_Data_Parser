@@ -476,13 +476,15 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
             return True
         else:
             ftype, delim = detect_file_type(file_paths[0])
-            if ftype == "delimited":
+            if ftype is None:
+                st.error(f"Could not detect file type for {side_label}")
+            elif ftype == "delimited":
                 st.success(f"Delimited ({delim})")
                 side_ctx.file_type = "delimited"
                 side_ctx.delimiter = delim
                 log_phase(f"Detection Completed — {side_label}: delimited")
                 return True
-            else:
+            elif ftype == "fixed":
                 st.warning("Fixed-width file")
                 side_ctx.file_type = "fixed"
                 layout_file = st.text_input(f"{side_label} Layout CSV", key=f"{key_prefix}_layout")
@@ -495,6 +497,14 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
                         return True
                     else:
                         st.error(f"Layout file not found: {layout_file}")
+            elif ftype == "excel":
+                st.success(f"Excel file detected ({side_label})")
+                side_ctx.file_type = "delimited"
+                side_ctx.delimiter = ","
+                log_phase(f"Detection Completed — {side_label}: excel")
+                return True
+            else:
+                st.error(f"Unrecognized file type '{ftype}' for {side_label}")
     except Exception as e:
         st.error(f"Detection failed for {side_label}: {str(e)}")
 

@@ -16,7 +16,7 @@ def safe_numeric(column: str) -> pl.Expr:
 
 
 def load_layout(layout_file: str) -> List[Dict[str, Any]]:
-    layout_df = pl.read_csv(layout_file)
+    layout_df = pl.read_csv(layout_file, encoding=FALLBACK_ENCODING)
     cols = [c.strip().lower() for c in layout_df.columns]
     layout_df.columns = cols
 
