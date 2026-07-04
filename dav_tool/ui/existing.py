@@ -53,21 +53,93 @@ def _phase0_detection_and_preview(ctx):
 
     col1, col2 = st.columns(2)
 
+    prod_file_paths = []
+    test_file_paths = []
+
     with col1:
         st.header("BAU")
         prod_txt = clean_path(st.text_input("BAU Folder Path", key="ex_bau_folder_path"))
+
+        # Clear failure flag when path changes
+        prev_path = st.session_state.get("ex_bau_prev_path")
+        if prod_txt != prev_path:
+            st.session_state.pop("ex_bau_detection_failed", None)
+            ctx.prod.file_type = None
+            ctx.prod.delimiter = None
+            ctx.prod.layout = None
+            st.session_state["ex_bau_prev_path"] = prod_txt
+
         prod_file_paths = get_file_list(prod_txt)
-        if prod_txt and prod_file_paths:
+        if prod_txt and not prod_file_paths:
+            st.error(f"No files found at path: {prod_txt}")
+        elif prod_txt and prod_file_paths and not ctx.prod.file_type and not st.session_state.get("ex_bau_detection_failed"):
             log_phase(f"BAU Folder Selected — {prod_txt} ({len(prod_file_paths)} files)")
-            _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod")
+            if not _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod"):
+                st.error(f"Automatic detection failed for BAU files at: {prod_txt}")
+                st.session_state["ex_bau_detection_failed"] = True
+            else:
+                st.session_state.pop("ex_bau_detection_failed", None)
+        elif prod_txt and prod_file_paths and ctx.prod.file_type:
+            if ctx.prod.file_type == "fixed" and not ctx.prod.layout:
+                _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod")
+            st.session_state.pop("ex_bau_detection_failed", None)
 
     with col2:
         st.header("Test")
         test_txt = clean_path(st.text_input("Test Folder Path", key="ex_test_folder_path"))
+
+        # Clear failure flag when path changes
+        prev_path = st.session_state.get("ex_test_prev_path")
+        if test_txt != prev_path:
+            st.session_state.pop("ex_test_detection_failed", None)
+            ctx.test.file_type = None
+            ctx.test.delimiter = None
+            ctx.test.layout = None
+            st.session_state["ex_test_prev_path"] = test_txt
+
         test_file_paths = get_file_list(test_txt)
-        if test_txt and test_file_paths:
+        if test_txt and not test_file_paths:
+            st.error(f"No files found at path: {test_txt}")
+        elif test_txt and test_file_paths and not ctx.test.file_type and not st.session_state.get("ex_test_detection_failed"):
             log_phase(f"Test Folder Selected — {test_txt} ({len(test_file_paths)} files)")
-            _detect_and_set(test_file_paths, ctx.test, "Test", "test")
+            if not _detect_and_set(test_file_paths, ctx.test, "Test", "test"):
+                st.error(f"Automatic detection failed for Test files at: {test_txt}")
+                st.session_state["ex_test_detection_failed"] = True
+            else:
+                st.session_state.pop("ex_test_detection_failed", None)
+        elif test_txt and test_file_paths and ctx.test.file_type:
+            if ctx.test.file_type == "fixed" and not ctx.test.layout:
+                _detect_and_set(test_file_paths, ctx.test, "Test", "test")
+            st.session_state.pop("ex_test_detection_failed", None)
+
+    # Retry/manual buttons when detection failed
+    if prod_txt and prod_file_paths and not ctx.prod.file_type:
+        st.warning("BAU file type could not be automatically detected.")
+        cr1, cr2 = st.columns(2)
+        with cr1:
+            if st.button("Retry BAU Detection", key="ex_bau_retry", use_container_width=True):
+                st.session_state.pop("ex_bau_detection_failed", None)
+                if _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod"):
+                    st.rerun()
+        with cr2:
+            if st.button("Start BAU Detection Manually", key="ex_bau_manual", use_container_width=True):
+                st.session_state.pop("ex_bau_detection_failed", None)
+                if _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod"):
+                    st.rerun()
+
+    if test_txt and test_file_paths and not ctx.test.file_type:
+        st.warning("Test file type could not be automatically detected.")
+        cr1, cr2 = st.columns(2)
+        with cr1:
+            if st.button("Retry Test Detection", key="ex_test_retry", use_container_width=True):
+                st.session_state.pop("ex_test_detection_failed", None)
+                if _detect_and_set(test_file_paths, ctx.test, "Test", "test"):
+                    st.rerun()
+        with cr2:
+            if st.button("Start Test Detection Manually", key="ex_test_manual", use_container_width=True):
+                st.session_state.pop("ex_test_detection_failed", None)
+                if _detect_and_set(test_file_paths, ctx.test, "Test", "test"):
+                    st.rerun()
 
     if ctx.prod.file_type == "fixed" or ctx.test.file_type == "fixed":
         st.subheader("Fixed Width Settings")
@@ -393,30 +465,40 @@ def _phase2_validation(ctx):
 
 def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = ""):
     log_phase(f"Detection Started — {side_label}")
-    if is_multiline_record(file_paths[0]):
-        st.warning(f"Multi-line structured file detected ({side_label})")
-        side_ctx.file_type = "multiline"
-        hdr_prefixes = detect_hdr_prefix(file_paths[0])
-        if hdr_prefixes:
-            side_ctx.header_prefix = hdr_prefixes[0]
+
+    try:
+        if is_multiline_record(file_paths[0]):
+            st.warning(f"Multi-line structured file detected ({side_label})")
+            side_ctx.file_type = "multiline"
+            hdr_prefixes = detect_hdr_prefix(file_paths[0])
+            side_ctx.header_prefix = hdr_prefixes[0] if hdr_prefixes else None
+            log_phase(f"Detection Completed — {side_label}: multiline")
+            return True
         else:
-            side_ctx.header_prefix = None
-    else:
-        ftype, delim = detect_file_type(file_paths[0])
-        if ftype == "delimited":
-            st.success(f"Delimited ({delim})")
-            side_ctx.file_type = "delimited"
-            side_ctx.delimiter = delim
-        else:
-            st.warning("Fixed-width file")
-            side_ctx.file_type = "fixed"
-            layout_file = st.text_input(f"{side_label} Layout CSV", key=f"{key_prefix}_layout")
-            if layout_file:
-                layout_file = clean_path(layout_file)
-                if os.path.exists(layout_file):
-                    side_ctx.layout = load_layout(layout_file)
-                    st.success("Layout loaded")
-    log_phase(f"Detection Completed — {side_label}: {side_ctx.file_type}")
+            ftype, delim = detect_file_type(file_paths[0])
+            if ftype == "delimited":
+                st.success(f"Delimited ({delim})")
+                side_ctx.file_type = "delimited"
+                side_ctx.delimiter = delim
+                log_phase(f"Detection Completed — {side_label}: delimited")
+                return True
+            else:
+                st.warning("Fixed-width file")
+                side_ctx.file_type = "fixed"
+                layout_file = st.text_input(f"{side_label} Layout CSV", key=f"{key_prefix}_layout")
+                if layout_file:
+                    layout_file = clean_path(layout_file)
+                    if os.path.exists(layout_file):
+                        side_ctx.layout = load_layout(layout_file)
+                        st.success("Layout loaded")
+                        log_phase(f"Detection Completed — {side_label}: fixed-width with layout")
+                        return True
+                    else:
+                        st.error(f"Layout file not found: {layout_file}")
+    except Exception as e:
+        st.error(f"Detection failed for {side_label}: {str(e)}")
+
+    return False
 
 
 def _multiline_section(prod_paths, test_paths):
