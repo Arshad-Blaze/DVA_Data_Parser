@@ -1,529 +1,413 @@
-# Runtime Stabilization Sprint
+# DVA Parser Roadmap - Phase 2 Onwards
 
-Read and understand the entire repository before making any modifications.
+Read and understand the current repository before making any modifications.
 
-The parser architecture, canonical data layer, validation engine, aggregation layer and reporting flow are COMPLETE.
+The current application is considered Version 1.0.
+
+Current state:
+
+- Parser architecture complete
+- Canonical Data Layer complete
+- Validation Engine complete
+- Aggregation Engine complete
+- Runtime Stabilization complete
+- Playwright Regression Suite complete
+- Engineering Review complete
+
+The objective from this point forward is to EXTEND parser capability without changing the existing architecture.
+
+------------------------------------------------------------
+
+# IMPORTANT RULES
 
 Do NOT redesign the architecture.
 
-Do NOT refactor modules unless absolutely necessary.
+Do NOT rewrite the parser.
 
-Do NOT optimize code that is already working.
+Do NOT modify validation logic.
 
-This sprint is ONLY for runtime stabilization, UX improvements and regression elimination.
+Do NOT modify aggregation logic.
 
-All Playwright tests must continue to pass after every change.
+Do NOT modify reporting.
 
-------------------------------------------------------------
+Do NOT modify canonical dataframe structure.
 
-## Current Status
+Do NOT refactor unrelated modules.
 
-The application is functionally complete.
+Every feature must integrate into the existing pipeline.
 
-Playwright E2E framework is integrated.
+All Playwright tests must continue to pass.
 
-Regression suite is available.
-
-Architecture review is complete.
-
-The objective is to eliminate runtime issues before implementing multiline record support.
+Every feature must preserve backward compatibility.
 
 ------------------------------------------------------------
 
-## General Rules
+# Development Strategy
 
-1.
+Every new feature must be developed in isolation.
 
-Do NOT introduce architectural changes.
+Treat the existing implementation as the production baseline.
 
-2.
-
-Do NOT rewrite parser logic.
-
-3.
-
-Do NOT change validation calculations.
-
-4.
-
-Do NOT change report generation.
-
-5.
-
-Do NOT change canonical DataFrame structure.
-
-6.
-
-Fix only confirmed runtime issues.
-
-7.
-
-Every change must preserve existing functionality.
-
-8.
-
-After every fix
-
-Run
-
-pytest
-
-Playwright
-
-Verify no regression
-
-Stop
-
-------------------------------------------------------------
-
-# TASK 1
-
-Smart Column Auto Mapping
-
-Current issue
-
-Every mapping dropdown defaults to the first column.
-
-Users can accidentally map
-
-Store -> Store
-
-Units -> Store
-
-Price -> Store
-
-etc.
-
-causing DuplicateError.
-
-Implement intelligent default mapping.
-
-Match columns using
-
-case-insensitive
-
-substring matching
-
-synonyms where applicable
-
-Examples
-
-Store
-
-Store Number
-
-Store_ID
-
-STORE
-
-↓
-
-Store
-
-UPC
-
-UPC_CODE
-
-Item UPC
-
-↓
-
-UPC
-
-Description
-
-Item Description
-
-DESC
-
-↓
-
-Description
-
-Units
-
-Qty
-
-Quantity
-
-↓
-
-Units
-
-Price
-
-Total Price
-
-Sales
-
-Amount
-
-↓
-
-Price
-
-If no confident match exists
-
-leave the dropdown unselected.
-
-------------------------------------------------------------
-
-# TASK 2
-
-Column Mapping Validation
-
-Before allowing
-
-Confirm Mapping
-
-validate
-
-Required fields selected
-
-No duplicate column selection
-
-All required mappings exist
-
-If validation fails
-
-show friendly Streamlit error.
-
-Never expose Polars exceptions.
-
-Disable Confirm Mapping until validation succeeds.
-
-------------------------------------------------------------
-
-# TASK 3
-
-Friendly Runtime Errors
-
-Replace technical exceptions with user friendly messages.
-
-Examples
-
-Missing Store List
-
-Duplicate Mapping
-
-Missing Required Column
-
-Aggregation Failure
-
-Invalid Layout
-
-Invalid Delimiter
-
-Missing Header
-
-Unknown File Type
-
-Unexpected Parsing Failure
-
-Every error should explain
-
-What happened
-
-Why
-
-How to fix it
-
-------------------------------------------------------------
-
-# TASK 4
-
-Processing Feedback
-
-Every long running phase must display progress.
-
-Detection
-
-Preview
-
-Parsing
-
-Canonical Conversion
-
-Aggregation
-
-Validation
-
-Report Generation
-
-Use
-
-st.spinner()
-
-or
-
-st.status()
-
-or
-
-st.progress()
-
-Display current phase.
-
-Example
-
-Reading File...
-
-Parsing Records...
-
-Generating Canonical Dataset...
-
-Aggregating Store Data...
-
-Running Validation...
-
-Generating Reports...
-
-Completed
-
-------------------------------------------------------------
-
-# TASK 5
-
-Execution Timing
-
-Capture timings for
-
-Detection
-
-Preview
-
-Column Mapping Load
-
-Parsing
-
-Canonical Conversion
-
-Aggregation
-
-Validation
-
-Reports
-
-Display timings
-
-inside a collapsed
-
-Processing Metrics
-
-expander.
-
-Do not clutter the main UI.
-
-------------------------------------------------------------
-
-# TASK 6
-
-Runtime Diagnostics
-
-Create expandable sections
-
-Detection Details
-
-Parser Details
-
-Schema Details
-
-Validation Details
-
-Processing Metrics
-
-Runtime Logs
-
-Default
-
-Collapsed
-
-Only populate expensive diagnostics when the user expands them.
-
-Do not render unnecessary large tables automatically.
-
-------------------------------------------------------------
-
-# TASK 7
-
-Workflow State Review
-
-Review both
-
-Onboarding
-
-Existing
-
-Verify
-
-Every phase transition
-
-Every session_state variable
-
-ProcessingContext
-
-Navigation
-
-Reset
-
-History
-
-No stale state
-
-No duplicated state
-
-No unnecessary reruns.
-
-------------------------------------------------------------
-
-# TASK 8
-
-Performance Review
+Every implementation must:
 
 Review
 
-Detection
+↓
 
-Preview
+Implement
 
-Column Mapping
+↓
 
-Processing
+Unit Test
 
-Validation
+↓
 
-Find
+Playwright Test
 
-Repeated parsing
+↓
 
-Repeated preview generation
+Regression Test
 
-Repeated aggregation
+↓
 
-Repeated detection
+Manual Verification
 
-Repeated folder scanning
+↓
 
-Repeated file reading
-
-If repeated work exists
-
-remove it
-
-without changing architecture.
+Commit
 
 ------------------------------------------------------------
 
-# TASK 9
+# Phase 2
 
-Playwright Expansion
+Multiline Record Support
 
-Extend Playwright suite.
+This is the highest priority feature.
 
-Verify
+Objective
 
-Detection
+Support files where a logical record spans multiple physical lines.
 
-Preview
+Current parser
 
-Column Mapping
+Physical Line
+
+↓
+
+Canonical Row
+
+New parser
+
+Multiple Physical Lines
+
+↓
+
+Logical Record
+
+↓
+
+Canonical Row
+
+Requirements
+
+1.
+
+Detect multiline record format.
+
+2.
+
+Group physical lines into logical records.
+
+3.
+
+Flatten logical records.
+
+4.
+
+Generate exactly the same canonical dataframe as single-line parsing.
+
+5.
+
+Do NOT change downstream processing.
 
 Validation
+
+Aggregation
 
 Reports
 
-Timing metrics
+must remain unchanged.
 
-Friendly errors
-
-Processing spinner
-
-Column auto mapping
-
-Regression cases
-
-Capture screenshots after every phase.
-
-Generate HTML report.
+The multiline parser must simply produce canonical rows.
 
 ------------------------------------------------------------
 
-# TASK 10
+# Phase 3
 
-Final Engineering Review
+Header Based Record Support
 
-Produce
+Support files such as
 
-Engineering Review.md
+HDR
 
-Include
+DTL
 
-Architecture score
+DTL
 
-Maintainability
+DTL
 
-Performance
+TRL
 
-Memory usage
+Convert them into one logical transaction.
 
-UI responsiveness
+Reuse the canonical data pipeline.
 
-Parser quality
-
-Validation quality
-
-Test coverage
-
-Technical debt
-
-Immediate improvements
-
-Future roadmap
-
-Multiline readiness
+Do not duplicate parsing logic.
 
 ------------------------------------------------------------
 
-# Deliverables
+# Phase 4
 
-Updated application
+Configuration Driven Parsing
 
-Passing pytest suite
+The parser must become configuration driven.
 
-Passing Playwright suite
+Instead of retailer specific logic,
 
-Runtime issues resolved
+load parsing behavior from configuration.
 
-Engineering review
+Example
 
-Updated HTML report
+record_type
 
-Regression report
+delimiter
 
-Execution summary
+header
+
+continuation_record
+
+layout_file
+
+record_start
+
+record_end
+
+field_mapping
+
+This should allow new retailers to be onboarded without changing code.
+
+------------------------------------------------------------
+
+# Phase 5
+
+Golden Dataset Framework
+
+Create a regression dataset.
+
+Structure
+
+tests/
+
+golden/
+
+expected/
+
+For every supported format
+
+store
+
+Input File
+
+Expected Canonical Output
+
+Every parser change must compare
+
+Generated Canonical Output
+
+against
+
+Expected Canonical Output
+
+No parser regression should be allowed.
+
+------------------------------------------------------------
+
+# Phase 6
+
+Performance Improvements
+
+Only after parser functionality is complete.
+
+Review
+
+Memory
+
+CPU
+
+Repeated Parsing
+
+Repeated Preview
+
+Repeated Aggregation
+
+Large File Processing
+
+Folder Processing
+
+Batch Size
+
+Parallel Processing
+
+Polars Optimisation
+
+No premature optimisation before parser completion.
+
+------------------------------------------------------------
+
+# Phase 7
+
+Enterprise Readiness
+
+Improve
+
+Installer
+
+Logging
+
+Configuration Repository
+
+Application Versioning
+
+Error Reporting
+
+Documentation
+
+Packaging
+
+Deployment
+
+------------------------------------------------------------
+
+# Testing Requirements
+
+Every phase must include
+
+Unit Tests
+
+Playwright Tests
+
+Regression Tests
+
+Golden Dataset Validation
+
+Performance Metrics
+
+Screenshots
+
+HTML Report
+
+No feature is complete until all tests pass.
+
+------------------------------------------------------------
+
+# Development Rules
+
+Never implement multiple parser features together.
+
+Complete one feature.
+
+Test completely.
+
+Merge.
+
+Then start the next feature.
+
+------------------------------------------------------------
+
+# Expected Workflow
+
+Review
+
+↓
+
+Design
+
+↓
+
+Implement
+
+↓
+
+Unit Test
+
+↓
+
+Playwright
+
+↓
+
+Regression
+
+↓
+
+Golden Dataset Validation
+
+↓
+
+Manual Test
+
+↓
+
+Performance Review
+
+↓
+
+Commit
+
+------------------------------------------------------------
+
+# Deliverables for Every Feature
+
+Architecture Impact
+
+Files Modified
+
+Functions Modified
+
+Unit Tests
+
+Playwright Tests
+
+Regression Tests
+
+Golden Dataset Results
+
+Performance Results
+
+Known Limitations
+
+Future Improvements
 
 ------------------------------------------------------------
 
 # DO NOT
 
-Do not redesign architecture.
+Do not redesign the application.
 
-Do not implement multiline yet.
-
-Do not refactor parser.
-
-Do not change validation calculations.
-
-Do not optimize unrelated code.
+Do not modify working modules.
 
 Do not introduce breaking changes.
+
+Do not bypass Playwright.
+
+Do not bypass regression tests.
+
+Do not skip manual verification.
 
 ------------------------------------------------------------
 
 # Success Criteria
 
-The application should feel production-ready.
+The application must evolve by extending parser capability while preserving the stability of Version 1.0.
 
-Users should be able to complete both Onboarding and Existing workflows without crashes, confusion or unnecessary waiting.
-
-Only after this sprint is complete should multiline record handling begin.
+Every new parser feature should seamlessly integrate into the existing canonical pipeline without affecting validation, aggregation, reporting, or existing user workflows.
