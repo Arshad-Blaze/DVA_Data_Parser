@@ -1,6 +1,9 @@
+import logging
 import os
 import streamlit as st
 import polars as pl
+
+logger = logging.getLogger(__name__)
 from dav_tool._parsers import (
     preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
     load_layout,
@@ -10,7 +13,11 @@ from dav_tool._reports import generate_file_review
 from dav_tool._observability import ProcessingTimer, log_phase, setup_logging
 from dav_tool.validation.store import compare_files
 from dav_tool.detection import is_multiline_record, detect_file_type, detect_record_types, detect_hdr_prefix
-from dav_tool.ui.helpers import clean_path, get_file_list, load_storelist, get_column_names, display_execution_summary, display_dev_diagnostics, record_execution, display_processing_history
+from dav_tool.ui.helpers import (
+    clean_path, get_file_list, load_storelist, get_column_names,
+    display_execution_summary, display_dev_diagnostics, record_execution,
+    display_processing_history, smart_column_indices, validate_column_mapping,
+)
 from dav_tool.processing_context import ProcessingContext
 
 
@@ -147,11 +154,12 @@ def _phase1_column_mapping(ctx):
     storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"])
 
     st.subheader("Column Selection")
-    prod_store_col = st.selectbox("Retailer Store Column", cols)
-    prod_upc_col = st.selectbox("UPC Column", cols)
-    prod_desc_col = st.selectbox("Description Column", cols)
-    prod_units_col = st.selectbox("Units Column", cols)
-    prod_price_col = st.selectbox("Price Column", cols)
+    smart_idx = smart_column_indices(cols)
+    prod_store_col = st.selectbox("Retailer Store Column", cols, index=smart_idx.get("store", (0,))[0])
+    prod_upc_col = st.selectbox("UPC Column", cols, index=smart_idx.get("upc", (0,))[0])
+    prod_desc_col = st.selectbox("Description Column", cols, index=smart_idx.get("description", (0,))[0])
+    prod_units_col = st.selectbox("Units Column", cols, index=smart_idx.get("units", (0,))[0])
+    prod_price_col = st.selectbox("Price Column", cols, index=smart_idx.get("price", (0,))[0])
 
     storelist_store_col = None
     if storelist_path:
@@ -167,7 +175,19 @@ def _phase1_column_mapping(ctx):
 
     if ctx.phase == 1:
         if not ctx.mapping_confirmed:
-            if st.button("Confirm Mapping", use_container_width=True):
+            mapping_errors = validate_column_mapping(
+                prod_store_col, prod_upc_col, prod_desc_col,
+                prod_units_col, prod_price_col,
+            )
+            if mapping_errors:
+                for err in mapping_errors:
+                    st.error(f"Column Mapping Error: {err}")
+                st.info(
+                    "Please fix the column selections above before confirming. "
+                    "Each of the 5 required columns must be unique and properly selected."
+                )
+
+            if st.button("Confirm Mapping", use_container_width=True, disabled=bool(mapping_errors)):
                 log_phase("Column Mapping Confirmed")
                 ctx.store_col = prod_store_col
                 ctx.upc_col = prod_upc_col
@@ -183,30 +203,44 @@ def _phase1_column_mapping(ctx):
             st.success("Column mapping confirmed. Ready to process.")
             if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
                 log_phase("Processing Started")
-                with ProcessingTimer(ctx.metrics, "aggregation", "stream_store_aggregate"):
-                    store_agg = stream_store_aggregate(
-                        fp, ft, ctx.store_col, ctx.units_col, ctx.price_col,
-                        delimiter=pd, layout=ll,
-                        start_line=sl, record_type=rt,
-                        multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                        column_names=ctx.schema,
-                        header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                    )
-                with ProcessingTimer(ctx.metrics, "aggregation", "stream_item_aggregate"):
-                    item_agg = stream_item_aggregate(
-                        fp, ft,
-                        ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
-                        delimiter=pd, layout=ll,
-                        start_line=sl, record_type=rt,
-                        multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                        column_names=ctx.schema,
-                        header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                    )
+                try:
+                    with st.spinner("Aggregating store-level data..."):
+                        with ProcessingTimer(ctx.metrics, "aggregation", "stream_store_aggregate"):
+                            store_agg = stream_store_aggregate(
+                                fp, ft, ctx.store_col, ctx.units_col, ctx.price_col,
+                                delimiter=pd, layout=ll,
+                                start_line=sl, record_type=rt,
+                                multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
+                                column_names=ctx.schema,
+                                header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                            )
+                    with st.spinner("Aggregating item-level data..."):
+                        with ProcessingTimer(ctx.metrics, "aggregation", "stream_item_aggregate"):
+                            item_agg = stream_item_aggregate(
+                                fp, ft,
+                                ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
+                                delimiter=pd, layout=ll,
+                                start_line=sl, record_type=rt,
+                                multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
+                                column_names=ctx.schema,
+                                header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                            )
 
-                ctx.store_agg = store_agg
-                ctx.item_agg = item_agg
-                ctx.phase = 2
-                st.rerun()
+                    ctx.store_agg = store_agg
+                    ctx.item_agg = item_agg
+                    ctx.phase = 2
+                    st.rerun()
+                except Exception as e:
+                    st.error(
+                        f"Data processing failed. This may be due to a column mapping issue, "
+                        f"data format mismatch, or file reading error.\n\n"
+                        f"**Detail:** {str(e)}\n\n"
+                        f"**Suggested fixes:**\n"
+                        f"1. Verify your column selections match the actual data columns.\n"
+                        f"2. Check that the file format is consistent across all files.\n"
+                        f"3. Ensure numeric columns contain valid numbers."
+                    )
+                    logger.error("Aggregation failed: %s", str(e), exc_info=True)
 
 
 def _phase2_validation(ctx):
@@ -241,20 +275,45 @@ def _phase2_validation(ctx):
         if item_agg is not None and not item_agg.is_empty():
             st.dataframe(item_agg.to_pandas().head(10))
 
+    with st.expander("Processing Metrics", expanded=False):
+        m = ctx.metrics
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Parse Time", f"{m.parse_time:.2f}s")
+            st.metric("Aggregation Time", f"{m.aggregation_time:.2f}s")
+        with c2:
+            st.metric("Validation Time", f"{m.validation_time:.2f}s")
+            st.metric("Report Time", f"{m.report_time:.2f}s")
+        with c3:
+            st.metric("Total Time", f"{m.total_execution_time:.2f}s")
+            st.metric("Peak Memory", f"{m.peak_memory:.1f} MB")
+
+    with st.expander("Schema Details", expanded=False):
+        st.markdown(f"**Detected Columns ({len(cols)})**: {', '.join(cols)}")
+        st.markdown(f"**Store Column**: {prod_store_col}")
+        st.markdown(f"**UPC Column**: {prod_upc_col}")
+        st.markdown(f"**Description Column**: {prod_desc_col}")
+        st.markdown(f"**Units Column**: {prod_units_col}")
+        st.markdown(f"**Price Column**: {prod_price_col}")
+        if ctx.storelist_path:
+            st.markdown(f"**Store List**: {ctx.storelist_path}")
+            st.markdown(f"**Store List Delimiter**: {storelist_delim}")
+
     st.subheader("Select Validations")
     run_onb_compare = st.checkbox("Compare Store List", value=True)
     run_upc_summary = st.checkbox("Generate Unique UPC Summary", value=True)
     run_onb_file_review = st.checkbox("File Review Report", value=False)
 
     if st.button("Validate Onboarding", use_container_width=True, type="primary"):
-        _run_validation(
-            fp, ft, pd, ll, sl, rt, cols,
-            storelist_path, storelist_delim, storelist_store_col,
-            run_onb_compare, run_upc_summary, run_onb_file_review,
-            prod_store_col, prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
-            header_prefix=ctx.header_prefix,
-            header_layout=ctx.header_layout,
-        )
+        with st.spinner("Running validations..."):
+            _run_validation(
+                fp, ft, pd, ll, sl, rt, cols,
+                storelist_path, storelist_delim, storelist_store_col,
+                run_onb_compare, run_upc_summary, run_onb_file_review,
+                prod_store_col, prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
+                header_prefix=ctx.header_prefix,
+                header_layout=ctx.header_layout,
+            )
 
     if ctx.done:
         _display_results()
@@ -405,12 +464,20 @@ def _run_validation(
     log_phase("Validation Started")
 
     if not any([run_onb_compare, run_upc_summary]):
-        st.warning("Select at least one validation")
+        st.warning(
+            "Please select at least one validation option.\n\n"
+            "**Options:** Compare Store List, Generate Unique UPC Summary, "
+            "or File Review Report."
+        )
         st.stop()
 
     if run_onb_compare:
         if not storelist_path:
-            st.error("Store list file required")
+            st.error(
+                "Store list file is required for 'Compare Store List' validation.\n\n"
+                "**How to fix:** Go back to Phase 2 (Column Mapping) and enter a "
+                "valid Store List File Path before running validation."
+            )
             st.stop()
 
         storelist_df = load_storelist(storelist_path, storelist_delim)

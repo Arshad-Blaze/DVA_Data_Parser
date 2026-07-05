@@ -16,3 +16,24 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-playwright>=0.4",
+    "playwright>=1.40",
+    "requests>=2.31",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+addopts = "--html=tests/e2e/reports/report.html --self-contained-html --junit-xml=tests/e2e/reports/junit.xml"
+markers = [
+    "regression: mark test as a regression test",
+]
+
+[tool.pytest-playwright]
+screenshot = "only-on-failure"
+tracing = "retain-on-failure"

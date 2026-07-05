@@ -1,0 +1,151 @@
+import csv
+import os
+from typing import List, Tuple
+
+
+def create_delimited_csv(
+    directory: str,
+    filename: str = "store.csv",
+    rows: List[Tuple[str, str, str, str, str]] = None,
+) -> str:
+    if rows is None:
+        rows = [
+            ("S001", "100001", "Widget A", "10", "99.90"),
+            ("S001", "100002", "Gadget B", "5", "49.95"),
+            ("S002", "100001", "Widget A", "8", "79.92"),
+            ("S003", "100003", "Doohickey", "20", "199.80"),
+        ]
+    path = os.path.join(directory, filename)
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Store", "UPC", "Description", "Units", "Price"])
+        for row in rows:
+            w.writerow(row)
+    return path
+
+
+def create_fixed_width_data(
+    directory: str,
+    filename: str = "fixed.txt",
+    rows: List[Tuple[str, str, str, str, str]] = None,
+) -> Tuple[str, str]:
+    if rows is None:
+        rows = [
+            ("S001", "100001", "Widget A", "10", "99.90"),
+            ("S001", "100002", "Gadget B", "5", "49.95"),
+            ("S002", "100001", "Widget A", "8", "79.92"),
+        ]
+
+    layout_path = os.path.join(directory, "layout.csv")
+    with open(layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["1", "6", "Store", "text"])
+        w.writerow(["7", "10", "UPC", "numeric"])
+        w.writerow(["17", "20", "Description", "text"])
+        w.writerow(["37", "5", "Units", "numeric"])
+        w.writerow(["42", "8", "Price", "numeric"])
+
+    def fwf_row(store, upc, desc, units, price):
+        return f"{store:<6}{upc:>10}{desc:<20}{units:>5}{price:>8}\n"
+
+    data_path = os.path.join(directory, filename)
+    with open(data_path, "w") as f:
+        for row in rows:
+            f.write(fwf_row(*row))
+
+    return data_path, layout_path
+
+
+def create_multiline_delimited(directory: str, filename: str = "multiline.txt") -> str:
+    path = os.path.join(directory, filename)
+    with open(path, "w") as f:
+        f.write("H|S001|2024-01-15\n")
+        f.write("D|S001|100001|Widget A|10|99.90\n")
+        f.write("D|S001|100002|Gadget B|5|49.95\n")
+        f.write("H|S002|2024-01-15\n")
+        f.write("D|S002|100001|Widget A|8|79.92\n")
+    return path
+
+
+def create_hdr_fixed_width(directory: str, filename: str = "hdr_fixed.txt") -> Tuple[str, str, str]:
+    header_layout_path = os.path.join(directory, "hdr_header_layout.csv")
+    with open(header_layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["4", "5", "Store", "text"])
+        w.writerow(["12", "8", "Date", "text"])
+
+    detail_layout_path = os.path.join(directory, "hdr_detail_layout.csv")
+    with open(detail_layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["1", "12", "UPC", "text"])
+        w.writerow(["13", "21", "Description", "text"])
+        w.writerow(["34", "2", "Units", "numeric"])
+        w.writerow(["36", "8", "Price", "numeric"])
+
+    def hdr_header(store, date):
+        return f"HDR{store:<5}   {date}\n"
+
+    def hdr_detail(upc, desc, units, price):
+        return f"{upc:<12}{desc:<21}{units:>2}{price:>8}     \n"
+
+    data_path = os.path.join(directory, filename)
+    with open(data_path, "w") as f:
+        f.write(hdr_header("S001", "2024-01-15"))
+        f.write(hdr_detail("100001", "Widget A", "10", "99.90"))
+        f.write(hdr_detail("100002", "Gadget B", "5", "49.95"))
+        f.write(hdr_header("S002", "2024-01-15"))
+        f.write(hdr_detail("100001", "Widget A", "8", "79.92"))
+
+    return data_path, header_layout_path, detail_layout_path
+
+
+def create_flow_test_data(directory: str) -> dict:
+    bau_dir = os.path.join(directory, "bau")
+    os.makedirs(bau_dir, exist_ok=True)
+    bau_file = create_delimited_csv(bau_dir, "bau_data.csv")
+
+    test_dir = os.path.join(directory, "test")
+    os.makedirs(test_dir, exist_ok=True)
+    test_file = create_delimited_csv(
+        test_dir, "test_data.csv",
+        rows=[
+            ("S001", "100001", "Widget A", "12", "119.88"),
+            ("S001", "100002", "Gadget B", "5", "49.95"),
+            ("S002", "100001", "Widget A", "8", "79.92"),
+            ("S003", "100003", "Doohickey", "20", "199.80"),
+            ("S004", "100004", "NewItem", "7", "69.93"),
+        ],
+    )
+
+    storelist_path = os.path.join(directory, "storelist.csv")
+    with open(storelist_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Store"])
+        w.writerow(["S001"])
+        w.writerow(["S002"])
+        w.writerow(["S003"])
+        w.writerow(["S004"])
+
+    onb_dir = os.path.join(directory, "onboarding")
+    os.makedirs(onb_dir, exist_ok=True)
+    onb_file = create_delimited_csv(onb_dir, "onb_data.csv")
+
+    fw_dir = os.path.join(directory, "fixedwidth")
+    os.makedirs(fw_dir, exist_ok=True)
+    fw_file, fw_layout = create_fixed_width_data(fw_dir, "fixed_data.txt")
+
+    return {
+        "bau_dir": bau_dir,
+        "bau_file": bau_file,
+        "test_dir": test_dir,
+        "test_file": test_file,
+        "onboarding_dir": onb_dir,
+        "onboarding_file": onb_file,
+        "storelist_path": storelist_path,
+        "fixedwidth_dir": fw_dir,
+        "fixedwidth_file": fw_file,
+        "fixedwidth_layout": fw_layout,
+    }
