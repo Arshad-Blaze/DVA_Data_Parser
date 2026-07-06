@@ -1,4 +1,6 @@
 """Tests for the canonical data layer (normalizer)."""
+import csv
+import os
 import polars as pl
 from dav_tool._normalizer import (
     apply_column_names,
@@ -9,7 +11,7 @@ from dav_tool._normalizer import (
     upc_normalize_exprs,
     normalize_upc_chunk,
 )
-from dav_tool._aggregators import stream_store_aggregate
+from dav_tool._aggregators import stream_store_aggregate, stream_item_aggregate, stream_upc_summary
 
 
 def test_apply_column_names():
@@ -134,3 +136,67 @@ def test_normalize_empty_chunk():
     assert result.is_empty()
     assert "STORE_NUMBER" in result.columns
     assert "Units" in result.columns
+
+
+def test_multiline_canonical_equivalence_delimited(tmp_path):
+    data = [
+        ("S001", "100001", "Widget A", "10", "99.90"),
+        ("S001", "100002", "Gadget B", "5", "49.95"),
+        ("S002", "100001", "Widget A", "8", "79.92"),
+        ("S003", "100003", "Doohickey", "20", "199.80"),
+    ]
+    csv_path = os.path.join(tmp_path, "single.csv")
+    with open(csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Store", "UPC", "Description", "Units", "Price"])
+        for row in data:
+            w.writerow(row)
+
+    ml_path = os.path.join(tmp_path, "multiline.txt")
+    with open(ml_path, "w") as f:
+        for store, upc, desc, units, price in data:
+            f.write(f"H|{store}|2024-01-15\n")
+            f.write(f"D|{store}|{upc}|{desc}|{units}|{price}\n")
+
+    ml_cols = ["Store", "UPC", "Description", "Units", "Price"]
+    single_store = stream_store_aggregate(
+        [csv_path], "delimited", "Store", "Units", "Price", delimiter=","
+    )
+    ml_store = stream_store_aggregate(
+        [ml_path], "multiline", "Store", "Units", "Price",
+        multiline_record_types=["D"], multiline_delimiter="|",
+        column_names=ml_cols,
+    )
+    assert single_store.shape == ml_store.shape, "Store agg shape mismatch"
+    assert single_store.sort("STORE_NUMBER").to_dicts() == ml_store.sort("STORE_NUMBER").to_dicts(), (
+        f"Store agg mismatch:\n{single_store.sort('STORE_NUMBER')}\n{ml_store.sort('STORE_NUMBER')}"
+    )
+
+    single_item = stream_item_aggregate(
+        [csv_path], "delimited", "UPC", "Description", "Units", "Price", delimiter=","
+    )
+    ml_item = stream_item_aggregate(
+        [ml_path], "multiline", "UPC", "Description", "Units", "Price",
+        multiline_record_types=["D"], multiline_delimiter="|",
+        column_names=ml_cols,
+    )
+    assert single_item.shape == ml_item.shape, "Item agg shape mismatch"
+    assert single_item.sort("UPC_CODE").to_dicts() == ml_item.sort("UPC_CODE").to_dicts(), (
+        f"Item agg mismatch:\n{single_item.sort('UPC_CODE')}\n{ml_item.sort('UPC_CODE')}"
+    )
+
+    single_upc = stream_upc_summary(
+        [csv_path], "delimited", "UPC", "Units", "Price", delimiter=","
+    )
+    ml_upc = stream_upc_summary(
+        [ml_path], "multiline", "UPC", "Units", "Price",
+        multiline_record_types=["D"], multiline_delimiter="|",
+        column_names=ml_cols,
+    )
+    assert single_upc.shape == ml_upc.shape, "UPC summary shape mismatch"
+    assert single_upc.sort("UPC").to_dicts() == ml_upc.sort("UPC").to_dicts(), (
+        f"UPC summary mismatch:\n{single_upc.sort('UPC')}\n{ml_upc.sort('UPC')}"
+    )
+
+
+

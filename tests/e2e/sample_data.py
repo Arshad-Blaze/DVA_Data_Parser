@@ -102,6 +102,49 @@ def create_hdr_fixed_width(directory: str, filename: str = "hdr_fixed.txt") -> T
     return data_path, header_layout_path, detail_layout_path
 
 
+def create_multiline_flow_test_data(directory: str) -> dict:
+    bau_dir = os.path.join(directory, "bau_ml")
+    os.makedirs(bau_dir, exist_ok=True)
+    bau_file = create_multiline_delimited(bau_dir, "bau_multiline.txt")
+
+    test_dir = os.path.join(directory, "test_ml")
+    os.makedirs(test_dir, exist_ok=True)
+    test_path = os.path.join(test_dir, "test_multiline.txt")
+    with open(test_path, "w") as f:
+        f.write("H|S001|2024-01-15\n")
+        f.write("D|S001|100001|Widget A|12|119.88\n")
+        f.write("D|S001|100002|Gadget B|5|49.95\n")
+        f.write("H|S002|2024-01-15\n")
+        f.write("D|S002|100001|Widget A|8|79.92\n")
+        f.write("H|S003|2024-01-16\n")
+        f.write("D|S003|100003|Doohickey|20|199.80\n")
+        f.write("H|S004|2024-01-16\n")
+        f.write("D|S004|100004|NewItem|7|69.93\n")
+
+    storelist_path = os.path.join(directory, "storelist_ml.csv")
+    with open(storelist_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Store"])
+        w.writerow(["S001"])
+        w.writerow(["S002"])
+        w.writerow(["S003"])
+        w.writerow(["S004"])
+
+    onb_dir = os.path.join(directory, "onboarding_ml")
+    os.makedirs(onb_dir, exist_ok=True)
+    onb_file = create_multiline_delimited(onb_dir, "onb_multiline.txt")
+
+    return {
+        "bau_ml_dir": bau_dir,
+        "bau_ml_file": bau_file,
+        "test_ml_dir": test_dir,
+        "test_ml_file": test_path,
+        "onboarding_ml_dir": onb_dir,
+        "onboarding_ml_file": onb_file,
+        "storelist_ml_path": storelist_path,
+    }
+
+
 def create_flow_test_data(directory: str) -> dict:
     bau_dir = os.path.join(directory, "bau")
     os.makedirs(bau_dir, exist_ok=True)
