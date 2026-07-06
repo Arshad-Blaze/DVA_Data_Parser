@@ -269,3 +269,144 @@ def display_processing_history():
                 f"{r.peak_cpu}% CPU, "
                 f"{r.warnings}w, {r.errors}e"
             )
+
+
+def display_config_review(cfg):
+    """Render a read-only configuration summary in the UI."""
+    from dav_tool.config_builder import config_to_summary_dict
+
+    sections = config_to_summary_dict(cfg)
+
+    editable = not cfg.locked
+    st.subheader("Configuration" + (" (Locked)" if cfg.locked else ""))
+
+    for section_name, items in sections.items():
+        with st.expander(section_name, expanded=not cfg.locked):
+            for key, val in items.items():
+                st.markdown(f"**{key}:** {val}")
+
+    with st.expander("Validation Configuration", expanded=not cfg.locked):
+        vc = cfg.validation_config
+        for rule_name in ["store_validation", "item_validation", "compare_store_list", "file_review"]:
+            rule = getattr(vc, rule_name)
+            st.markdown(f"- **{rule_name}**: {'Enabled' if rule.enabled else 'Disabled'}")
+
+    with st.expander("Raw JSON", expanded=False):
+        st.json(asdict(cfg) if hasattr(cfg, 'locked') else {})
+
+    if not cfg.locked:
+        st.download_button(
+            "Download Config as JSON",
+            json.dumps(asdict(cfg), indent=2, default=str),
+            file_name=f"{cfg.name or 'config'}.json",
+            mime="application/json",
+        )
+
+
+def edit_and_accept_config(cfg, key_prefix=""):
+    """Render editable configuration fields and an Accept button.
+
+    User can edit column mapping, price settings, and validation toggles
+    directly in the UI. Returns True when the user accepts.
+    """
+    from dav_tool.format_config import asdict
+
+    changed = False
+
+    with st.expander("Column Mapping", expanded=True):
+        if cfg.detected_columns:
+            cols = cfg.detected_columns
+        elif cfg.schema:
+            cols = cfg.schema
+        else:
+            cols = []
+
+        if cols:
+            idx_map = {}
+            if cfg.suggested_mapping:
+                for role, col in cfg.suggested_mapping.items():
+                    if col in cols:
+                        idx_map[role] = cols.index(col)
+
+            c1, c2 = st.columns(2)
+            with c1:
+                new_store = st.selectbox(
+                    "Store Column", cols,
+                    index=idx_map.get("store", 0),
+                    key=f"{key_prefix}_cfg_store",
+                )
+                new_upc = st.selectbox(
+                    "UPC Column", cols,
+                    index=idx_map.get("upc", 0),
+                    key=f"{key_prefix}_cfg_upc",
+                )
+                new_desc = st.selectbox(
+                    "Description Column", cols,
+                    index=idx_map.get("description", 0),
+                    key=f"{key_prefix}_cfg_desc",
+                )
+            with c2:
+                new_units = st.selectbox(
+                    "Units Column", cols,
+                    index=idx_map.get("units", 0),
+                    key=f"{key_prefix}_cfg_units",
+                )
+                new_price = st.selectbox(
+                    "Price Column", cols,
+                    index=idx_map.get("price", 0),
+                    key=f"{key_prefix}_cfg_price",
+                )
+
+            if new_store != cfg.store_col:
+                cfg.store_col = new_store; changed = True
+            if new_upc != cfg.upc_col:
+                cfg.upc_col = new_upc; changed = True
+            if new_desc != cfg.desc_col:
+                cfg.desc_col = new_desc; changed = True
+            if new_units != cfg.units_col:
+                cfg.units_col = new_units; changed = True
+            if new_price != cfg.price_col:
+                cfg.price_col = new_price; changed = True
+
+        new_price_type = st.radio(
+            "Price Type", ["Total Price", "Unit Price"],
+            index=0 if cfg.price_type == "Total Price" else 1,
+            key=f"{key_prefix}_cfg_price_type",
+        )
+        if new_price_type != cfg.price_type:
+            cfg.price_type = new_price_type; changed = True
+
+        c1, c2 = st.columns(2)
+        with c1:
+            new_imp_dol = st.checkbox("Implied Dollars", value=cfg.implied_dollars, key=f"{key_prefix}_cfg_imp_dol")
+            if new_imp_dol != cfg.implied_dollars:
+                cfg.implied_dollars = new_imp_dol; changed = True
+        with c2:
+            new_imp_unt = st.checkbox("Implied Units", value=cfg.implied_units, key=f"{key_prefix}_cfg_imp_unt")
+            if new_imp_unt != cfg.implied_units:
+                cfg.implied_units = new_imp_unt; changed = True
+
+    with st.expander("Validation Configuration", expanded=False):
+        vc = cfg.validation_config
+        for rule_name, label in [
+            ("store_validation", "Store Level Validation"),
+            ("item_validation", "Item Level Validation"),
+            ("compare_store_list", "Compare Store List"),
+            ("file_review", "File Review Report"),
+        ]:
+            rule = getattr(vc, rule_name)
+            enabled = st.checkbox(
+                label, value=rule.enabled,
+                key=f"{key_prefix}_cfg_val_{rule_name}",
+            )
+            if enabled != rule.enabled:
+                rule.enabled = enabled; changed = True
+
+    accepted = st.button(
+        "Accept Configuration" if not cfg.locked else "Configuration Locked",
+        use_container_width=True, type="primary",
+        disabled=cfg.locked,
+        key=f"{key_prefix}_accept_cfg",
+    )
+
+    return accepted

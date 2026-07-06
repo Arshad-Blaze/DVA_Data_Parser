@@ -30,6 +30,8 @@ from dav_tool.ui.helpers import (
 )
 from dav_tool.processing_context import ProcessingContext, ExistingContext
 from dav_tool.format_config import load_format_config, apply_format_config
+from dav_tool.config_builder import build_config
+from dav_tool.ui.helpers import display_config_review, edit_and_accept_config
 
 
 def _reset_phase():
@@ -52,6 +54,10 @@ def _reset_phase():
         del old
         gc.collect()
     st.session_state.ex_ctx = ExistingContext()
+    keys = list(st.session_state.keys())
+    for k in keys:
+        if k.startswith("ex_cfg_") or k.startswith("ex_prod_cfg") or k.startswith("ex_test_cfg") or k == "_show_ex_config":
+            st.session_state.pop(k, None)
 
 
 def run():
@@ -232,12 +238,85 @@ def _phase0_detection_and_preview(ctx):
         both_detected = False
 
     if both_detected and ctx.phase == 0:
-        if st.button("Proceed to Column Mapping  ->", use_container_width=True):
-            ctx.prod.file_paths = prod_file_paths
-            ctx.test.file_paths = test_file_paths
-            ctx.ml_delimiter = ml_delim
-            ctx.phase = 1
-            st.rerun()
+        ctx.prod.file_paths = prod_file_paths
+        ctx.test.file_paths = test_file_paths
+        ctx.ml_delimiter = ml_delim
+
+        if not ctx.prod.config_locked and not ctx.test.config_locked and not getattr(ctx, '_show_ex_config', False):
+            if st.button("Generate Configuration \u2192", use_container_width=True):
+                ctx._show_ex_config = True
+                st.rerun()
+
+        if getattr(ctx, '_show_ex_config', False):
+            st.divider()
+            st.markdown("### Configuration Review")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader("BAU Configuration")
+                prod_cfg = build_config(
+                    prod_file_paths,
+                    file_type=ctx.prod.file_type,
+                    delimiter=ctx.prod.delimiter,
+                    layout=ctx.prod.layout,
+                    header_prefix=ctx.prod.header_prefix,
+                    header_layout=ctx.prod.header_layout,
+                    detail_layout=ctx.prod.detail_layout,
+                    trailer_prefix=ctx.prod.trailer_prefix,
+                    trailer_layout=ctx.prod.trailer_layout,
+                    ml_record_types=ctx.prod.ml_record_types,
+                    ml_delimiter=ml_delim,
+                )
+                ctx._prod_cfg = prod_cfg
+                accepted_prod = edit_and_accept_config(prod_cfg, key_prefix="ex_prod")
+                if accepted_prod:
+                    ctx._prod_cfg = prod_cfg
+                    ctx.prod.config_locked = True
+                    ctx.prod.store_col = prod_cfg.store_col
+                    ctx.prod.upc_col = prod_cfg.upc_col
+                    ctx.prod.desc_col = prod_cfg.desc_col
+                    ctx.prod.units_col = prod_cfg.units_col
+                    ctx.prod.price_col = prod_cfg.price_col
+                    ctx.prod.price_type = prod_cfg.price_type
+                    ctx.prod.implied_dollars = prod_cfg.implied_dollars
+                    ctx.prod.implied_units = prod_cfg.implied_units
+                    st.rerun()
+
+            with c2:
+                st.subheader("Test Configuration")
+                test_cfg = build_config(
+                    test_file_paths,
+                    file_type=ctx.test.file_type,
+                    delimiter=ctx.test.delimiter,
+                    layout=ctx.test.layout,
+                    header_prefix=ctx.test.header_prefix,
+                    header_layout=ctx.test.header_layout,
+                    detail_layout=ctx.test.detail_layout,
+                    trailer_prefix=ctx.test.trailer_prefix,
+                    trailer_layout=ctx.test.trailer_layout,
+                    ml_record_types=ctx.test.ml_record_types,
+                    ml_delimiter=ml_delim,
+                )
+                ctx._test_cfg = test_cfg
+                accepted_test = edit_and_accept_config(test_cfg, key_prefix="ex_test")
+                if accepted_test:
+                    ctx._test_cfg = test_cfg
+                    ctx.test.config_locked = True
+                    ctx.test.store_col = test_cfg.store_col
+                    ctx.test.upc_col = test_cfg.upc_col
+                    ctx.test.desc_col = test_cfg.desc_col
+                    ctx.test.units_col = test_cfg.units_col
+                    ctx.test.price_col = test_cfg.price_col
+                    ctx.test.price_type = test_cfg.price_type
+                    ctx.test.implied_dollars = test_cfg.implied_dollars
+                    ctx.test.implied_units = test_cfg.implied_units
+                    st.rerun()
+
+        if ctx.prod.config_locked and ctx.test.config_locked:
+            st.success("Both configurations locked. Ready to proceed.")
+            if st.button("Proceed to Column Mapping  ->", use_container_width=True):
+                ctx._show_ex_config = False
+                ctx.phase = 1
+                st.rerun()
 
 
 def _phase1_column_mapping(ctx):

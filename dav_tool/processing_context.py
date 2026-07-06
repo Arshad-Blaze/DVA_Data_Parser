@@ -55,6 +55,9 @@ class ProcessingContext:
     eff_record_type: Optional[str] = None
     eff_layout: Optional[List[Dict[str, Any]]] = None
 
+    # === Configuration ===
+    config_locked: bool = False
+
     # === Store List (onboarding) ===
     storelist_path: Optional[str] = None
     storelist_delim: Optional[str] = None

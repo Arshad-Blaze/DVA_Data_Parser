@@ -24,6 +24,8 @@ from dav_tool.ui.helpers import (
 )
 from dav_tool.processing_context import ProcessingContext
 from dav_tool.format_config import apply_format_config, load_format_config, save_format_config, config_from_ctx
+from dav_tool.config_builder import build_config
+from dav_tool.ui.helpers import display_config_review, edit_and_accept_config
 
 
 def _reset_phase():
@@ -38,6 +40,11 @@ def _reset_phase():
         del old
         gc.collect()
     st.session_state.onb_ctx = ProcessingContext()
+    st.session_state.pop("onb_cfg_accepted", None)
+    keys = list(st.session_state.keys())
+    for k in keys:
+        if k.startswith("onb_cfg_") or k == "_show_config":
+            st.session_state.pop(k, None)
 
 
 def run():
@@ -195,17 +202,59 @@ def _phase0_parsing_and_preview(ctx):
             st.stop()
 
     if parsing_ready and ctx.phase == 0:
-        st.success(f"Parsing complete — {len(cols)} column(s) detected")
-        if st.button("Proceed to Column Mapping  ->", use_container_width=True):
-            ctx.file_paths = file_paths
-            ctx.file_type = file_type
-            ctx.delimiter = prod_delim
-            ctx.layout = layout_list
-            ctx.start_line = start_line
-            ctx.record_type = record_type
-            ctx.columns = cols
-            ctx.phase = 1
-            st.rerun()
+        ctx.file_paths = file_paths
+        ctx.file_type = file_type
+        ctx.delimiter = prod_delim
+        ctx.layout = layout_list
+        ctx.start_line = start_line
+        ctx.record_type = record_type
+        ctx.columns = cols
+
+        if not ctx.config_locked:
+            st.success(f"Parsing complete — {len(cols)} column(s) detected")
+            if st.button("Generate Configuration \u2192", use_container_width=True):
+                ctx._show_config = True
+                st.rerun()
+
+        if getattr(ctx, '_show_config', False) and not ctx.config_locked:
+            st.divider()
+            st.markdown("### Configuration Review")
+            cfg = build_config(
+                ctx.file_paths,
+                file_type=ctx.file_type,
+                delimiter=ctx.delimiter,
+                layout=ctx.layout,
+                header_prefix=ctx.header_prefix,
+                header_layout=ctx.header_layout,
+                detail_layout=ctx.detail_layout,
+                trailer_prefix=ctx.trailer_prefix,
+                trailer_layout=ctx.trailer_layout,
+                ml_record_types=ctx.ml_record_types,
+                ml_delimiter=ctx.ml_delimiter or "|",
+            )
+            ctx._generated_config = cfg
+            accepted = edit_and_accept_config(cfg, key_prefix="onb")
+            if accepted:
+                ctx._generated_config = cfg
+                ctx.config_locked = True
+                ctx._show_config = False
+                # Apply config mapping to context
+                ctx.store_col = cfg.store_col
+                ctx.upc_col = cfg.upc_col
+                ctx.desc_col = cfg.desc_col
+                ctx.units_col = cfg.units_col
+                ctx.price_col = cfg.price_col
+                ctx.price_type = cfg.price_type
+                ctx.implied_dollars = cfg.implied_dollars
+                ctx.implied_units = cfg.implied_units
+                ctx.phase = 1
+                st.rerun()
+
+        if ctx.config_locked:
+            st.success("Configuration locked. Proceed to column mapping.")
+            if st.button("Proceed to Column Mapping  ->", use_container_width=True):
+                ctx.phase = 1
+                st.rerun()
 
 
 def _phase1_column_mapping(ctx):

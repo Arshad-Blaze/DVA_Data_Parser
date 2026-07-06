@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Optional
 
 import polars as pl
@@ -10,14 +10,45 @@ from dav_tool.processing_context import ProcessingContext
 
 
 @dataclass
+class ValidationRule:
+    """Configuration for a single validation check.
+
+    If *aggregation_columns* is omitted (empty), the current default
+    aggregation implementation is used for that validation.
+    """
+    enabled: bool = True
+    required_columns: List[str] = field(default_factory=list)
+    aggregation_columns: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ValidationConfig:
+    """Per-validation settings that can be overridden per file/profile."""
+    store_validation: ValidationRule = field(default_factory=lambda: ValidationRule(
+        required_columns=["STORE_NUMBER", "Units", "Totalprice"],
+    ))
+    item_validation: ValidationRule = field(default_factory=lambda: ValidationRule(
+        required_columns=["UPC_CODE", "PRODUCT_DESCRIPTION", "UNITS_SOLD", "TOTAL_DOLLARS"],
+    ))
+    compare_store_list: ValidationRule = field(default_factory=lambda: ValidationRule(
+        required_columns=["STORE_NUMBER"],
+    ))
+    file_review: ValidationRule = field(default_factory=lambda: ValidationRule(
+        required_columns=["STORE_NUMBER", "UPC_CODE", "UNITS_SOLD", "TOTAL_DOLLARS"],
+    ))
+
+
+@dataclass
 class FormatConfig:
     """Serializable description of a data file format.
 
     Can be saved to / loaded from JSON to bypass manual UI setup.
     """
-    version: int = 1
+    version: int = 2
     name: str = ""
     file_type: Optional[str] = None
+    encoding: str = "cp1252"
+    has_header: bool = True
     delimiter: Optional[str] = None
     start_line: int = 0
     record_type: Optional[str] = None
@@ -29,6 +60,10 @@ class FormatConfig:
     trailer_layout_file: Optional[str] = None
     ml_record_types: Optional[List[str]] = None
     ml_delimiter: str = "|"
+    schema: Optional[List[str]] = None
+    detected_columns: Optional[List[str]] = None
+    detected_data_types: Optional[Dict[str, str]] = None
+    suggested_mapping: Optional[Dict[str, str]] = None
     store_col: Optional[str] = None
     upc_col: Optional[str] = None
     desc_col: Optional[str] = None
@@ -37,6 +72,8 @@ class FormatConfig:
     price_type: str = "Total Price"
     implied_dollars: bool = False
     implied_units: bool = False
+    validation_config: ValidationConfig = field(default_factory=ValidationConfig)
+    locked: bool = False
 
 
 def load_format_config(path: str) -> FormatConfig:
@@ -45,7 +82,15 @@ def load_format_config(path: str) -> FormatConfig:
         data = json.load(f)
     version = data.pop("version", 1)
     name = data.pop("name", "")
-    return FormatConfig(version=version, name=name, **data)
+    # Handle nested ValidationConfig
+    vc_data = data.pop("validation_config", None)
+    cfg = FormatConfig(version=version, name=name, **data)
+    if vc_data:
+        for key in ("store_validation", "item_validation", "compare_store_list", "file_review"):
+            rule_data = vc_data.get(key)
+            if rule_data:
+                setattr(cfg.validation_config, key, ValidationRule(**rule_data))
+    return cfg
 
 
 def save_format_config(config: FormatConfig, path: str):
@@ -65,8 +110,6 @@ def apply_format_config(
 
     Sets all fields, loads referenced layout CSVs (resolved relative to
     *config_dir*), flattens multiline data, and auto-applies schema.
-
-    Returns the flattened preview DataFrame (or None if not applicable).
     """
     config_dir = config_dir or "."
 
@@ -94,6 +137,13 @@ def apply_format_config(
     ctx.implied_dollars = config.implied_dollars
     ctx.implied_units = config.implied_units
 
+    if config.schema:
+        ctx.schema = config.schema
+    if config.detected_columns:
+        ctx.columns = config.detected_columns
+    elif config.schema:
+        ctx.columns = config.schema
+
     resolved_layout_file = _resolve(config.layout_file)
     if resolved_layout_file and os.path.exists(resolved_layout_file):
         ctx.layout = load_layout(resolved_layout_file)
@@ -110,7 +160,6 @@ def apply_format_config(
     if resolved_trailer and os.path.exists(resolved_trailer):
         ctx.trailer_layout = load_layout(resolved_trailer)
 
-    config_has_mapping = bool(config.store_col or config.upc_col or config.units_col or config.price_col)
     if ctx.file_type != "multiline":
         ctx.ml_flattened = False
         return None
@@ -138,8 +187,9 @@ def apply_format_config(
         return None
 
     if flat is not None and not flat.is_empty():
-        ctx.schema = list(flat.columns)
-        if config_has_mapping:
+        if not config.schema:
+            ctx.schema = list(flat.columns)
+        if not config.detected_columns:
             ctx.columns = list(flat.columns)
         return flat
 
@@ -151,6 +201,18 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
 
     Used for saving the current configuration.
     """
+    mapping = {}
+    if ctx.store_col:
+        mapping["store"] = ctx.store_col
+    if ctx.upc_col:
+        mapping["upc"] = ctx.upc_col
+    if ctx.desc_col:
+        mapping["description"] = ctx.desc_col
+    if ctx.units_col:
+        mapping["units"] = ctx.units_col
+    if ctx.price_col:
+        mapping["price"] = ctx.price_col
+
     return FormatConfig(
         name="",
         file_type=ctx.file_type,
@@ -161,6 +223,9 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
         trailer_prefix=ctx.trailer_prefix,
         ml_record_types=ctx.ml_record_types,
         ml_delimiter=ctx.ml_delimiter,
+        schema=ctx.schema,
+        detected_columns=ctx.columns,
+        suggested_mapping=mapping or None,
         store_col=ctx.store_col,
         upc_col=ctx.upc_col,
         desc_col=ctx.desc_col,
