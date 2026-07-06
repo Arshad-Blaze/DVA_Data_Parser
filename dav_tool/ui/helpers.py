@@ -1,4 +1,6 @@
 import datetime
+import hashlib
+import json
 import os
 import glob
 import logging
@@ -13,6 +15,31 @@ from dav_tool.config import FALLBACK_ENCODING
 from dav_tool.io import safe_read_csv
 
 logger = logging.getLogger(__name__)
+
+_COLUMN_CACHE_KEY = "_column_name_cache"
+
+
+def _cache_key(paths, file_type, delimiter, record_type) -> str:
+    """Deterministic cache key from input parameters."""
+    raw = f"{paths}|{file_type}|{delimiter}|{record_type}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def cached_get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
+                             record_type=None, header_prefix=None, header_layout=None,
+                             trailer_prefix=None, trailer_layout=None):
+    """get_column_names with a session-state cache to avoid re-reading on reruns."""
+    if _COLUMN_CACHE_KEY not in st.session_state:
+        st.session_state[_COLUMN_CACHE_KEY] = {}
+    cache = st.session_state[_COLUMN_CACHE_KEY]
+    key = _cache_key(str(paths), file_type, delimiter, record_type)
+    if key in cache:
+        return cache[key]
+    cols = get_column_names(paths, file_type, delimiter, layout, start_line,
+                            record_type, header_prefix, header_layout,
+                            trailer_prefix, trailer_layout)
+    cache[key] = cols
+    return cols
 
 
 def display_execution_summary(metrics):

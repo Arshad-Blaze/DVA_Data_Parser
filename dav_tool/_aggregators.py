@@ -1,3 +1,4 @@
+import gc
 import logging
 
 import polars as pl
@@ -20,18 +21,23 @@ from dav_tool._parsers import (
 logger = logging.getLogger(__name__)
 
 
-
 def _merge_accumulate(
     aggs: List[pl.DataFrame],
     group_cols: List[str],
 ) -> pl.DataFrame:
     if not aggs:
         return pl.DataFrame()
-    return (
-        pl.concat(aggs)
+    # Concat all per-chunk aggs and merge in one shot
+    merged = pl.concat(aggs)
+    aggs.clear()
+    result = (
+        merged
         .group_by(group_cols)
         .agg([pl.sum("Units"), pl.sum("Totalprice")])
     )
+    del merged
+    gc.collect()
+    return result
 
 
 def _merge_accumulate_item(
@@ -39,11 +45,16 @@ def _merge_accumulate_item(
 ) -> pl.DataFrame:
     if not aggs:
         return pl.DataFrame()
-    return (
-        pl.concat(aggs)
+    merged = pl.concat(aggs)
+    aggs.clear()
+    result = (
+        merged
         .group_by(["UPC_CODE", "PRODUCT_DESCRIPTION"])
         .agg([pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")])
     )
+    del merged
+    gc.collect()
+    return result
 
 
 def _merge_accumulate_upc(
@@ -51,11 +62,16 @@ def _merge_accumulate_upc(
 ) -> pl.DataFrame:
     if not aggs:
         return pl.DataFrame()
-    return (
-        pl.concat(aggs)
+    merged = pl.concat(aggs)
+    aggs.clear()
+    result = (
+        merged
         .group_by("UPC")
         .agg([pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")])
     )
+    del merged
+    gc.collect()
+    return result
 
 
 def stream_store_aggregate(
@@ -84,7 +100,7 @@ def stream_store_aggregate(
 
     if file_type == "delimited":
         lazy = scan_delimited(file_paths, delimiter, columns=[store_col, units_col, price_col])
-        return (
+        result = (
             lazy.with_columns(
                 store_normalize_exprs(store_col, units_col, price_col,
                                        implied_units, implied_dollars, price_type)
@@ -94,6 +110,9 @@ def stream_store_aggregate(
             .sort("STORE_NUMBER")
             .collect(engine="streaming")
         )
+        del lazy
+        gc.collect()
+        return result
 
     aggs = []
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
@@ -105,17 +124,22 @@ def stream_store_aggregate(
         chunk = apply_column_names(chunk, column_names)
         if store_col not in chunk.columns:
             logger.warning("Skipping chunk: column '%s' not found (available: %s)", store_col, chunk.columns)
+            del chunk
             continue
 
         c = normalize_store_chunk(chunk, store_col, units_col, price_col,
                                    implied_units, implied_dollars, price_type)
+        del chunk
         agg = c.group_by("STORE_NUMBER").agg([pl.sum("Units"), pl.sum("Totalprice")])
+        del c
         aggs.append(agg)
 
     result = _merge_accumulate(aggs, ["STORE_NUMBER"])
+    del aggs[:]
+    gc.collect()
     if not result.is_empty():
         return result.sort("STORE_NUMBER")
-    return pl.DataFrame()
+    return result
 
 
 def stream_item_aggregate(
@@ -144,7 +168,7 @@ def stream_item_aggregate(
 
     if file_type == "delimited":
         lazy = scan_delimited(file_paths, delimiter, columns=[upc_col, desc_col, units_col, dollars_col])
-        return (
+        result = (
             lazy.with_columns(
                 item_normalize_exprs(upc_col, desc_col, units_col, dollars_col,
                                       implied_units, implied_dollars)
@@ -154,6 +178,9 @@ def stream_item_aggregate(
             .sort(["UPC_CODE", "PRODUCT_DESCRIPTION"])
             .collect(engine="streaming")
         )
+        del lazy
+        gc.collect()
+        return result
 
     aggs = []
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
@@ -165,19 +192,24 @@ def stream_item_aggregate(
         chunk = apply_column_names(chunk, column_names)
         if upc_col not in chunk.columns:
             logger.warning("Skipping chunk: column '%s' not found (available: %s)", upc_col, chunk.columns)
+            del chunk
             continue
 
         c = normalize_item_chunk(chunk, upc_col, desc_col, units_col, dollars_col,
                                   implied_units, implied_dollars)
+        del chunk
         agg = c.group_by(["UPC_CODE", "PRODUCT_DESCRIPTION"]).agg(
             [pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")]
         )
+        del c
         aggs.append(agg)
 
     result = _merge_accumulate_item(aggs)
+    del aggs[:]
+    gc.collect()
     if not result.is_empty():
         return result.sort(["UPC_CODE", "PRODUCT_DESCRIPTION"])
-    return pl.DataFrame()
+    return result
 
 
 def stream_upc_summary(
@@ -205,7 +237,7 @@ def stream_upc_summary(
 
     if file_type == "delimited":
         lazy = scan_delimited(file_paths, delimiter, columns=[upc_col, units_col, dollars_col])
-        return (
+        result = (
             lazy.with_columns(
                 upc_normalize_exprs(upc_col, units_col, dollars_col,
                                      implied_units, implied_dollars)
@@ -214,6 +246,9 @@ def stream_upc_summary(
             .agg([pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")])
             .collect(engine="streaming")
         )
+        del lazy
+        gc.collect()
+        return result
 
     aggs = []
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
@@ -225,17 +260,20 @@ def stream_upc_summary(
         chunk = apply_column_names(chunk, column_names)
         if upc_col not in chunk.columns:
             logger.warning("Skipping chunk: column '%s' not found (available: %s)", upc_col, chunk.columns)
+            del chunk
             continue
 
         c = normalize_upc_chunk(chunk, upc_col, units_col, dollars_col,
                                  implied_units, implied_dollars)
+        del chunk
         agg = c.group_by("UPC").agg([pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")])
+        del c
         aggs.append(agg)
 
     result = _merge_accumulate_upc(aggs)
-    if not result.is_empty():
-        return result
-    return pl.DataFrame()
+    del aggs[:]
+    gc.collect()
+    return result
 
 
 def _iter_chunks(file_paths, file_type, layout, start_line,

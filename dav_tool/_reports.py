@@ -1,3 +1,4 @@
+import gc
 import os
 import polars as pl
 from typing import List, Dict, Optional, Union
@@ -27,9 +28,41 @@ def generate_file_review(
     header_layout: Optional[List[Dict]] = None,
     trailer_prefix: Optional[str] = None,
     trailer_layout: Optional[List[Dict]] = None,
+    precomputed_store_agg: Optional[pl.DataFrame] = None,
+    precomputed_upc_summary: Optional[pl.DataFrame] = None,
 ) -> pl.DataFrame:
+    """Generate per-file summary statistics.
+
+    If *precomputed_store_agg* and *precomputed_upc_summary* are provided
+    (from a previous aggregate pass), they are used directly instead of
+    re-parsing the dataset.
+    """
     if isinstance(file_paths, str):
         file_paths = [file_paths]
+
+    if precomputed_store_agg is not None and precomputed_upc_summary is not None:
+        file_list = file_paths if isinstance(file_paths, list) else [file_paths]
+        rows = []
+        for f in file_list:
+            fname = os.path.basename(f)
+            store_count = precomputed_store_agg.height
+            upc_count = precomputed_upc_summary.height
+            total_units = (
+                precomputed_upc_summary["UNITS_SOLD"].sum()
+                if "UNITS_SOLD" in precomputed_upc_summary.columns else 0.0
+            )
+            total_dollars = (
+                precomputed_upc_summary["TOTAL_DOLLARS"].sum()
+                if "TOTAL_DOLLARS" in precomputed_upc_summary.columns else 0.0
+            )
+            rows.append({
+                "filename": fname,
+                "store_count": store_count,
+                "upc_count": upc_count,
+                "total_units": float(total_units),
+                "total_dollars": round(float(total_dollars), 2),
+            })
+        return pl.DataFrame(rows)
 
     rows = []
     for f in file_paths:
@@ -76,5 +109,7 @@ def generate_file_review(
             "total_units": float(total_units),
             "total_dollars": round(float(total_dollars), 2),
         })
+        del sa, ua
+        gc.collect()
 
     return pl.DataFrame(rows)

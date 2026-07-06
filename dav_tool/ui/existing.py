@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import streamlit as st
@@ -12,7 +13,10 @@ from dav_tool._aggregators import (
     stream_store_aggregate, stream_item_aggregate,
 )
 from dav_tool._reports import generate_file_review
-from dav_tool._observability import ProcessingTimer, log_phase, setup_logging
+from dav_tool._observability import (
+    ProcessingTimer, log_phase, setup_logging,
+    print_memory_snapshot, log_dataframe_summary,
+)
 from dav_tool.validation.store import compare_files, storelevelvalidation
 from dav_tool.validation.item import run_item_validation
 from dav_tool.detection import (
@@ -20,7 +24,7 @@ from dav_tool.detection import (
     detect_hdr_prefix,
 )
 from dav_tool.ui.helpers import (
-    clean_path, get_file_list, get_column_names,
+    clean_path, get_file_list, get_column_names, cached_get_column_names,
     display_execution_summary, display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
 )
@@ -29,6 +33,24 @@ from dav_tool.format_config import load_format_config, apply_format_config
 
 
 def _reset_phase():
+    old = st.session_state.get("ex_ctx")
+    if old is not None:
+        for side_attr in ["prod", "test"]:
+            side = getattr(old, side_attr, None)
+            if side is not None:
+                for attr_name in ["store_agg", "item_agg", "upc_summary", "file_review",
+                                  "store_df", "comparison_df", "summary_df",
+                                  "fr_prod", "fr_test"]:
+                    df = getattr(side, attr_name, None)
+                    if df is not None:
+                        del df
+                del side
+        for attr_name in ["store_df", "comparison_df", "summary_df", "fr_prod", "fr_test"]:
+            df = getattr(old, attr_name, None)
+            if df is not None:
+                del df
+        del old
+        gc.collect()
     st.session_state.ex_ctx = ExistingContext()
 
 
@@ -274,13 +296,13 @@ def _phase1_column_mapping(ctx):
     eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
     eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
 
-    prod_cols = get_column_names(
+    prod_cols = cached_get_column_names(
         prod_paths, eff_prod_type, eff_delim_prod,
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
         trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
     )
-    test_cols = get_column_names(
+    test_cols = cached_get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
@@ -380,6 +402,7 @@ def _phase1_column_mapping(ctx):
             st.success("Column mapping confirmed. Ready to process.")
             if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
                 log_phase("Processing Started")
+                print_memory_snapshot("BEFORE AGGREGATION (EXISTING)")
                 try:
                     with st.spinner("Aggregating BAU store-level data..."):
                         with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_store_aggregate"):
@@ -444,6 +467,8 @@ def _phase1_column_mapping(ctx):
                     ctx.test.store_agg = test_store_agg
                     ctx.prod.item_agg = prod_item_agg
                     ctx.test.item_agg = test_item_agg
+                    print_memory_snapshot("AFTER AGGREGATION (EXISTING)")
+                    log_dataframe_summary()
                     ctx.phase = 2
                     st.rerun()
                 except Exception as e:
@@ -505,13 +530,13 @@ def _phase2_validation(ctx):
     trailer_layout_test = ctx.test.trailer_layout
     eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
     eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
-    prod_cols = get_column_names(
+    prod_cols = cached_get_column_names(
         prod_paths, eff_prod_type, eff_delim_prod,
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
         trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
     )
-    test_cols = get_column_names(
+    test_cols = cached_get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
@@ -568,12 +593,15 @@ def _phase2_validation(ctx):
         with c1:
             st.metric("Parse Time", f"{m.parse_time:.2f}s")
             st.metric("Aggregation Time", f"{m.aggregation_time:.2f}s")
+            st.metric("Current Memory", f"{m.current_memory:.1f} MB")
         with c2:
             st.metric("Validation Time", f"{m.validation_time:.2f}s")
             st.metric("Report Time", f"{m.report_time:.2f}s")
+            st.metric("Memory Released", f"{m.memory_released_mb:.1f} MB")
         with c3:
             st.metric("Total Time", f"{m.total_execution_time:.2f}s")
             st.metric("Peak Memory", f"{m.peak_memory:.1f} MB")
+            st.metric("Peak Phase", m.peak_memory_phase or "—")
 
     with st.expander("Schema Details", expanded=False):
         st.markdown(f"**BAU Columns ({len(prod_cols)})**: {', '.join(prod_cols)}")
@@ -982,6 +1010,8 @@ def _execute_validation(
             )
         log_phase("Reports Generated")
 
+    print_memory_snapshot("AFTER VALIDATION (EXISTING)")
+    log_dataframe_summary()
     record_execution(ctx.metrics)
     log_phase("Validation Completed")
     log_phase(f"Execution Summary — {ctx.metrics.rows_processed} rows, "
@@ -1076,6 +1106,8 @@ def _generate_file_reviews(
             header_layout=hdr_header_prod,
             trailer_prefix=trailer_prefix_prod,
             trailer_layout=trailer_layout_prod,
+            precomputed_store_agg=ctx.prod.store_agg,
+            precomputed_upc_summary=ctx.prod.item_agg,
         )
     with ProcessingTimer(ctx.metrics, "report", "Test generate_file_review"):
         fr_test = generate_file_review(
@@ -1092,6 +1124,8 @@ def _generate_file_reviews(
             header_layout=hdr_header_test,
             trailer_prefix=trailer_prefix_test,
             trailer_layout=trailer_layout_test,
+            precomputed_store_agg=ctx.test.store_agg,
+            precomputed_upc_summary=ctx.test.item_agg,
         )
     ctx.fr_prod = fr_prod
     ctx.fr_test = fr_test

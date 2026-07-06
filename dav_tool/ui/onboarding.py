@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import streamlit as st
@@ -10,7 +11,10 @@ from dav_tool._parsers import (
 )
 from dav_tool._aggregators import stream_store_aggregate, stream_item_aggregate
 from dav_tool._reports import generate_file_review
-from dav_tool._observability import ProcessingTimer, log_phase, setup_logging
+from dav_tool._observability import (
+    ProcessingTimer, log_phase, setup_logging,
+    print_memory_snapshot, log_dataframe_summary,
+)
 from dav_tool.validation.store import compare_files
 from dav_tool.detection import is_multiline_record, detect_file_type, detect_record_types, detect_hdr_prefix
 from dav_tool.ui.helpers import (
@@ -23,6 +27,16 @@ from dav_tool.format_config import apply_format_config, load_format_config, save
 
 
 def _reset_phase():
+    old = st.session_state.get("onb_ctx")
+    if old is not None:
+        for attr_name in ["store_agg", "item_agg", "upc_summary", "file_review",
+                          "store_df", "comparison_df", "summary_df",
+                          "fr_prod", "fr_test"]:
+            df = getattr(old, attr_name, None)
+            if df is not None:
+                del df
+        del old
+        gc.collect()
     st.session_state.onb_ctx = ProcessingContext()
 
 
@@ -270,6 +284,7 @@ def _phase1_column_mapping(ctx):
                     st.success(f"Config saved to {sp}")
             if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
                 log_phase("Processing Started")
+                print_memory_snapshot("BEFORE AGGREGATION")
                 try:
                     with st.spinner("Aggregating store-level data..."):
                         with ProcessingTimer(ctx.metrics, "aggregation", "stream_store_aggregate"):
@@ -297,6 +312,8 @@ def _phase1_column_mapping(ctx):
 
                     ctx.store_agg = store_agg
                     ctx.item_agg = item_agg
+                    print_memory_snapshot("AFTER AGGREGATION")
+                    log_dataframe_summary()
                     ctx.phase = 2
                     st.rerun()
                 except Exception as e:
@@ -350,12 +367,15 @@ def _phase2_validation(ctx):
         with c1:
             st.metric("Parse Time", f"{m.parse_time:.2f}s")
             st.metric("Aggregation Time", f"{m.aggregation_time:.2f}s")
+            st.metric("Current Memory", f"{m.current_memory:.1f} MB")
         with c2:
             st.metric("Validation Time", f"{m.validation_time:.2f}s")
             st.metric("Report Time", f"{m.report_time:.2f}s")
+            st.metric("Memory Released", f"{m.memory_released_mb:.1f} MB")
         with c3:
             st.metric("Total Time", f"{m.total_execution_time:.2f}s")
             st.metric("Peak Memory", f"{m.peak_memory:.1f} MB")
+            st.metric("Peak Phase", m.peak_memory_phase or "—")
 
     with st.expander("Schema Details", expanded=False):
         st.markdown(f"**Detected Columns ({len(cols)})**: {', '.join(cols)}")
@@ -606,10 +626,14 @@ def _run_validation(
                 header_layout=header_layout,
                 trailer_prefix=trailer_prefix,
                 trailer_layout=trailer_layout,
+                precomputed_store_agg=ctx.store_agg,
+                precomputed_upc_summary=ctx.item_agg,
             )
         ctx.file_review = fr
         log_phase("Reports Generated")
 
+    print_memory_snapshot("AFTER VALIDATION")
+    log_dataframe_summary()
     record_execution(ctx.metrics)
     log_phase("Validation Completed")
     log_phase(f"Execution Summary — {ctx.metrics.rows_processed} rows, "
