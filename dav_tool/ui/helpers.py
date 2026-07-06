@@ -180,7 +180,8 @@ def load_storelist(path, delimiter):
 
 
 def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
-                     record_type=None, header_prefix=None, header_layout=None):
+                     record_type=None, header_prefix=None, header_layout=None,
+                     trailer_prefix=None, trailer_layout=None):
     if not paths:
         return []
     try:
@@ -194,7 +195,8 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
         elif file_type == "multiline":
             if header_prefix and header_layout:
                 flat = preview_flattened_multiline_fixed(
-                    paths, header_prefix, header_layout, layout or [], n_rows=5
+                    paths, header_prefix, header_layout, layout or [], n_rows=5,
+                    trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
                 )
             else:
                 rt_list = record_type.split(",") if record_type else ["H", "D"]

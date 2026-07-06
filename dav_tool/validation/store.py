@@ -74,6 +74,7 @@ def storelevelvalidation(
     start_line=0, record_type=None,
     multiline_record_types=None, multiline_delimiter="|",
     column_names=None, header_prefix=None, header_layout=None,
+    trailer_prefix=None, trailer_layout=None,
     prod_summary=None, test_summary=None,
 ):
     start_time = time.time()
@@ -92,6 +93,8 @@ def storelevelvalidation(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
         )
 
     if test_summary is None:
@@ -108,6 +111,8 @@ def storelevelvalidation(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
         )
 
     result = _compare_store_summaries(prod_summary, test_summary)

@@ -15,6 +15,7 @@ def run_item_validation(
     start_line=0, record_type=None,
     multiline_record_types=None, multiline_delimiter="|",
     column_names=None, header_prefix=None, header_layout=None,
+    trailer_prefix=None, trailer_layout=None,
     bau_summary=None, test_summary=None,
 ):
     start_time = time.time()
@@ -32,6 +33,8 @@ def run_item_validation(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
         )
 
     if test_summary is None:
@@ -47,6 +50,8 @@ def run_item_validation(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
         )
 
     comparison = create_comparison(bau_summary, test_summary)

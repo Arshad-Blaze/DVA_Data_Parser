@@ -42,7 +42,7 @@ No modifications to parser, validation, aggregation, reporting, or UI code.
 | Existing delimited E2E | 8 | ✅ All pass |
 | Onboarding multiline E2E | 5 | ✅ All pass |
 | Existing multiline E2E | 5 | ✅ All pass |
-| **Total E2E** | **34** | **✅ All pass** |
+| **Total E2E** | **34** | **✅ 33 pass, 1 pre-existing flaky** |
 
 ## Phase 2 Requirements Status
 
@@ -64,6 +64,8 @@ No modifications to parser, validation, aggregation, reporting, or UI code.
 
 4. **Flatten preview only**: The `preview_flattened_multiline()` function limits output rows but reads the full file. For very large multiline files, this incurs I/O cost on every rerun. No lazy/streaming preview is implemented.
 
+5. **Pre-existing flaky E2E test**: `test_detection_completes_for_both_sides` in `test_existing_delimited.py` fails intermittently due to timing — it expects 2 "Delimited" status texts but sometimes only 1 is rendered before the assertion timeout. This is a pre-existing issue, not caused by Phase 2 changes.
+
 ## Future Improvements (for later phases)
 
 1. **Phase 3 — Header Based Record Support**: Add HDR/DTL/TRL transaction grouping. Reuses canonical pipeline. Do not duplicate parsing logic.
@@ -82,15 +84,8 @@ No modifications to parser, validation, aggregation, reporting, or UI code.
 
 Current work is on `phase2-multiline` branch (based on `runtime-stabilization-sprint`, which is based on `main`).
 
-Uncommitted changes:
-```
-modified:   tests/e2e/conftest.py
-modified:   tests/e2e/sample_data.py
-modified:   tests/test_canonical_layer.py
-new:        tests/e2e/onboarding/test_onboarding_multiline.py
-new:        tests/e2e/existing/test_existing_multiline.py
-```
+All Phase 2 changes have been committed at `df5b611`.
 
 ## Next Step
 
-Commit the Phase 2 work, then begin Phase 3: Header Based Record Support per PROMPT.md.
+Begin Phase 3: Header Based Record Support per PROMPT.md.

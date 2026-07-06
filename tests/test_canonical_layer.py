@@ -12,6 +12,7 @@ from dav_tool._normalizer import (
     normalize_upc_chunk,
 )
 from dav_tool._aggregators import stream_store_aggregate, stream_item_aggregate, stream_upc_summary
+from dav_tool._parsers import flatten_multiline_fixed_width, preview_flattened_multiline_fixed
 
 
 def test_apply_column_names():
@@ -199,4 +200,168 @@ def test_multiline_canonical_equivalence_delimited(tmp_path):
     )
 
 
+def test_flatten_multiline_fixed_width_backward_compat(tmp_path):
+    """No trailer params = old behavior preserved (chunk-based flush)."""
+    f = tmp_path / "test.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "DTL002Item B\n"
+        "HDR002Store 2\n"
+        "DTL003Item C\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10
+    ))
+    assert len(chunks) == 1, "No trailer = single chunk expected"
+    df = chunks[0]
+    assert len(df) == 3, "3 detail rows expected"
+    assert "store" in df.columns
+    assert "item" in df.columns
 
+
+def test_flatten_multiline_fixed_width_with_trailer(tmp_path):
+    """TRL groups HDR+DTLs into transaction, TRL fields attach to DTL rows."""
+    f = tmp_path / "test.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "DTL002Item B\n"
+        "TRL001   100\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 9, "end": 12, "type": "numeric"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    ))
+    assert len(chunks) == 1, "One TRL = one flush"
+    df = chunks[0]
+    assert len(df) == 2, "2 detail rows expected"
+    assert "store" in df.columns
+    assert "item" in df.columns
+    assert "total" in df.columns
+    assert df["total"].to_list() == ["100", "100"]
+
+
+def test_flatten_multiline_fixed_width_trailer_chunk_size_ignored(tmp_path):
+    """With trailer active, chunk_size is ignored — TRL controls flush."""
+    f = tmp_path / "test.txt"
+    lines = []
+    for i in range(5):
+        lines.append(f"HDR00{i}  Store{i}\n")
+        lines.append(f"DTL00{i}  Item{i}\n")
+        lines.append(f"TRL00{i}  {i*10:>3}\n")
+    f.write_text("".join(lines))
+    hdr_layout = [{"field": "store", "start": 8, "end": 16, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 8, "end": 16, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 8, "end": 12, "type": "numeric"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=1,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    ))
+    assert len(chunks) == 5, "5 TRL = 5 flushes, ignoring chunk_size=1"
+    for i, chunk in enumerate(chunks):
+        assert len(chunk) == 1, f"Chunk {i}: 1 DTL expected"
+        assert chunk["total"].to_list() == [str(i * 10)]
+
+
+def test_flatten_multiline_fixed_width_trailer_no_trl_at_end(tmp_path):
+    """HDR without trailing TRL at EOF yields remaining DTLs."""
+    f = tmp_path / "test.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "TRL001   100\n"
+        "HDR002Store 2\n"
+        "DTL002Item B\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 9, "end": 12, "type": "numeric"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    ))
+    assert len(chunks) == 2
+    assert len(chunks[0]) == 1
+    assert "store" in chunks[0].columns
+    assert "total" in chunks[0].columns
+    assert chunks[0]["store"].to_list() == ["Store 1"]
+    assert chunks[0]["total"].to_list() == ["100"]
+    assert len(chunks[1]) == 1
+    assert "store" in chunks[1].columns
+    assert "total" not in chunks[1].columns
+
+
+def test_flatten_multiline_fixed_width_multiple_transactions(tmp_path):
+    """Multiple HDR-DTLs-TRL groups all produce separate transactions."""
+    f = tmp_path / "multitxn.txt"
+    f.write_text(
+        "HDR001Store A\n"
+        "DTL001Item 1\n"
+        "DTL002Item 2\n"
+        "TRL001 1000\n"
+        "HDR002Store B\n"
+        "DTL003Item 3\n"
+        "TRL002 2000\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 13, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 7, "end": 11, "type": "numeric"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    ))
+    assert len(chunks) == 2
+    assert len(chunks[0]) == 2
+    assert chunks[0]["store"].to_list() == ["Store A", "Store A"]
+    assert chunks[0]["total"].to_list() == ["1000", "1000"]
+    assert len(chunks[1]) == 1
+    assert chunks[1]["store"].to_list() == ["Store B"]
+    assert chunks[1]["total"].to_list() == ["2000"]
+
+
+def test_preview_flattened_multiline_fixed_with_trailer(tmp_path):
+    """Preview function correctly passes trailer params through."""
+    f = tmp_path / "preview.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "DTL002Item B\n"
+        "TRL001   100\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 9, "end": 12, "type": "numeric"}]
+    result = preview_flattened_multiline_fixed(
+        [str(f)], "HDR", hdr_layout, dtl_layout, n_rows=5,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    )
+    assert len(result) == 2
+    assert "total" in result.columns
+    assert result["total"].to_list() == ["100", "100"]
+
+
+def test_flatten_multiline_fixed_width_trailer_no_trailer_layout(tmp_path):
+    """TRL with prefix but no layout still flushes; no extra columns."""
+    f = tmp_path / "test.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "TRL001   100\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10,
+        trailer_prefix="TRL",
+    ))
+    assert len(chunks) == 1
+    df = chunks[0]
+    assert len(df) == 1
+    assert df["store"].to_list() == ["Store 1"]
+    assert "total" not in df.columns

@@ -143,18 +143,38 @@ def flatten_multiline_chunks(
                 yield _fields_to_df(buffer)
 
 
+def _parse_fields(line: str, layout: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Parse fields from *line* using *layout* spec (start/end/type)."""
+    record: Dict[str, str] = {}
+    for col in layout:
+        end = min(col["end"], len(line))
+        raw = line[col["start"] : end].strip()
+        if col["type"] == "numeric":
+            raw = raw.lstrip("0") or "0"
+        elif col["type"] == "date" and len(raw) == 6:
+            raw = f"20{raw[:2]}-{raw[2:4]}-{raw[4:6]}"
+        record[col["field"]] = raw
+    return record
+
+
 def flatten_multiline_fixed_width(
     file_paths: Union[str, List[str]],
     header_prefix: str,
     header_layout: List[Dict[str, Any]],
     detail_layout: List[Dict[str, Any]],
     chunk_size: int = DEFAULT_CHUNK_SIZE,
+    trailer_prefix: Optional[str] = None,
+    trailer_layout: Optional[List[Dict[str, Any]]] = None,
 ) -> Iterator[pl.DataFrame]:
     """Flatten HDR-fixed-width files: extract header fields, merge into detail rows.
 
     Lines starting with *header_prefix* are parsed with *header_layout* and
     their values carried forward to all subsequent detail (non-header) lines,
     which are parsed with *detail_layout*.
+
+    When *trailer_prefix* and *trailer_layout* are provided, lines starting
+    with the trailer prefix act as transaction boundaries: trailer fields are
+    attached to each buffered detail row and the buffer is flushed.
     """
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -164,7 +184,7 @@ def flatten_multiline_fixed_width(
             continue
 
         with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
-            buffer = []
+            buffer: List[Dict[str, str]] = []
             current_header: Dict[str, str] = {}
 
             for line in f:
@@ -173,29 +193,25 @@ def flatten_multiline_fixed_width(
                     continue
 
                 if line.startswith(header_prefix):
+                    current_header = _parse_fields(line, header_layout)
+                elif trailer_prefix and line.startswith(trailer_prefix):
+                    trailer = _parse_fields(line, trailer_layout) if trailer_layout else {}
+
+                    for record in buffer:
+                        record.update(trailer)
+
+                    if buffer:
+                        yield pl.DataFrame(buffer)
+                        buffer.clear()
                     current_header = {}
-                    for col in header_layout:
-                        raw = line[col["start"] : col["end"]].strip()
-                        if col["type"] == "numeric":
-                            raw = raw.lstrip("0") or "0"
-                        elif col["type"] == "date" and len(raw) == 6:
-                            raw = f"20{raw[:2]}-{raw[2:4]}-{raw[4:6]}"
-                        current_header[col["field"]] = raw
                 else:
                     if not current_header:
                         continue
                     record = dict(current_header)
-                    for col in detail_layout:
-                        end = min(col["end"], len(line))
-                        raw = line[col["start"] : end].strip()
-                        if col["type"] == "numeric":
-                            raw = raw.lstrip("0") or "0"
-                        elif col["type"] == "date" and len(raw) == 6:
-                            raw = f"20{raw[:2]}-{raw[2:4]}-{raw[4:6]}"
-                        record[col["field"]] = raw
+                    record.update(_parse_fields(line, detail_layout))
                     buffer.append(record)
 
-                    if len(buffer) >= chunk_size:
+                    if not trailer_prefix and len(buffer) >= chunk_size:
                         yield pl.DataFrame(buffer)
                         buffer.clear()
 
@@ -299,9 +315,12 @@ def preview_flattened_multiline_fixed(
     header_layout: List[Dict[str, Any]],
     detail_layout: List[Dict[str, Any]],
     n_rows: int = DEFAULT_PREVIEW_ROWS,
+    trailer_prefix: Optional[str] = None,
+    trailer_layout: Optional[List[Dict[str, Any]]] = None,
 ) -> pl.DataFrame:
     for chunk in flatten_multiline_fixed_width(
-        file_paths, header_prefix, header_layout, detail_layout, chunk_size=n_rows
+        file_paths, header_prefix, header_layout, detail_layout, chunk_size=n_rows,
+        trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
     ):
         return chunk.head(n_rows)
     return pl.DataFrame()

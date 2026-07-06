@@ -213,6 +213,7 @@ def _phase1_column_mapping(ctx):
                                 multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
                                 column_names=ctx.schema,
                                 header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                                trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
                             )
                     with st.spinner("Aggregating item-level data..."):
                         with ProcessingTimer(ctx.metrics, "aggregation", "stream_item_aggregate"):
@@ -224,6 +225,7 @@ def _phase1_column_mapping(ctx):
                                 multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
                                 column_names=ctx.schema,
                                 header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                                trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
                             )
 
                     ctx.store_agg = store_agg
@@ -313,6 +315,8 @@ def _phase2_validation(ctx):
                 prod_store_col, prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
                 header_prefix=ctx.header_prefix,
                 header_layout=ctx.header_layout,
+                trailer_prefix=ctx.trailer_prefix,
+                trailer_layout=ctx.trailer_layout,
             )
 
     if ctx.done:
@@ -393,11 +397,24 @@ def _hdr_fixed_flow(file_paths, hdr_prefixes):
             hdr_detail_layout = load_layout(dl)
             st.success(f"Detail layout loaded ({len(hdr_detail_layout)} fields)")
 
+    st.subheader("Trailer Layout CSV (optional)")
+    trailer_prefix_hint = ctx.trailer_prefix or "TRL"
+    trailer_prefix_val = st.text_input("Trailer Prefix", value=trailer_prefix_hint, key="onb_tr_prefix")
+    trailer_layout_file = st.text_input("Trailer Layout CSV Path (leave empty if no trailer)", key="onb_hdr_trailer_layout")
+    hdr_trailer_layout = None
+    if trailer_layout_file:
+        tl = clean_path(trailer_layout_file)
+        if os.path.exists(tl):
+            hdr_trailer_layout = load_layout(tl)
+            st.success(f"Trailer layout loaded ({len(hdr_trailer_layout)} fields)")
+
     if st.button("Flatten Records", key="onb_hdr_flatten"):
         if hdr_header_layout and hdr_detail_layout:
             ctx.header_prefix = prefix
             ctx.header_layout = hdr_header_layout
             ctx.detail_layout = hdr_detail_layout
+            ctx.trailer_prefix = trailer_prefix_val.strip() or None
+            ctx.trailer_layout = hdr_trailer_layout
             ctx.ml_flattened = True
             st.rerun()
 
@@ -435,7 +452,8 @@ def _show_hdr_fixed_preview_and_schema(file_paths, prefix):
     hdr_header_layout = ctx.header_layout
     hdr_detail_layout = ctx.detail_layout
     flat_preview = preview_flattened_multiline_fixed(
-        file_paths, prefix, hdr_header_layout, hdr_detail_layout, n_rows=10
+        file_paths, prefix, hdr_header_layout, hdr_detail_layout, n_rows=10,
+        trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
     )
     if not flat_preview.is_empty():
         st.dataframe(flat_preview.to_pandas())
@@ -459,6 +477,7 @@ def _run_validation(
     run_onb_compare, run_upc_summary, run_onb_file_review,
     prod_store_col, prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
     header_prefix=None, header_layout=None,
+    trailer_prefix=None, trailer_layout=None,
 ):
     ctx = st.session_state.onb_ctx
     log_phase("Validation Started")
@@ -512,6 +531,8 @@ def _run_validation(
                 column_names=ctx.schema,
                 header_prefix=header_prefix,
                 header_layout=header_layout,
+                trailer_prefix=trailer_prefix,
+                trailer_layout=trailer_layout,
             )
         ctx.file_review = fr
         log_phase("Reports Generated")

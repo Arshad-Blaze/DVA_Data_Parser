@@ -25,6 +25,8 @@ def generate_file_review(
     column_names: Optional[List[str]] = None,
     header_prefix: Optional[str] = None,
     header_layout: Optional[List[Dict]] = None,
+    trailer_prefix: Optional[str] = None,
+    trailer_layout: Optional[List[Dict]] = None,
 ) -> pl.DataFrame:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -44,6 +46,8 @@ def generate_file_review(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
         )
 
         ua = stream_upc_summary(
@@ -56,6 +60,8 @@ def generate_file_review(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
         )
 
         store_count = sa.height if sa is not None and not sa.is_empty() else 0

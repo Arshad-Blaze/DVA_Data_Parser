@@ -237,6 +237,10 @@ def _phase1_column_mapping(ctx):
     hdr_prefix_test, hdr_header_test = _get_hdr_params(ctx.test)
     hdr_detail_prod = ctx.prod.detail_layout
     hdr_detail_test = ctx.test.detail_layout
+    trailer_prefix_prod = ctx.prod.trailer_prefix
+    trailer_layout_prod = ctx.prod.trailer_layout
+    trailer_prefix_test = ctx.test.trailer_prefix
+    trailer_layout_test = ctx.test.trailer_layout
 
     eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
     eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
@@ -245,11 +249,13 @@ def _phase1_column_mapping(ctx):
         prod_paths, eff_prod_type, eff_delim_prod,
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
     )
     test_cols = get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
     )
 
     st.subheader("Column Mapping")
@@ -332,6 +338,10 @@ def _phase1_column_mapping(ctx):
                 ctx.test.header_prefix = hdr_prefix_test
                 ctx.prod.header_layout = hdr_header_prod
                 ctx.test.header_layout = hdr_header_test
+                ctx.prod.trailer_prefix = trailer_prefix_prod
+                ctx.test.trailer_prefix = trailer_prefix_test
+                ctx.prod.trailer_layout = trailer_layout_prod
+                ctx.test.trailer_layout = trailer_layout_test
                 ctx.prod.eff_layout = eff_layout_prod_cols
                 ctx.test.eff_layout = eff_layout_test_cols
                 ctx.prod.mapping_confirmed = True
@@ -355,6 +365,7 @@ def _phase1_column_mapping(ctx):
                             multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
                             multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
                             header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+                            trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
                         )
                     with st.spinner("Aggregating Test store-level data..."):
                         with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_store_aggregate"):
@@ -369,6 +380,7 @@ def _phase1_column_mapping(ctx):
                             multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
                             multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
                             header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+                            trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
                         )
                     with st.spinner("Aggregating BAU item-level data..."):
                         with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_item_aggregate"):
@@ -382,6 +394,7 @@ def _phase1_column_mapping(ctx):
                             multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
                             multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
                             header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+                            trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
                         )
                     with st.spinner("Aggregating Test item-level data..."):
                         with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_item_aggregate"):
@@ -395,6 +408,7 @@ def _phase1_column_mapping(ctx):
                             multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
                             multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
                             header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+                            trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
                         )
 
                     ctx.prod.store_agg = prod_store_agg
@@ -456,17 +470,23 @@ def _phase2_validation(ctx):
     hdr_prefix_test, hdr_header_test = _get_hdr_params(ctx.test)
     hdr_detail_prod = ctx.prod.detail_layout
     hdr_detail_test = ctx.test.detail_layout
+    trailer_prefix_prod = ctx.prod.trailer_prefix
+    trailer_layout_prod = ctx.prod.trailer_layout
+    trailer_prefix_test = ctx.test.trailer_prefix
+    trailer_layout_test = ctx.test.trailer_layout
     eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
     eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
     prod_cols = get_column_names(
         prod_paths, eff_prod_type, eff_delim_prod,
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
     )
     test_cols = get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
     )
 
     prod_store_col = ctx.prod.store_col
@@ -559,6 +579,8 @@ def _phase2_validation(ctx):
                 ctx.prod.implied_dollars, ctx.prod.implied_units,
                 ctx.test.implied_dollars, ctx.test.implied_units,
                 run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
+                trailer_prefix_prod=trailer_prefix_prod, trailer_layout_prod=trailer_layout_prod,
+                trailer_prefix_test=trailer_prefix_test, trailer_layout_test=trailer_layout_test,
             )
 
     if ctx.validation_done:
@@ -670,6 +692,13 @@ def _multiline_side_inputs(file_paths, side_ctx: ProcessingContext, side_label: 
         if df and os.path.exists(clean_path(df)):
             side_ctx.detail_layout = load_layout(clean_path(df))
             st.success("Detail layout ready")
+
+        tf = st.text_input(f"{side_label} Trailer Layout CSV (optional)", key=f"ex_hdr_trailer_file_{key_prefix}")
+        tr_prefix = st.text_input(f"{side_label} Trailer Prefix", value="TRL", key=f"ex_tr_prefix_{key_prefix}")
+        if tf and os.path.exists(clean_path(tf)):
+            side_ctx.trailer_layout = load_layout(clean_path(tf))
+            side_ctx.trailer_prefix = tr_prefix.strip() or None
+            st.success("Trailer layout ready")
     else:
         detected = detect_record_types(file_paths[0])
         rt_default = ",".join(detected) if detected else "H,D"
@@ -699,6 +728,8 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     ctx.prod.header_layout or [],
                     ctx.prod.detail_layout or [],
                     n_rows=10,
+                    trailer_prefix=ctx.prod.trailer_prefix,
+                    trailer_layout=ctx.prod.trailer_layout,
                 )
             else:
                 fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=10)
@@ -714,6 +745,8 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     ctx.test.header_layout or [],
                     ctx.test.detail_layout or [],
                     n_rows=10,
+                    trailer_prefix=ctx.test.trailer_prefix,
+                    trailer_layout=ctx.test.trailer_layout,
                 )
             else:
                 fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=10)
@@ -733,6 +766,8 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     ctx.prod.header_layout or [],
                     ctx.prod.detail_layout or [],
                     n_rows=5,
+                    trailer_prefix=ctx.prod.trailer_prefix,
+                    trailer_layout=ctx.prod.trailer_layout,
                 )
             else:
                 fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=5)
@@ -751,6 +786,8 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     ctx.test.header_layout or [],
                     ctx.test.detail_layout or [],
                     n_rows=5,
+                    trailer_prefix=ctx.test.trailer_prefix,
+                    trailer_layout=ctx.test.trailer_layout,
                 )
             else:
                 fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=5)
@@ -805,6 +842,8 @@ def _execute_validation(
     isimplied_dollars_prod, isimplied_units_prod,
     isimplied_dollars_test, isimplied_units_test,
     run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
+    trailer_prefix_prod=None, trailer_layout_prod=None,
+    trailer_prefix_test=None, trailer_layout_test=None,
 ):
     ctx = st.session_state.ex_ctx
     log_phase("Validation Started")
@@ -850,6 +889,8 @@ def _execute_validation(
                 multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
                 header_prefix=ctx.prod.header_prefix,
                 header_layout=ctx.prod.header_layout,
+                trailer_prefix=trailer_prefix_prod,
+                trailer_layout=trailer_layout_prod,
                 prod_summary=prod_store_agg, test_summary=test_store_agg,
             )
         ctx.store_df = store_df
@@ -869,6 +910,8 @@ def _execute_validation(
                 multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
                 header_prefix=ctx.prod.header_prefix,
                 header_layout=ctx.prod.header_layout,
+                trailer_prefix=trailer_prefix_prod,
+                trailer_layout=trailer_layout_prod,
                 bau_summary=prod_item_agg, test_summary=test_item_agg,
             )
         ctx.comparison_df = comparison_df
@@ -894,6 +937,8 @@ def _execute_validation(
                 isimplied_dollars_test, isimplied_units_test,
                 hdr_prefix_prod, hdr_prefix_test,
                 hdr_header_prod, hdr_header_test,
+                trailer_prefix_prod, trailer_layout_prod,
+                trailer_prefix_test, trailer_layout_test,
             )
         log_phase("Reports Generated")
 
@@ -928,6 +973,8 @@ def _compare_stores(
                 multiline_delimiter=ctx.ml_delimiter, column_names=ctx.prod.schema,
                 header_prefix=ctx.prod.header_prefix,
                 header_layout=ctx.prod.header_layout,
+                trailer_prefix=ctx.prod.trailer_prefix,
+                trailer_layout=ctx.prod.trailer_layout,
             ).select(["STORE_NUMBER"])
 
     if test_store_agg is not None:
@@ -944,6 +991,8 @@ def _compare_stores(
                 multiline_delimiter=ctx.ml_delimiter, column_names=ctx.test.schema,
                 header_prefix=ctx.test.header_prefix,
                 header_layout=ctx.test.header_layout,
+                trailer_prefix=ctx.test.trailer_prefix,
+                trailer_layout=ctx.test.trailer_layout,
             ).select(["STORE_NUMBER"])
 
     if not prod_series.is_empty() and not test_series.is_empty():
@@ -967,6 +1016,8 @@ def _generate_file_reviews(
     isimplied_dollars_test, isimplied_units_test,
     hdr_prefix_prod=None, hdr_prefix_test=None,
     hdr_header_prod=None, hdr_header_test=None,
+    trailer_prefix_prod=None, trailer_layout_prod=None,
+    trailer_prefix_test=None, trailer_layout_test=None,
 ):
     ctx = st.session_state.ex_ctx
 
@@ -983,6 +1034,8 @@ def _generate_file_reviews(
             multiline_delimiter=ctx.ml_delimiter, column_names=ctx.prod.schema,
             header_prefix=hdr_prefix_prod,
             header_layout=hdr_header_prod,
+            trailer_prefix=trailer_prefix_prod,
+            trailer_layout=trailer_layout_prod,
         )
     with ProcessingTimer(ctx.metrics, "report", "Test generate_file_review"):
         fr_test = generate_file_review(
@@ -997,6 +1050,8 @@ def _generate_file_reviews(
             multiline_delimiter=ctx.ml_delimiter, column_names=ctx.test.schema,
             header_prefix=hdr_prefix_test,
             header_layout=hdr_header_test,
+            trailer_prefix=trailer_prefix_test,
+            trailer_layout=trailer_layout_test,
         )
     ctx.fr_prod = fr_prod
     ctx.fr_test = fr_test

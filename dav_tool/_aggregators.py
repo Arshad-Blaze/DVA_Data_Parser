@@ -76,6 +76,8 @@ def stream_store_aggregate(
     column_names: Optional[List[str]] = None,
     header_prefix: Optional[str] = None,
     header_layout: Optional[List[Dict]] = None,
+    trailer_prefix: Optional[str] = None,
+    trailer_layout: Optional[List[Dict]] = None,
 ) -> pl.DataFrame:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -96,7 +98,8 @@ def stream_store_aggregate(
     aggs = []
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
                           record_type, multiline_record_types, multiline_delimiter,
-                          header_prefix, header_layout)
+                          header_prefix, header_layout,
+                          trailer_prefix, trailer_layout)
 
     for chunk in chunks:
         chunk = apply_column_names(chunk, column_names)
@@ -133,6 +136,8 @@ def stream_item_aggregate(
     column_names: Optional[List[str]] = None,
     header_prefix: Optional[str] = None,
     header_layout: Optional[List[Dict]] = None,
+    trailer_prefix: Optional[str] = None,
+    trailer_layout: Optional[List[Dict]] = None,
 ) -> pl.DataFrame:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -153,7 +158,8 @@ def stream_item_aggregate(
     aggs = []
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
                           record_type, multiline_record_types, multiline_delimiter,
-                          header_prefix, header_layout)
+                          header_prefix, header_layout,
+                          trailer_prefix, trailer_layout)
 
     for chunk in chunks:
         chunk = apply_column_names(chunk, column_names)
@@ -191,6 +197,8 @@ def stream_upc_summary(
     column_names: Optional[List[str]] = None,
     header_prefix: Optional[str] = None,
     header_layout: Optional[List[Dict]] = None,
+    trailer_prefix: Optional[str] = None,
+    trailer_layout: Optional[List[Dict]] = None,
 ) -> pl.DataFrame:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -210,7 +218,8 @@ def stream_upc_summary(
     aggs = []
     chunks = _iter_chunks(file_paths, file_type, layout, start_line,
                           record_type, multiline_record_types, multiline_delimiter,
-                          header_prefix, header_layout)
+                          header_prefix, header_layout,
+                          trailer_prefix, trailer_layout)
 
     for chunk in chunks:
         chunk = apply_column_names(chunk, column_names)
@@ -231,13 +240,15 @@ def stream_upc_summary(
 
 def _iter_chunks(file_paths, file_type, layout, start_line,
                  record_type, multiline_record_types, multiline_delimiter,
-                 header_prefix=None, header_layout=None):
+                 header_prefix=None, header_layout=None,
+                 trailer_prefix=None, trailer_layout=None):
     if file_type == "fixed":
         return parse_fixed_width_chunks(file_paths, layout, start_line, record_type)
     elif file_type == "multiline":
         if header_prefix and header_layout:
             return flatten_multiline_fixed_width(
-                file_paths, header_prefix, header_layout, layout or []
+                file_paths, header_prefix, header_layout, layout or [],
+                trailer_prefix=trailer_prefix, trailer_layout=trailer_layout
             )
         rtypes = multiline_record_types or ["H", "D"]
         return flatten_multiline_chunks(file_paths, rtypes, multiline_delimiter)
