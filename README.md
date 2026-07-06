@@ -100,7 +100,17 @@ E2E test benchmark results: [BENCHMARK.md](tests/e2e/BENCHMARK.md)
 ## Workflow Overview
 
 ```
-=== Quick start (with config file) ===
+=== Configuration Builder (new workflow) ===
+1. Select page: Onboarding or Existing
+2. Point to file(s) — format is auto-detected
+3. Click "Generate Configuration" — reads only a sample (100 rows)
+4. Review detected settings: encoding, delimiter, schema, data types, column mapping
+5. Edit settings directly in the UI: column mapping, price type, implied decimals, validations
+6. Click "Accept Configuration" — config is locked, no further inference
+7. Proceed to processing — full dataset read exactly once
+8. Review results and download CSVs
+
+=== Quick start (with pre-saved config file) ===
 1. Save your parsing settings as a JSON config (once)
 2. Select page: Onboarding or Existing
 3. Point to file(s)
@@ -109,7 +119,7 @@ E2E test benchmark results: [BENCHMARK.md](tests/e2e/BENCHMARK.md)
 6. Choose validations and run
 7. Review results
 
-=== Manual setup ===
+=== Manual setup (legacy) ===
 1. Get input specs from data team (layout CSVs, column mapping, delimiter, etc.)
 2. Select page: Onboarding (single file) or Existing (BAU vs Test)
 3. Point to file(s) — format is auto-detected

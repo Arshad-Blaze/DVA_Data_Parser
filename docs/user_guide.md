@@ -271,32 +271,207 @@ TRL   15   149.85
 
 Instead of going through the manual setup each time, you can save your parsing settings as a **JSON config file** and load it on subsequent runs.
 
-### What a config file contains
+### Sample configurations by file type
+
+#### Delimited (CSV / pipe / tab)
 
 ```json
 {
-  "version": 1,
-  "name": "Retailer X Format",
-  "file_type": "multiline",
-  "ml_record_types": ["H", "D"],
-  "ml_delimiter": "|",
-  "header_prefix": "HDR",
-  "header_layout_file": "/path/to/header_layout.csv",
-  "detail_layout_file": "/path/to/detail_layout.csv",
-  "trailer_prefix": "TRL",
-  "trailer_layout_file": "/path/to/trailer_layout.csv",
+  "version": 2,
+  "name": "Retailer X — Delimited",
+  "file_type": "delimited",
+  "encoding": "cp1252",
+  "has_header": true,
+  "delimiter": ",",
+  "start_line": 0,
+  "record_type": null,
+  "detected_columns": ["Store", "UPC", "Description", "Units", "Price"],
+  "detected_data_types": {
+    "Store": "String",
+    "UPC": "Int64",
+    "Description": "String",
+    "Units": "Int64",
+    "Price": "Float64"
+  },
+  "suggested_mapping": {
+    "store": "Store",
+    "upc": "UPC",
+    "description": "Description",
+    "units": "Units",
+    "price": "Price"
+  },
   "store_col": "Store",
   "upc_col": "UPC",
   "desc_col": "Description",
   "units_col": "Units",
   "price_col": "Price",
+  "price_type": "Total Price",
+  "implied_dollars": false,
+  "implied_units": false,
+  "locked": false
+}
+```
+
+#### Fixed-width
+
+```json
+{
+  "version": 2,
+  "name": "Retailer Y — Fixed-Width",
+  "file_type": "fixed",
+  "encoding": "cp1252",
+  "has_header": false,
   "delimiter": null,
-  "start_line": 0,
-  "record_type": null
+  "start_line": 1,
+  "record_type": "U",
+  "layout_file": "/path/to/layout.csv",
+  "detected_columns": ["Store", "UPC", "Description", "Units", "Price"],
+  "detected_data_types": {
+    "Store": "String",
+    "UPC": "Int64",
+    "Description": "String",
+    "Units": "Int64",
+    "Price": "Float64"
+  },
+  "suggested_mapping": {
+    "store": "Store",
+    "upc": "UPC",
+    "description": "Description",
+    "units": "Units",
+    "price": "Price"
+  },
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "units_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price",
+  "implied_dollars": false,
+  "implied_units": false,
+  "locked": false
 }
 ```
 
 Layout file paths can be absolute or relative to the config file's directory.
+
+#### Multi-line HDR (delimited)
+
+```json
+{
+  "version": 2,
+  "name": "Retailer Z — Multiline Delimited",
+  "file_type": "multiline",
+  "encoding": "cp1252",
+  "has_header": false,
+  "delimiter": "|",
+  "start_line": 0,
+  "ml_record_types": ["H", "D"],
+  "ml_delimiter": "|",
+  "schema": ["Store", "Date", "UPC", "Description", "Units", "Price"],
+  "detected_columns": ["Store", "Date", "UPC", "Description", "Units", "Price"],
+  "detected_data_types": {
+    "Store": "String",
+    "Date": "String",
+    "UPC": "Int64",
+    "Description": "String",
+    "Units": "Int64",
+    "Price": "Float64"
+  },
+  "suggested_mapping": {
+    "store": "Store",
+    "upc": "UPC",
+    "description": "Description",
+    "units": "Units",
+    "price": "Price"
+  },
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "units_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price",
+  "implied_dollars": false,
+  "implied_units": false,
+  "locked": false
+}
+```
+
+#### HDR Fixed-Width (with Trailer)
+
+```json
+{
+  "version": 2,
+  "name": "Retailer W — HDR Fixed-Width",
+  "file_type": "multiline",
+  "encoding": "cp1252",
+  "has_header": false,
+  "delimiter": null,
+  "start_line": 0,
+  "header_prefix": "HDR",
+  "header_layout_file": "/path/to/header_layout.csv",
+  "detail_layout_file": "/path/to/detail_layout.csv",
+  "trailer_prefix": "TRL",
+  "trailer_layout_file": "/path/to/trailer_layout.csv",
+  "schema": ["Store", "Date", "UPC", "Description", "Units", "Price", "TotalUnits", "TotalPrice"],
+  "detected_columns": ["Store", "Date", "UPC", "Description", "Units", "Price", "TotalUnits", "TotalPrice"],
+  "detected_data_types": {
+    "Store": "String",
+    "Date": "String",
+    "UPC": "Int64",
+    "Description": "String",
+    "Units": "Int64",
+    "Price": "Float64",
+    "TotalUnits": "Int64",
+    "TotalPrice": "Float64"
+  },
+  "suggested_mapping": {
+    "store": "Store",
+    "upc": "UPC",
+    "description": "Description",
+    "units": "Units",
+    "price": "Price"
+  },
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "units_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price",
+  "implied_dollars": false,
+  "implied_units": false,
+  "locked": false
+}
+```
+
+### Config file fields explained
+
+| Field | Description |
+|---|---|
+| `version` | Config format version (currently 2) |
+| `name` | Optional friendly name for this configuration |
+| `file_type` | `delimited`, `fixed`, or `multiline` |
+| `encoding` | File encoding detected (`cp1252`, `utf-8`, etc.) |
+| `has_header` | Whether the file has a header row |
+| `delimiter` | Delimiter character for delimited files |
+| `start_line` | Number of lines to skip at the top |
+| `record_type` | Line prefix filter (e.g. `U` for UPC records only) |
+| `layout_file` | Path to layout CSV (for fixed-width) |
+| `header_prefix` | Multi-character header prefix (e.g. `HDR`) for HDR files |
+| `header_layout_file` | Layout CSV for HDR header records |
+| `detail_layout_file` | Layout CSV for HDR detail records |
+| `trailer_prefix` | Trailer line prefix (e.g. `TRL`) |
+| `trailer_layout_file` | Layout CSV for trailer records |
+| `ml_record_types` | List of record-type prefixes (e.g. `["H", "D"]`) |
+| `ml_delimiter` | Delimiter used inside multiline records |
+| `schema` | Full list of column names after flattening |
+| `detected_columns` | Column names detected from the sample |
+| `detected_data_types` | Map of column name to inferred data type |
+| `suggested_mapping` | Auto-detected column role mapping |
+| `store_col` / `upc_col` / `desc_col` / `units_col` / `price_col` | Mapped column names |
+| `price_type` | `Total Price` or `Unit Price` |
+| `implied_dollars` / `implied_units` | Divide by 100 for implied decimals |
+| `validation_config` | Per-validation enable/disable and column requirements |
+| `locked` | Whether the config has been accepted by the user |
 
 ### How to save a config
 
