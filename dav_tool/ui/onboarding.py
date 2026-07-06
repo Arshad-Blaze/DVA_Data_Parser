@@ -28,6 +28,15 @@ from dav_tool.config_builder import build_config
 from dav_tool.ui.helpers import display_config_review, edit_and_accept_config
 
 
+def _get_validation_config(ctx):
+    """Return ValidationConfig from context or a default instance."""
+    cfg = getattr(ctx, '_generated_config', None)
+    if cfg is not None and hasattr(cfg, 'validation_config'):
+        return cfg.validation_config
+    from dav_tool.format_config import ValidationConfig
+    return ValidationConfig()
+
+
 def _reset_phase():
     old = st.session_state.get("onb_ctx")
     if old is not None:
@@ -437,13 +446,24 @@ def _phase2_validation(ctx):
             st.markdown(f"**Store List**: {ctx.storelist_path}")
             st.markdown(f"**Store List Delimiter**: {storelist_delim}")
 
+    vc = _get_validation_config(ctx)
     st.subheader("Select Validations")
-    run_onb_compare = st.checkbox("Compare Store List", value=True)
-    run_upc_summary = st.checkbox("Generate Unique UPC Summary", value=True)
-    run_onb_file_review = st.checkbox("File Review Report", value=False)
+    run_onb_compare = st.checkbox(
+        "Compare Store List", value=vc.compare_store_list.enabled,
+    )
+    run_upc_summary = st.checkbox(
+        "Generate Unique UPC Summary", value=vc.item_validation.enabled,
+    )
+    run_onb_file_review = st.checkbox(
+        "File Review Report", value=vc.file_review.enabled,
+    )
 
     if st.button("Validate Onboarding", use_container_width=True, type="primary"):
         with st.spinner("Running validations..."):
+            # Apply validation config overrides
+            run_onb_compare = run_onb_compare and vc.compare_store_list.enabled
+            run_upc_summary = run_upc_summary and vc.item_validation.enabled
+            run_onb_file_review = run_onb_file_review and vc.file_review.enabled
             _run_validation(
                 fp, ft, pd, ll, sl, rt, cols,
                 storelist_path, storelist_delim, storelist_store_col,

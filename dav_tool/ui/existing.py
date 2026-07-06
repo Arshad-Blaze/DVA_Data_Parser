@@ -34,6 +34,17 @@ from dav_tool.config_builder import build_config
 from dav_tool.ui.helpers import display_config_review, edit_and_accept_config
 
 
+def _get_ex_validation_config(ctx):
+    """Return ValidationConfig from prod/test config or a default."""
+    side = getattr(ctx, 'prod', None)
+    if side is not None:
+        cfg = getattr(side, '_generated_config', None)
+        if cfg is not None and hasattr(cfg, 'validation_config'):
+            return cfg.validation_config
+    from dav_tool.format_config import ValidationConfig
+    return ValidationConfig()
+
+
 def _reset_phase():
     old = st.session_state.get("ex_ctx")
     if old is not None:
@@ -692,18 +703,25 @@ def _phase2_validation(ctx):
         st.markdown(f"- Store: {test_store_col}, UPC: {test_upc_col}")
         st.markdown(f"- Description: {test_desc_col}, Units: {test_units_col}, Price: {test_price_col}")
 
+    vc = _get_ex_validation_config(ctx)
     st.subheader("Select Validations")
     colA, colB = st.columns(2)
     with colA:
-        run_store = st.checkbox("Store Level Validation", value=True)
-        run_item = st.checkbox("Item Level Validation", value=True)
+        run_store = st.checkbox("Store Level Validation", value=vc.store_validation.enabled)
+        run_item = st.checkbox("Item Level Validation", value=vc.item_validation.enabled)
     with colB:
-        run_compare_existing = st.checkbox("Compare Store List", value=True)
-        run_summary = st.checkbox("Summary (requires Item)", value=True)
-        run_file_review_existing = st.checkbox("File Review Report", value=False)
+        run_compare_existing = st.checkbox("Compare Store List", value=vc.compare_store_list.enabled)
+        run_summary = st.checkbox("Summary (requires Item)", value=vc.item_validation.enabled)
+        run_file_review_existing = st.checkbox("File Review Report", value=vc.file_review.enabled)
 
     if st.button("Validate", use_container_width=True, type="primary"):
         with st.spinner("Running validations..."):
+            # Apply validation config overrides
+            run_store = run_store and vc.store_validation.enabled
+            run_item = run_item and vc.item_validation.enabled
+            run_compare_existing = run_compare_existing and vc.compare_store_list.enabled
+            run_summary = run_summary and vc.item_validation.enabled
+            run_file_review_existing = run_file_review_existing and vc.file_review.enabled
             _execute_validation(
                 prod_paths, test_paths, prod_type, test_type,
                 prod_delim, test_delim,
