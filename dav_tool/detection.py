@@ -65,9 +65,13 @@ def is_multiline_record(file_path):
         text_prefixes = set()
         data_count = 0
         for line in lines:
-            if len(line) >= 3 and line[:2].isalpha() and line[2].isdigit():
-                text_prefixes.add(line[:3])
-            elif line and line[0].isdigit():
+            found = False
+            for i in range(2, min(6, len(line))):
+                if line[:i].isalpha() and i < len(line) and line[i].isdigit():
+                    text_prefixes.add(line[:i])
+                    found = True
+                    break
+            if not found and line and line[0].isdigit():
                 data_count += 1
 
         if len(text_prefixes) >= 1 and data_count >= 2:

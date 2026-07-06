@@ -102,6 +102,84 @@ def create_hdr_fixed_width(directory: str, filename: str = "hdr_fixed.txt") -> T
     return data_path, header_layout_path, detail_layout_path
 
 
+def create_hdr_trailer_test_data(directory: str) -> dict:
+    header_layout_path = os.path.join(directory, "trl_header_layout.csv")
+    with open(header_layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["6", "4", "Store", "text"])
+        w.writerow(["13", "8", "Date", "text"])
+
+    detail_layout_path = os.path.join(directory, "trl_detail_layout.csv")
+    with open(detail_layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["1", "12", "UPC", "text"])
+        w.writerow(["13", "21", "Description", "text"])
+        w.writerow(["34", "2", "Units", "numeric"])
+        w.writerow(["36", "8", "Price", "numeric"])
+
+    trailer_layout_path = os.path.join(directory, "trl_trailer_layout.csv")
+    with open(trailer_layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["4", "5", "TotalUnits", "numeric"])
+        w.writerow(["10", "9", "TotalPrice", "numeric"])
+
+    def hdr_header(store, seq, date):
+        return f"HDR{seq:02d}{store:<4}   {date}\n"
+
+    def hdr_detail(upc, desc, units, price):
+        return f"{upc:<12}{desc:<21}{units:>2}{price:>8}     \n"
+
+    def hdr_trailer(total_units, total_price):
+        return f"TRL{total_units:>5}{total_price:>9}\n"
+
+    # Onboarding: single dir with HDR + DTL + TRL
+    onb_dir = os.path.join(directory, "onb_trl")
+    os.makedirs(onb_dir, exist_ok=True)
+    onb_file = os.path.join(onb_dir, "onb_trl_data.txt")
+    with open(onb_file, "w") as f:
+        f.write(hdr_header("S001", 1, "2024-01-15"))
+        f.write(hdr_detail("100001", "Widget A", "10", "99.90"))
+        f.write(hdr_detail("100002", "Gadget B", "5", "49.95"))
+        f.write(hdr_trailer("15", "149.85"))
+        f.write(hdr_header("S002", 2, "2024-01-15"))
+        f.write(hdr_detail("100001", "Widget A", "8", "79.92"))
+        f.write(hdr_trailer("8", "79.92"))
+
+    # Existing: BAU and Test dirs
+    bau_dir = os.path.join(directory, "bau_trl")
+    os.makedirs(bau_dir, exist_ok=True)
+    bau_file = os.path.join(bau_dir, "bau_trl_data.txt")
+    with open(bau_file, "w") as f:
+        f.write(hdr_header("S001", 1, "2024-01-15"))
+        f.write(hdr_detail("100001", "Widget A", "10", "99.90"))
+        f.write(hdr_detail("100002", "Gadget B", "5", "49.95"))
+        f.write(hdr_trailer("15", "149.85"))
+
+    test_dir = os.path.join(directory, "test_trl")
+    os.makedirs(test_dir, exist_ok=True)
+    test_file = os.path.join(test_dir, "test_trl_data.txt")
+    with open(test_file, "w") as f:
+        f.write(hdr_header("S001", 1, "2024-01-15"))
+        f.write(hdr_detail("100001", "Widget A", "12", "119.88"))
+        f.write(hdr_detail("100002", "Gadget B", "5", "49.95"))
+        f.write(hdr_trailer("17", "169.83"))
+
+    return {
+        "trl_data_dir": onb_dir,
+        "trl_data_file": onb_file,
+        "trl_header_layout": header_layout_path,
+        "trl_detail_layout": detail_layout_path,
+        "trl_trailer_layout": trailer_layout_path,
+        "bau_trl_dir": bau_dir,
+        "bau_trl_file": bau_file,
+        "test_trl_dir": test_dir,
+        "test_trl_file": test_file,
+    }
+
+
 def create_multiline_flow_test_data(directory: str) -> dict:
     bau_dir = os.path.join(directory, "bau_ml")
     os.makedirs(bau_dir, exist_ok=True)
