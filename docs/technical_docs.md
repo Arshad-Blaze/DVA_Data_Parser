@@ -39,6 +39,7 @@
 │  dav_tool/config.py       dav_tool/types.py         │
 │  dav_tool/processing_context.py                     │
 │  dav_tool/_normalizer.py                            │
+│  dav_tool/format_config.py                          │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -233,6 +234,32 @@ cat /tmp/dav_test_results/full_test_report.txt
 1. Add aggregation logic to `_aggregators.py` or reuse existing `stream_store_aggregate`
 2. Add validation/comparison function in `validation/`
 3. Wire into `ui/onboarding.py` or `ui/existing.py` with checkbox + results display
+
+---
+
+## Configuration Layer
+
+### `dav_tool/format_config.py`
+
+| Function | Description |
+|---|---|
+| `FormatConfig` | Dataclass with all parsing settings: file_type, delimiter, layout paths, multiline/HDR/TRL config, column mapping |
+| `load_format_config(path)` | Loads a `FormatConfig` from JSON file |
+| `save_format_config(config, path)` | Saves a `FormatConfig` to JSON file |
+| `apply_format_config(config, ctx, config_dir, file_paths)` | Applies config to a `ProcessingContext` — sets fields, loads layout CSVs (resolved relative to config dir), flattens multiline data, auto-applies schema |
+| `config_from_ctx(ctx)` | Builds a `FormatConfig` from a configured `ProcessingContext` (used for saving) |
+
+Layout file paths in the config are resolved relative to the config file's directory (or kept absolute). `apply_format_config` is purely additive — it modifies `ProcessingContext` fields without touching parser/aggregator/validation code.
+
+### Usage flow
+
+```
+User provides config JSON → load_format_config() → apply_format_config() → ctx populated
+                                                                              ↓
+                                                              For multiline: flatten + schema auto-applied
+                                                                              ↓
+                                                              UI shows preview → user proceeds to column mapping
+```
 
 ---
 
