@@ -19,6 +19,7 @@ from dav_tool.ui.helpers import (
     display_processing_history, smart_column_indices, validate_column_mapping,
 )
 from dav_tool.processing_context import ProcessingContext
+from dav_tool.format_config import apply_format_config, load_format_config, save_format_config, config_from_ctx
 
 
 def _reset_phase():
@@ -63,51 +64,110 @@ def _phase0_parsing_and_preview(ctx):
 
     if prod_txt and file_paths:
         log_phase(f"Folder Selected — {prod_txt} ({len(file_paths)} files)")
-        log_phase("Detection Started")
-        if is_multiline_record(file_paths[0]):
-            st.warning("Multi-line structured file detected")
-            file_type = "multiline"
-            _multiline_flow(file_paths)
-        else:
-            file_type, prod_delim = detect_file_type(file_paths[0])
-            if file_type == "delimited":
-                st.success(f"Delimited ({prod_delim})")
+
+        # === Config Load ===
+        config_file = clean_path(st.text_input("Optional: Load Config (JSON)", key="onb_config_file"))
+        if config_file and os.path.exists(config_file):
+            if not getattr(ctx, '_config_applied', False):
+                config = load_format_config(config_file)
+                apply_format_config(config, ctx, os.path.dirname(config_file), file_paths)
+                ctx._config_applied = True
+                ctx._config_name = config.name or ''
+                st.rerun()
+            if getattr(ctx, '_config_applied', False):
+                st.success(f"Config '{ctx._config_name or 'unnamed'}' loaded")
+
+        # Use ctx fields when config was applied
+        if getattr(ctx, '_config_applied', False):
+            if ctx.file_type == "multiline":
+                file_type = "multiline"
+                if ctx.schema:
+                    cols = ctx.schema
+                if ctx.header_prefix and ctx.header_layout and ctx.detail_layout:
+                    st.subheader("Flattened Preview (from config)")
+                    flat = preview_flattened_multiline_fixed(
+                        file_paths, ctx.header_prefix, ctx.header_layout,
+                        ctx.detail_layout, n_rows=10,
+                        trailer_prefix=ctx.trailer_prefix,
+                        trailer_layout=ctx.trailer_layout,
+                    )
+                    if not flat.is_empty():
+                        st.dataframe(flat.to_pandas().head(10))
+                elif ctx.ml_record_types:
+                    st.subheader("Flattened Preview (from config)")
+                    flat = preview_flattened_multiline(
+                        file_paths, ctx.ml_record_types, ctx.ml_delimiter, n_rows=10,
+                    )
+                    if not flat.is_empty():
+                        st.dataframe(flat.to_pandas().head(10))
             else:
-                st.warning("Fixed-width file")
-                file_type = "fixed"
-                layout_file = st.text_input("Layout CSV")
-                if layout_file:
-                    layout_file = clean_path(layout_file)
-                    if os.path.exists(layout_file):
-                        layout_list = load_layout(layout_file)
-                        st.success("Layout loaded")
-
-    if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0]):
-        st.subheader("Fixed Width Settings")
-        colA, colB = st.columns(2)
-        with colA:
-            start_line = st.number_input("Start Line", min_value=0, value=0)
-        with colB:
-            record_type = st.text_input("Record Type (e.g., U)", value="")
-
-    if file_type and file_type != "multiline" and file_paths:
-        st.subheader("Data Preview")
-        df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
-                                  n_rows=10, start_line=start_line, record_type=record_type)
-        if not df_preview.is_empty():
-            st.dataframe(df_preview.to_pandas().head(10))
-
-    if file_type:
-        log_phase(f"Detection Completed — {file_type}")
-
-    if file_type and file_type == "multiline":
-        if ctx.ml_flattened and ctx.schema:
-            cols = ctx.schema
+                file_type = ctx.file_type
+                prod_delim = ctx.delimiter
+                layout_list = ctx.layout
+                start_line = ctx.start_line
+                record_type = ctx.record_type or ""
+                if file_paths:
+                    cols = get_column_names(
+                        file_paths, file_type, prod_delim or ",",
+                        layout_list, start_line, record_type,
+                        header_prefix=ctx.header_prefix,
+                        header_layout=ctx.header_layout,
+                        trailer_prefix=ctx.trailer_prefix,
+                        trailer_layout=ctx.trailer_layout,
+                    )
+                    st.subheader("Data Preview")
+                    df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
+                                              n_rows=10, start_line=start_line, record_type=record_type)
+                    if not df_preview.is_empty():
+                        st.dataframe(df_preview.to_pandas().head(10))
         else:
-            cols = []
-    elif file_type and file_paths:
-        cols = get_column_names(file_paths, file_type, prod_delim or ",", layout_list,
-                                 start_line, record_type)
+            # Normal detection flow
+            log_phase("Detection Started")
+            if is_multiline_record(file_paths[0]):
+                st.warning("Multi-line structured file detected")
+                file_type = "multiline"
+                _multiline_flow(file_paths)
+            else:
+                file_type, prod_delim = detect_file_type(file_paths[0])
+                if file_type == "delimited":
+                    st.success(f"Delimited ({prod_delim})")
+                else:
+                    st.warning("Fixed-width file")
+                    file_type = "fixed"
+                    layout_file = st.text_input("Layout CSV")
+                    if layout_file:
+                        layout_file = clean_path(layout_file)
+                        if os.path.exists(layout_file):
+                            layout_list = load_layout(layout_file)
+                            st.success("Layout loaded")
+
+        if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0]):
+            st.subheader("Fixed Width Settings")
+            colA, colB = st.columns(2)
+            with colA:
+                start_line = st.number_input("Start Line", min_value=0, value=start_line)
+            with colB:
+                record_type = st.text_input("Record Type (e.g., U)", value=record_type or "")
+
+        if file_type and file_type != "multiline" and file_paths and not getattr(ctx, '_config_applied', False):
+            st.subheader("Data Preview")
+            df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
+                                      n_rows=10, start_line=start_line, record_type=record_type)
+            if not df_preview.is_empty():
+                st.dataframe(df_preview.to_pandas().head(10))
+
+        if file_type and not getattr(ctx, '_config_applied', False):
+            log_phase(f"Detection Completed — {file_type}")
+
+        if not getattr(ctx, '_config_applied', False):
+            if file_type and file_type == "multiline":
+                if ctx.ml_flattened and ctx.schema:
+                    cols = ctx.schema
+                else:
+                    cols = []
+            elif file_type and file_paths:
+                cols = get_column_names(file_paths, file_type, prod_delim or ",", layout_list,
+                                         start_line, record_type)
 
     if cols:
         log_phase(f"Schema Generated — {len(cols)} columns")
@@ -201,6 +261,13 @@ def _phase1_column_mapping(ctx):
                 st.rerun()
         else:
             st.success("Column mapping confirmed. Ready to process.")
+            save_path = st.text_input("Save config to (optional)", key="onb_save_config_path")
+            if save_path and st.button("Save Config", key="onb_save_config"):
+                sp = clean_path(save_path)
+                if sp:
+                    cfg = config_from_ctx(ctx)
+                    save_format_config(cfg, sp)
+                    st.success(f"Config saved to {sp}")
             if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
                 log_phase("Processing Started")
                 try:
@@ -330,6 +397,12 @@ def _phase2_validation(ctx):
 
 
 def _multiline_flow(file_paths):
+    ctx = st.session_state.onb_ctx
+
+    # If config already loaded, skip manual inputs
+    if getattr(ctx, '_config_applied', False) and ctx.ml_flattened and ctx.schema:
+        return
+
     hdr_prefixes = detect_hdr_prefix(file_paths[0])
 
     if hdr_prefixes:

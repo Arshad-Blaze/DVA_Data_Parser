@@ -15,6 +15,7 @@ from tests.e2e.sample_data import (
     create_flow_test_data,
     create_multiline_flow_test_data,
     create_hdr_trailer_test_data,
+    create_config_test_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,13 @@ def multiline_test_data() -> Generator[Dict[str, str], None, None]:
 def trl_test_data() -> Generator[Dict[str, str], None, None]:
     with tempfile.TemporaryDirectory(prefix="dav_trl_e2e_") as tmpdir:
         data = create_hdr_trailer_test_data(tmpdir)
+        yield data
+
+
+@pytest.fixture(scope="session")
+def config_test_data() -> Generator[Dict[str, str], None, None]:
+    with tempfile.TemporaryDirectory(prefix="dav_cfg_e2e_") as tmpdir:
+        data = create_config_test_data(tmpdir)
         yield data
 
 

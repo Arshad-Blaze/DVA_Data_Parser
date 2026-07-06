@@ -25,6 +25,7 @@ from dav_tool.ui.helpers import (
     display_processing_history, smart_column_indices, validate_column_mapping,
 )
 from dav_tool.processing_context import ProcessingContext, ExistingContext
+from dav_tool.format_config import load_format_config, apply_format_config
 
 
 def _reset_phase():
@@ -66,18 +67,32 @@ def _phase0_detection_and_preview(ctx):
     with col1:
         st.header("BAU")
         prod_txt = clean_path(st.text_input("BAU Folder Path", key="ex_bau_folder_path"))
+        prod_file_paths = get_file_list(prod_txt)
+
+        # Config load for BAU
+        bau_config_file = clean_path(st.text_input("Optional: BAU Config (JSON)", key="ex_bau_config_file"))
+        if bau_config_file and os.path.exists(bau_config_file):
+            if not getattr(ctx.prod, '_config_applied', False):
+                bau_cfg = load_format_config(bau_config_file)
+                apply_format_config(bau_cfg, ctx.prod, os.path.dirname(bau_config_file), prod_file_paths or None)
+                ctx.prod._config_applied = True
+                ctx.prod.file_paths = prod_file_paths
+                st.success(f"BAU config '{bau_cfg.name or 'unnamed'}' loaded")
+                st.rerun()
 
         # Clear failure flag when path changes
         prev_path = st.session_state.get("ex_bau_prev_path")
         if prod_txt != prev_path:
             st.session_state.pop("ex_bau_detection_failed", None)
-            ctx.prod.file_type = None
-            ctx.prod.delimiter = None
-            ctx.prod.layout = None
+            if not getattr(ctx.prod, '_config_applied', False):
+                ctx.prod.file_type = None
+                ctx.prod.delimiter = None
+                ctx.prod.layout = None
             st.session_state["ex_bau_prev_path"] = prod_txt
 
-        prod_file_paths = get_file_list(prod_txt)
-        if prod_txt and not prod_file_paths:
+        if getattr(ctx.prod, '_config_applied', False):
+            st.success(f"Config loaded — {len(ctx.prod.schema or [])} columns") if ctx.prod.ml_flattened else None
+        elif prod_txt and not prod_file_paths:
             st.error(f"No files found at path: {prod_txt}")
         elif prod_txt and prod_file_paths and not ctx.prod.file_type and not st.session_state.get("ex_bau_detection_failed"):
             log_phase(f"BAU Folder Selected — {prod_txt} ({len(prod_file_paths)} files)")
@@ -94,18 +109,32 @@ def _phase0_detection_and_preview(ctx):
     with col2:
         st.header("Test")
         test_txt = clean_path(st.text_input("Test Folder Path", key="ex_test_folder_path"))
+        test_file_paths = get_file_list(test_txt)
+
+        # Config load for Test
+        test_config_file = clean_path(st.text_input("Optional: Test Config (JSON)", key="ex_test_config_file"))
+        if test_config_file and os.path.exists(test_config_file):
+            if not getattr(ctx.test, '_config_applied', False):
+                test_cfg = load_format_config(test_config_file)
+                apply_format_config(test_cfg, ctx.test, os.path.dirname(test_config_file), test_file_paths or None)
+                ctx.test._config_applied = True
+                ctx.test.file_paths = test_file_paths
+                st.success(f"Test config '{test_cfg.name or 'unnamed'}' loaded")
+                st.rerun()
 
         # Clear failure flag when path changes
         prev_path = st.session_state.get("ex_test_prev_path")
         if test_txt != prev_path:
             st.session_state.pop("ex_test_detection_failed", None)
-            ctx.test.file_type = None
-            ctx.test.delimiter = None
-            ctx.test.layout = None
+            if not getattr(ctx.test, '_config_applied', False):
+                ctx.test.file_type = None
+                ctx.test.delimiter = None
+                ctx.test.layout = None
             st.session_state["ex_test_prev_path"] = test_txt
 
-        test_file_paths = get_file_list(test_txt)
-        if test_txt and not test_file_paths:
+        if getattr(ctx.test, '_config_applied', False):
+            st.success(f"Config loaded — {len(ctx.test.schema or [])} columns") if ctx.test.ml_flattened else None
+        elif test_txt and not test_file_paths:
             st.error(f"No files found at path: {test_txt}")
         elif test_txt and test_file_paths and not ctx.test.file_type and not st.session_state.get("ex_test_detection_failed"):
             log_phase(f"Test Folder Selected — {test_txt} ({len(test_file_paths)} files)")
@@ -649,22 +678,33 @@ def _multiline_section(prod_paths, test_paths):
     with mc1:
         if ctx.prod.file_type == "multiline":
             st.markdown("**BAU Multiline**")
-            raw_p = preview_raw(prod_paths, "multiline", n_rows=5)
-            if not raw_p.is_empty():
-                st.dataframe(raw_p.to_pandas(), height=150)
-            _multiline_side_inputs(prod_paths, ctx.prod, "BAU", "prod")
+            if getattr(ctx.prod, '_config_applied', False) and ctx.prod.ml_flattened:
+                st.success("Config loaded (flattened)")
+            else:
+                raw_p = preview_raw(prod_paths, "multiline", n_rows=5)
+                if not raw_p.is_empty():
+                    st.dataframe(raw_p.to_pandas(), height=150)
+                _multiline_side_inputs(prod_paths, ctx.prod, "BAU", "prod")
 
     with mc2:
         if ctx.test.file_type == "multiline":
             st.markdown("**Test Multiline**")
-            raw_t = preview_raw(test_paths, "multiline", n_rows=5)
-            if not raw_t.is_empty():
-                st.dataframe(raw_t.to_pandas(), height=150)
-            _multiline_side_inputs(test_paths, ctx.test, "Test", "test")
+            if getattr(ctx.test, '_config_applied', False) and ctx.test.ml_flattened:
+                st.success("Config loaded (flattened)")
+            else:
+                raw_t = preview_raw(test_paths, "multiline", n_rows=5)
+                if not raw_t.is_empty():
+                    st.dataframe(raw_t.to_pandas(), height=150)
+                _multiline_side_inputs(test_paths, ctx.test, "Test", "test")
 
     ml_delim = st.selectbox("Multiline Delimiter", [",", "|", "\t", ";"], index=0, key="existing_ml_delim")
 
-    if st.button("Flatten Records", key="existing_flatten"):
+    prod_configured = getattr(ctx.prod, '_config_applied', False) and ctx.prod.ml_flattened
+    test_configured = getattr(ctx.test, '_config_applied', False) and ctx.test.ml_flattened
+    both_pre_flattened = prod_configured and test_configured
+    if both_pre_flattened:
+        st.info("Both sides configured — ready to proceed.")
+    elif st.button("Flatten Records", key="existing_flatten"):
         ctx.ml_delimiter = ml_delim
         if ctx.prod.file_type == "multiline":
             _store_ml_config(ctx.prod, "prod")

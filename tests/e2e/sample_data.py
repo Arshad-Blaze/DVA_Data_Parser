@@ -102,6 +102,144 @@ def create_hdr_fixed_width(directory: str, filename: str = "hdr_fixed.txt") -> T
     return data_path, header_layout_path, detail_layout_path
 
 
+def create_config_test_data(directory: str) -> dict:
+    """Creates test data files plus matching FormatConfig JSON files.
+
+    Returns dict with paths to data dirs, data files, and config JSON files
+    for delimited, multiline delimited, and HDR fixed-width formats.
+    """
+    import json
+
+    # === Delimited ===
+    delim_dir = os.path.join(directory, "delim")
+    os.makedirs(delim_dir, exist_ok=True)
+    delim_file = os.path.join(delim_dir, "data.csv")
+    with open(delim_file, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Store", "UPC", "Description", "Units", "Price"])
+        w.writerow(["S001", "100001", "Widget A", "10", "99.90"])
+        w.writerow(["S002", "100002", "Gadget B", "5", "49.95"])
+
+    delim_config = {
+        "version": 1,
+        "name": "Delimited Test",
+        "file_type": "delimited",
+        "delimiter": ",",
+        "store_col": "Store",
+        "upc_col": "UPC",
+        "desc_col": "Description",
+        "units_col": "Units",
+        "price_col": "Price",
+    }
+    delim_config_path = os.path.join(delim_dir, "config.json")
+    with open(delim_config_path, "w") as f:
+        json.dump(delim_config, f, indent=2)
+
+    # === Multiline Delimited ===
+    ml_dir = os.path.join(directory, "ml_delim")
+    os.makedirs(ml_dir, exist_ok=True)
+    ml_file = os.path.join(ml_dir, "ml_data.txt")
+    with open(ml_file, "w") as f:
+        f.write("H|S001|2024-01-15\n")
+        f.write("D|S001|100001|Widget A|10|99.90\n")
+        f.write("D|S001|100002|Gadget B|5|49.95\n")
+        f.write("H|S002|2024-01-15\n")
+        f.write("D|S002|100001|Widget A|8|79.92\n")
+
+    ml_config = {
+        "version": 1,
+        "name": "ML Delimited Test",
+        "file_type": "multiline",
+        "ml_record_types": ["H", "D"],
+        "ml_delimiter": "|",
+        "store_col": "Store",
+        "upc_col": "UPC",
+        "desc_col": "Description",
+        "units_col": "Units",
+        "price_col": "Price",
+    }
+    ml_config_path = os.path.join(ml_dir, "config.json")
+    with open(ml_config_path, "w") as f:
+        json.dump(ml_config, f, indent=2)
+
+    # === HDR Fixed-Width with Trailer ===
+    hdr_dir = os.path.join(directory, "hdr_fixed")
+    os.makedirs(hdr_dir, exist_ok=True)
+
+    hdr_header_layout_path = os.path.join(hdr_dir, "hdr_header_layout.csv")
+    with open(hdr_header_layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["6", "4", "Store", "text"])
+        w.writerow(["13", "8", "Date", "text"])
+
+    hdr_detail_layout_path = os.path.join(hdr_dir, "hdr_detail_layout.csv")
+    with open(hdr_detail_layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["1", "12", "UPC", "text"])
+        w.writerow(["13", "21", "Description", "text"])
+        w.writerow(["34", "2", "Units", "numeric"])
+        w.writerow(["36", "8", "Price", "numeric"])
+
+    hdr_trailer_layout_path = os.path.join(hdr_dir, "hdr_trailer_layout.csv")
+    with open(hdr_trailer_layout_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["From", "Length", "Field", "Type"])
+        w.writerow(["4", "5", "TotalUnits", "numeric"])
+        w.writerow(["10", "9", "TotalPrice", "numeric"])
+
+    def hdr_header(store, seq, date):
+        return f"HDR{seq:02d}{store:<4}   {date}\n"
+
+    def hdr_detail(upc, desc, units, price):
+        return f"{upc:<12}{desc:<21}{units:>2}{price:>8}     \n"
+
+    def hdr_trailer(total_units, total_price):
+        return f"TRL{total_units:>5}{total_price:>9}\n"
+
+    hdr_file = os.path.join(hdr_dir, "hdr_data.txt")
+    with open(hdr_file, "w") as f:
+        f.write(hdr_header("S001", 1, "2024-01-15"))
+        f.write(hdr_detail("100001", "Widget A", "10", "99.90"))
+        f.write(hdr_detail("100002", "Gadget B", "5", "49.95"))
+        f.write(hdr_trailer("15", "149.85"))
+
+    hdr_config = {
+        "version": 1,
+        "name": "HDR Fixed-Width Test",
+        "file_type": "multiline",
+        "header_prefix": "HDR",
+        "header_layout_file": hdr_header_layout_path,
+        "detail_layout_file": hdr_detail_layout_path,
+        "trailer_prefix": "TRL",
+        "trailer_layout_file": hdr_trailer_layout_path,
+        "store_col": "Store",
+        "upc_col": "UPC",
+        "desc_col": "Description",
+        "units_col": "Units",
+        "price_col": "Price",
+    }
+    hdr_config_path = os.path.join(hdr_dir, "config.json")
+    with open(hdr_config_path, "w") as f:
+        json.dump(hdr_config, f, indent=2)
+
+    return {
+        "delim_dir": delim_dir,
+        "delim_file": delim_file,
+        "delim_config": delim_config_path,
+        "ml_dir": ml_dir,
+        "ml_file": ml_file,
+        "ml_config": ml_config_path,
+        "hdr_dir": hdr_dir,
+        "hdr_file": hdr_file,
+        "hdr_header_layout": hdr_header_layout_path,
+        "hdr_detail_layout": hdr_detail_layout_path,
+        "hdr_trailer_layout": hdr_trailer_layout_path,
+        "hdr_config": hdr_config_path,
+    }
+
+
 def create_hdr_trailer_test_data(directory: str) -> dict:
     header_layout_path = os.path.join(directory, "trl_header_layout.csv")
     with open(header_layout_path, "w", newline="") as f:
