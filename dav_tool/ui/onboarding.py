@@ -1,6 +1,8 @@
 import gc
 import logging
 import os
+import time
+import concurrent.futures
 import streamlit as st
 import polars as pl
 
@@ -344,29 +346,42 @@ def _phase1_column_mapping(ctx):
                 log_phase("Processing Started")
                 print_memory_snapshot("BEFORE AGGREGATION")
                 try:
-                    with st.spinner("Aggregating store-level data..."):
-                        with ProcessingTimer(ctx.metrics, "aggregation", "stream_store_aggregate"):
-                            store_agg = stream_store_aggregate(
-                                fp, ft, ctx.store_col, ctx.units_col, ctx.price_col,
-                                delimiter=pd, layout=ll,
-                                start_line=sl, record_type=rt,
-                                multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                                column_names=ctx.schema,
-                                header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                                trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
-                            )
-                    with st.spinner("Aggregating item-level data..."):
-                        with ProcessingTimer(ctx.metrics, "aggregation", "stream_item_aggregate"):
-                            item_agg = stream_item_aggregate(
-                                fp, ft,
-                                ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
-                                delimiter=pd, layout=ll,
-                                start_line=sl, record_type=rt,
-                                multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                                column_names=ctx.schema,
-                                header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                                trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
-                            )
+                    with st.spinner("Aggregating data (Store + Item in parallel)..."):
+                        def _onb_run(fn, *args, **kw):
+                            t0 = time.perf_counter()
+                            r = fn(*args, **kw)
+                            return r, time.perf_counter() - t0
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+                            futs = [
+                                ex.submit(_onb_run, stream_store_aggregate,
+                                    fp, ft, ctx.store_col, ctx.units_col, ctx.price_col,
+                                    delimiter=pd, layout=ll,
+                                    start_line=sl, record_type=rt,
+                                    multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
+                                    column_names=ctx.schema,
+                                    header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                                    trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
+                                ),
+                                ex.submit(_onb_run, stream_item_aggregate,
+                                    fp, ft,
+                                    ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
+                                    delimiter=pd, layout=ll,
+                                    start_line=sl, record_type=rt,
+                                    multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
+                                    column_names=ctx.schema,
+                                    header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                                    trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
+                                ),
+                            ]
+                            names = ["stream_store_aggregate", "stream_item_aggregate"]
+                            results = []
+                            for i, future in enumerate(futs):
+                                result, elapsed = future.result(timeout=600)
+                                ctx.metrics.record("aggregation", names[i], elapsed)
+                                results.append(result)
+
+                        store_agg, item_agg = results
 
                     ctx.store_agg = store_agg
                     ctx.item_agg = item_agg
