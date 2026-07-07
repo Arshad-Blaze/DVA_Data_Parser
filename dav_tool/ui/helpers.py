@@ -4,6 +4,8 @@ import json
 import os
 import glob
 import logging
+from typing import Optional
+
 import streamlit as st
 import polars as pl
 from dav_tool._parsers import (
@@ -13,6 +15,8 @@ from dav_tool._parsers import (
 from dav_tool._observability import ProcessingRecord, MAX_HISTORY
 from dav_tool.config import FALLBACK_ENCODING
 from dav_tool.io import safe_read_csv
+from dav_tool.datasource.base import IDataSource
+from dav_tool.datasource.manager import get_active_source
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +195,14 @@ def clean_path(path):
     return os.path.abspath(os.path.normpath(path))
 
 
-def get_file_list(path):
+def get_file_list(path: str, source: Optional[IDataSource] = None) -> list:
+    if source is None:
+        source = get_active_source()
+    if source is not None:
+        try:
+            return source.list_files(path)
+        except Exception:
+            return []
     if os.path.isfile(path):
         return [path]
     elif os.path.isdir(path):
@@ -199,11 +210,35 @@ def get_file_list(path):
     return []
 
 
-def load_storelist(path, delimiter):
-    ext = os.path.splitext(path)[-1].lower()
+def resolve_source_paths(paths, source=None):
+    """Convert remote paths to local paths the parser can use.
+
+    For LocalDataSource the paths are returned as-is.
+    For remote sources (SSH) files are downloaded to temp dirs.
+    """
+    if source is None:
+        source = get_active_source()
+    if source is None:
+        return paths
+    local = []
+    for p in paths:
+        local.append(source.download_if_required(p))
+    return local
+
+
+def load_storelist(path, delimiter, source=None):
+    if source is None:
+        source = get_active_source()
+    local_path = path
+    if source is not None:
+        try:
+            local_path = source.download_if_required(path)
+        except Exception:
+            pass
+    ext = os.path.splitext(local_path)[-1].lower()
     if ext in [".xlsx", ".xls"]:
-        return pl.read_excel(path)
-    return safe_read_csv(path, separator=delimiter)
+        return pl.read_excel(local_path)
+    return safe_read_csv(local_path, separator=delimiter)
 
 
 def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,

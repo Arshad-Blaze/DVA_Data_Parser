@@ -1,6 +1,8 @@
 import streamlit as st
 from dav_tool.ui.onboarding import run as run_onboarding
 from dav_tool.ui.existing import run as run_existing
+from dav_tool.ui.connection_manager import render_connection_manager
+from dav_tool.datasource.manager import is_connected
 
 st.set_page_config(page_title="DAV TOOL", layout="wide")
 
@@ -17,6 +19,10 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+render_connection_manager()
+
+st.divider()
 
 col_spacer, col_toggle = st.columns([6, 3])
 

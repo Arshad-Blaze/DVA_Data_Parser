@@ -23,7 +23,9 @@ from dav_tool.ui.helpers import (
     clean_path, get_file_list, load_storelist, get_column_names,
     display_execution_summary, display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
+    resolve_source_paths,
 )
+from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
 from dav_tool.format_config import apply_format_config, load_format_config, save_format_config, config_from_ctx
 from dav_tool.config_builder import build_config
@@ -85,8 +87,9 @@ def _phase0_parsing_and_preview(ctx):
     if ctx.phase >= 1 and ctx.file_paths and ctx.columns:
         return
 
+    _onb_source = get_active_source()
     prod_txt = clean_path(st.text_input("Folder Path", key="onb_folder_path"))
-    file_paths = get_file_list(prod_txt)
+    file_paths = get_file_list(prod_txt, source=_onb_source)
     file_type = None
     prod_delim = None
     layout_list = None
@@ -242,6 +245,7 @@ def _phase0_parsing_and_preview(ctx):
                 trailer_layout=ctx.trailer_layout,
                 ml_record_types=ctx.ml_record_types,
                 ml_delimiter=ctx.ml_delimiter or "|",
+                source=_onb_source,
             )
             ctx._generated_config = cfg
             accepted = edit_and_accept_config(cfg, key_prefix="onb")
@@ -346,6 +350,7 @@ def _phase1_column_mapping(ctx):
                 log_phase("Processing Started")
                 print_memory_snapshot("BEFORE AGGREGATION")
                 try:
+                    fp_local = resolve_source_paths(fp, source=_onb_source)
                     with st.spinner("Aggregating data (Store + Item in parallel)..."):
                         def _onb_run(fn, *args, **kw):
                             t0 = time.perf_counter()
@@ -355,7 +360,7 @@ def _phase1_column_mapping(ctx):
                         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
                             futs = [
                                 ex.submit(_onb_run, stream_store_aggregate,
-                                    fp, ft, ctx.store_col, ctx.units_col, ctx.price_col,
+                                    fp_local, ft, ctx.store_col, ctx.units_col, ctx.price_col,
                                     delimiter=pd, layout=ll,
                                     start_line=sl, record_type=rt,
                                     multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
@@ -364,7 +369,7 @@ def _phase1_column_mapping(ctx):
                                     trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
                                 ),
                                 ex.submit(_onb_run, stream_item_aggregate,
-                                    fp, ft,
+                                    fp_local, ft,
                                     ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
                                     delimiter=pd, layout=ll,
                                     start_line=sl, record_type=rt,

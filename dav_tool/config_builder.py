@@ -20,6 +20,8 @@ from dav_tool.detection import (
 )
 from dav_tool.format_config import FormatConfig, ValidationConfig, ValidationRule
 from dav_tool.ui.helpers import smart_column_indices
+from dav_tool.datasource.base import IDataSource
+from dav_tool.datasource.manager import get_active_source
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +37,25 @@ def _infer_data_types(df: pl.DataFrame) -> Dict[str, str]:
     return types
 
 
-def _detect_encoding(file_path: str) -> str:
+def _detect_encoding(
+    file_path: str,
+    source: Optional[IDataSource] = None,
+) -> str:
     """Quick encoding detection by trying common encodings."""
+    sample = None
+    if source is not None:
+        try:
+            sample = source.read_sample(file_path, n=5)
+        except Exception:
+            pass
+    if sample is not None:
+        for enc in ["cp1252", "utf-8", "utf8-lossy", "latin-1"]:
+            try:
+                sample.encode(enc)
+                return enc
+            except (UnicodeEncodeError, UnicodeError):
+                continue
+        return "utf8-lossy"
     for enc in ["cp1252", "utf-8", "utf8-lossy", "latin-1"]:
         try:
             with open(file_path, "r", encoding=enc) as f:
@@ -59,6 +78,7 @@ def build_config(
     trailer_layout: Optional[List[Dict]] = None,
     ml_record_types: Optional[List[str]] = None,
     ml_delimiter: str = "|",
+    source: Optional[IDataSource] = None,
 ) -> FormatConfig:
     """Build a FormatConfig by inspecting a sample of the data.
 
@@ -68,90 +88,113 @@ def build_config(
     """
     fp = file_paths[0] if file_paths else ""
 
-    encoding = _detect_encoding(fp) if fp else DEFAULT_ENCODING
+    if source is None:
+        source = get_active_source()
 
-    if not file_type:
-        if is_multiline_record(fp):
-            file_type = "multiline"
-        else:
-            file_type, delimiter = detect_file_type(fp)
-
-    cfg = FormatConfig(
-        version=2,
-        file_type=file_type,
-        encoding=encoding,
-    )
-
-    if file_type == "multiline":
-        if not header_prefix:
-            hdr_prefixes = detect_hdr_prefix(fp) if fp else []
-            header_prefix = hdr_prefixes[0] if hdr_prefixes else None
-
-        if header_prefix:
-            cfg.header_prefix = header_prefix
-        else:
-            if not ml_record_types:
-                ml_record_types = detect_record_types(fp) if fp else ["H", "D"]
-            cfg.ml_record_types = ml_record_types
-            cfg.ml_delimiter = ml_delimiter
-
-        cfg.has_header = False
-        cfg.delimiter = ml_delimiter
-
-        if header_prefix and header_layout and detail_layout:
-            sample = preview_flattened_multiline_fixed(
-                file_paths, header_prefix, header_layout, detail_layout,
-                n_rows=SAMPLE_SIZE,
-                trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
-            )
-        else:
-            rtypes = ml_record_types or ["H", "D"]
-            sample = preview_flattened_multiline(
-                file_paths, rtypes, ml_delimiter, n_rows=SAMPLE_SIZE,
-            )
+    if source is not None:
+        sample_text = source.read_sample(fp, n=SAMPLE_SIZE) if fp else ""
+        import tempfile
+        _tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sample", mode="w")
+        _tmp.write(sample_text)
+        _tmp.close()
+        _sample_path = _tmp.name
+        fp_local = _sample_path
+        file_paths_local = [_sample_path]
     else:
-        cfg.has_header = has_header(fp, delimiter or ",") if fp else True
+        fp_local = fp
+        file_paths_local = file_paths
 
-        if file_type == "fixed" and layout:
-            sample = preview_raw(
-                file_paths, file_type, delimiter or ",", layout,
-                n_rows=SAMPLE_SIZE,
-            )
-        elif file_type == "delimited":
-            try:
-                sample = pl.read_csv(
-                    fp, separator=delimiter or ",",
-                    n_rows=SAMPLE_SIZE, encoding=FALLBACK_ENCODING,
+    encoding = _detect_encoding(fp_local, source) if fp_local else DEFAULT_ENCODING
+
+    try:
+        if not file_type:
+            if is_multiline_record(fp_local):
+                file_type = "multiline"
+            else:
+                file_type, delimiter = detect_file_type(fp_local)
+
+        cfg = FormatConfig(
+            version=2,
+            file_type=file_type,
+            encoding=encoding,
+        )
+
+        if file_type == "multiline":
+            if not header_prefix:
+                hdr_prefixes = detect_hdr_prefix(fp_local) if fp_local else []
+                header_prefix = hdr_prefixes[0] if hdr_prefixes else None
+
+            if header_prefix:
+                cfg.header_prefix = header_prefix
+            else:
+                if not ml_record_types:
+                    ml_record_types = detect_record_types(fp_local) if fp_local else ["H", "D"]
+                cfg.ml_record_types = ml_record_types
+                cfg.ml_delimiter = ml_delimiter
+
+            cfg.has_header = False
+            cfg.delimiter = ml_delimiter
+
+            if header_prefix and header_layout and detail_layout:
+                sample = preview_flattened_multiline_fixed(
+                    file_paths_local, header_prefix, header_layout, detail_layout,
+                    n_rows=SAMPLE_SIZE,
+                    trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
                 )
-            except Exception:
+            else:
+                rtypes = ml_record_types or ["H", "D"]
+                sample = preview_flattened_multiline(
+                    file_paths_local, rtypes, ml_delimiter, n_rows=SAMPLE_SIZE,
+                )
+        else:
+            cfg.has_header = has_header(fp_local, delimiter or ",") if fp_local else True
+
+            if file_type == "fixed" and layout:
                 sample = preview_raw(
-                    file_paths, file_type, delimiter or ",",
+                    file_paths_local, file_type, delimiter or ",", layout,
                     n_rows=SAMPLE_SIZE,
                 )
-        else:
-            sample = preview_raw(
-                file_paths, file_type, delimiter or ",",
-                n_rows=SAMPLE_SIZE,
-            )
+            elif file_type == "delimited":
+                try:
+                    sample = pl.read_csv(
+                        fp_local, separator=delimiter or ",",
+                        n_rows=SAMPLE_SIZE, encoding=FALLBACK_ENCODING,
+                    )
+                except Exception:
+                    sample = preview_raw(
+                        file_paths_local, file_type, delimiter or ",",
+                        n_rows=SAMPLE_SIZE,
+                    )
+            else:
+                sample = preview_raw(
+                    file_paths_local, file_type, delimiter or ",",
+                    n_rows=SAMPLE_SIZE,
+                )
 
-    if sample is not None and not sample.is_empty():
-        cfg.detected_columns = list(sample.columns)
-        cfg.detected_data_types = _infer_data_types(sample)
+        if sample is not None and not sample.is_empty():
+            cfg.detected_columns = list(sample.columns)
+            cfg.detected_data_types = _infer_data_types(sample)
 
-        indices = smart_column_indices(sample.columns)
-        mapping = {}
-        for role, (idx, col) in indices.items():
-            if col:
-                mapping[role] = col
-        cfg.suggested_mapping = mapping
+            indices = smart_column_indices(sample.columns)
+            mapping = {}
+            for role, (idx, col) in indices.items():
+                if col:
+                    mapping[role] = col
+            cfg.suggested_mapping = mapping
 
-        cfg.store_col = mapping.get("store")
-        cfg.upc_col = mapping.get("upc")
-        cfg.desc_col = mapping.get("description")
-        cfg.units_col = mapping.get("units")
-        cfg.price_col = mapping.get("price")
+            cfg.store_col = mapping.get("store")
+            cfg.upc_col = mapping.get("upc")
+            cfg.desc_col = mapping.get("description")
+            cfg.units_col = mapping.get("units")
+            cfg.price_col = mapping.get("price")
 
-        cfg.schema = list(sample.columns)
+            cfg.schema = list(sample.columns)
+    finally:
+        if source is not None and fp_local != fp:
+            try:
+                os.unlink(fp_local)
+            except Exception:
+                pass
 
     return cfg
 

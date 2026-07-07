@@ -29,7 +29,9 @@ from dav_tool.ui.helpers import (
     clean_path, get_file_list, get_column_names, cached_get_column_names,
     display_execution_summary, display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
+    resolve_source_paths,
 )
+from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext, ExistingContext
 from dav_tool.format_config import load_format_config, apply_format_config
 from dav_tool.config_builder import build_config
@@ -108,6 +110,7 @@ def _phase0_detection_and_preview(ctx):
     if ctx.phase >= 1 and ctx.prod.file_paths and ctx.test.file_paths:
         return
 
+    _ex_source = get_active_source()
     col1, col2 = st.columns(2)
 
     prod_file_paths = []
@@ -116,7 +119,7 @@ def _phase0_detection_and_preview(ctx):
     with col1:
         st.header("BAU")
         prod_txt = clean_path(st.text_input("BAU Folder Path", key="ex_bau_folder_path"))
-        prod_file_paths = get_file_list(prod_txt)
+        prod_file_paths = get_file_list(prod_txt, source=_ex_source)
 
         # Config load for BAU
         bau_config_file = clean_path(st.text_input("Optional: BAU Config (JSON)", key="ex_bau_config_file"))
@@ -156,9 +159,10 @@ def _phase0_detection_and_preview(ctx):
             st.session_state.pop("ex_bau_detection_failed", None)
 
     with col2:
+        _ex_source = get_active_source()
         st.header("Test")
         test_txt = clean_path(st.text_input("Test Folder Path", key="ex_test_folder_path"))
-        test_file_paths = get_file_list(test_txt)
+        test_file_paths = get_file_list(test_txt, source=_ex_source)
 
         # Config load for Test
         test_config_file = clean_path(st.text_input("Optional: Test Config (JSON)", key="ex_test_config_file"))
@@ -286,6 +290,7 @@ def _phase0_detection_and_preview(ctx):
                     trailer_layout=ctx.prod.trailer_layout,
                     ml_record_types=ctx.prod.ml_record_types,
                     ml_delimiter=ml_delim,
+                    source=_ex_source,
                 )
                 ctx._prod_cfg = prod_cfg
                 accepted_prod = edit_and_accept_config(prod_cfg, key_prefix="ex_prod")
@@ -316,6 +321,7 @@ def _phase0_detection_and_preview(ctx):
                     trailer_layout=ctx.test.trailer_layout,
                     ml_record_types=ctx.test.ml_record_types,
                     ml_delimiter=ml_delim,
+                    source=_ex_source,
                 )
                 ctx._test_cfg = test_cfg
                 accepted_test = edit_and_accept_config(test_cfg, key_prefix="ex_test")
@@ -504,6 +510,10 @@ def _phase1_column_mapping(ctx):
                 log_phase("Processing Started")
                 print_memory_snapshot("BEFORE AGGREGATION (EXISTING)")
                 try:
+                    _ex_source = get_active_source()
+                    prod_paths = resolve_source_paths(prod_paths, source=_ex_source)
+                    test_paths = resolve_source_paths(test_paths, source=_ex_source)
+
                     with st.spinner("Aggregating data (running BAU/Test, Store/Item in parallel)..."):
                         prod_ml_rtypes_prod = ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None
                         test_ml_rtypes = ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None
@@ -740,6 +750,9 @@ def _phase2_validation(ctx):
         run_file_review_existing = st.checkbox("File Review Report", value=vc.file_review.enabled)
 
     if st.button("Validate", use_container_width=True, type="primary"):
+        _ex_val_source = get_active_source()
+        prod_paths = resolve_source_paths(prod_paths, source=_ex_val_source)
+        test_paths = resolve_source_paths(test_paths, source=_ex_val_source)
         with st.spinner("Running validations..."):
             # Apply validation config overrides
             run_store = run_store and vc.store_validation.enabled
