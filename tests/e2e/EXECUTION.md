@@ -35,6 +35,9 @@ python -m pytest tests/e2e/ \
 ### Run Specific Test Categories
 
 ```bash
+# Connection Manager tests only
+python -m pytest tests/e2e/connection_manager/ -v
+
 # Onboarding workflow tests only
 python -m pytest tests/e2e/onboarding/ -v
 
@@ -45,7 +48,7 @@ python -m pytest tests/e2e/existing/ -v
 python -m pytest tests/e2e/test_regression.py -v
 
 # Single test method
-python -m pytest tests/e2e/onboarding/test_onboarding_delimited.py::TestOnboardingDelimitedFlow::test_full_onboarding_flow -v
+python -m pytest tests/e2e/connection_manager/test_connection_manager_ui.py::TestConnectionManagerLocal::test_connect_local_shows_connection_info -v
 ```
 
 ### Run With Performance Monitoring
@@ -99,10 +102,19 @@ tests/e2e/
 ├── sample_data.py               # Sample data generators
 ├── fixtures/                    # Fixture modules
 ├── common/                      # Shared test utilities
+├── connection_manager/
+│   └── test_connection_manager_ui.py
 ├── onboarding/
-│   └── test_onboarding_delimited.py
+│   ├── test_onboarding_config_builder.py
+│   ├── test_onboarding_config_load.py
+│   ├── test_onboarding_delimited.py
+│   ├── test_onboarding_hdr_trailer.py
+│   └── test_onboarding_multiline.py
 ├── existing/
-│   └── test_existing_delimited.py
+│   ├── test_existing_delimited.py
+│   └── test_existing_fixed_width.py
+├── reports/
+│   └── test_reports.py
 └── test_regression.py
 ```
 
@@ -117,10 +129,12 @@ tests/e2e/
 
 ## Test Count
 
-Currently **24 tests** across 3 test files:
+Currently **35 tests** across 5 test files:
+- 9 connection manager tests
 - 8 onboarding workflow tests
 - 8 existing/BAU workflow tests
 - 8 regression tests
+- 2 reports tests
 
 ## Troubleshooting
 
