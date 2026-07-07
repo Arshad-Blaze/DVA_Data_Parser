@@ -17,6 +17,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 
+[project.scripts]
+dav-tool = "dav_tool.__main__:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
