@@ -207,6 +207,53 @@ class SMBDataSource(IDataSource):
 
 ---
 
+## Testing
+
+### Unit Tests
+
+All tests are in `tests/` and run with:
+
+```bash
+pytest tests/ --ignore=tests/e2e
+```
+
+| Test File | Coverage | Tests |
+|---|---|---|
+| `tests/test_datasource.py` | `LocalDataSource` (all methods), `ConnectionManager` (connect/disconnect/is_connected, SSH auth failure) | 29 |
+| `tests/test_config_builder.py` | `build_config()` with and without `source` param, multiline config, data type inference | 5 |
+
+Key test scenarios:
+
+- **`LocalDataSource`**: connect, disconnect, exists, list_files (single file + directory + missing path), list_directory (with sorting: dirs first), read_sample (partial + full file), download_if_required (returns same path), stat (file, dir, missing), open_stream, get_server_info, get_connection_string
+- **`ConnectionManager`**: connect_local, get_active_source, disconnect, double-disconnect safety, `connect_ssh` with missing paramiko (DataSourceError), `connect_ssh` with connection failure (DataSourceError via mocked paramiko)
+- **`config_builder`**: delimited file detection, source parameter passthrough, empty file list, multiline delimited config, `_infer_data_types`
+
+### Integration Test
+
+The end-to-end test (`full_test.py`) runs the full pipeline (parse → aggregate → validate → report) against all file types (delimited, fixed-width, multiline, HDR) in single-file and multi-file modes. It verifies 29 DataFrame shape checks.
+
+### Running Tests
+
+```bash
+# All unit tests (130+ tests)
+pytest tests/ --ignore=tests/e2e -q
+
+# Specific test files
+pytest tests/test_datasource.py -v
+pytest tests/test_config_builder.py -v
+
+# Integration test
+python3 full_test.py
+```
+
+### CI Notes
+
+- `dav_tool/datasource/ssh.py` has a runtime check for `paramiko` — if not installed, all SSH operations raise `DataSourceError` with install instructions
+- The `conftest.py` at `tests/conftest.py` mocks `streamlit` to allow unit tests to import UI-touching modules without a Streamlit runtime
+- E2E Playwright tests require a Streamlit runtime environment and are in `tests/e2e/`
+
+---
+
 ## Files Modified
 
 | File | Change |
@@ -222,6 +269,9 @@ class SMBDataSource(IDataSource):
 | `dav_tool/ui/onboarding.py` | Modified — passes `source` to `get_file_list`, `build_config`, resolves paths before aggregation |
 | `dav_tool/ui/existing.py` | Modified — passes `source` to `get_file_list`, `build_config`, resolves paths before aggregation and validation |
 | `dav_tool/config_builder.py` | Modified — accepts `source` param, reads sample remotely without full download |
+| `tests/conftest.py` | New — mock `streamlit` for unit test compatibility |
+| `tests/test_datasource.py` | New — 29 unit tests for data source layer |
+| `tests/test_config_builder.py` | New — 5 unit tests for configuration builder |
 | `pyproject.toml` | Modified — added `paramiko>=3.0` dependency |
 
 ## Files NOT Modified

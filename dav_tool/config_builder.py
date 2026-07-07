@@ -19,7 +19,6 @@ from dav_tool.detection import (
     detect_hdr_prefix, has_header,
 )
 from dav_tool.format_config import FormatConfig, ValidationConfig, ValidationRule
-from dav_tool.ui.helpers import smart_column_indices
 from dav_tool.datasource.base import IDataSource
 from dav_tool.datasource.manager import get_active_source
 
@@ -175,6 +174,7 @@ def build_config(
             cfg.detected_columns = list(sample.columns)
             cfg.detected_data_types = _infer_data_types(sample)
 
+            from dav_tool.ui.helpers import smart_column_indices
             indices = smart_column_indices(sample.columns)
             mapping = {}
             for role, (idx, col) in indices.items():
