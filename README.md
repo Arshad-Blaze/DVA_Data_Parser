@@ -26,7 +26,15 @@ DAV Tool compares retail/POS data files (BAU vs Test) to find differences in sal
 | **Config-driven** | Load all parsing settings from a single JSON config file — bypasses manual setup for repeatable onboarding |
 
 ### How to run
-```
+
+```bash
+# Option 1 — via pip-installed CLI (after pip install)
+dav-tool
+
+# Option 2 — via python module
+python -m dav_tool
+
+# Option 3 — direct streamlit
 streamlit run dav_tool/ui/app.py
 ```
 
@@ -50,10 +58,27 @@ DAV Tool needs to know the structure of your files before it can process them. B
 ### Installation
 
 ```bash
-pip install polars streamlit
+pip install dav-tool
 ```
 
-No additional setup required — just run the app.
+Or install from source:
+
+```bash
+git clone <repo-url>
+cd DVA_Data_Parser
+pip install .
+```
+
+No additional setup required — just run `dav-tool`.
+
+### Docker
+
+```bash
+docker build -t dav-tool .
+docker run -p 8501:8501 dav-tool
+```
+
+Open `http://localhost:8501` in your browser.
 
 ### Project structure
 
@@ -85,12 +110,18 @@ dav_tool/
 - **No intermediate files** — data flows directly from source files through aggregators
 - **Multiline handling** — record-type prefixes (H, D, U, T) are detected, filtered, and flattened at preview time; user defines column names before schema is applied
 - **Schema fix at preview** — users rename generic `Column_N` names before column mapping, avoiding downstream failures
+- **Parallel aggregation** — independent aggregation calls (BAU/Test, Store/Item) run concurrently via `ThreadPoolExecutor`, cutting wall-clock time by up to 75%
+- **Memory observability** — DataFrame registry tracks live references; peak-memory snapshots and per-phase release logging via `ProcessingMetrics`
+- **Config builder** — reads only 100 sample rows to detect encoding, delimiter, schema, data types, and column mapping; config is locked after acceptance, then full dataset is read exactly once
+- **Golden dataset** — 12 parametrized regression tests in `tests/test_golden.py` compare current pipeline output against saved golden CSVs for all formats; regenerate with `python -m tests.golden.generate_golden`
 
 ### Running tests
 
 ```bash
-./venv/bin/python -m pytest tests/ -v --ignore=tests/e2e    # 86 unit tests
-./venv/bin/python -m pytest tests/e2e -v                     # 53 E2E tests (Playwright)
+python -m pytest tests/ -v --ignore=tests/e2e    # 98 unit tests (including golden regression)
+python -m pytest tests/e2e -v                     # Playwright E2E tests
+python full_test.py                               # integration test
+python -m tests.golden.generate_golden            # regenerate golden reference CSVs
 ```
 
 E2E test benchmark results: [BENCHMARK.md](tests/e2e/BENCHMARK.md)

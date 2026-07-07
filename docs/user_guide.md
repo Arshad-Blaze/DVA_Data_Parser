@@ -36,6 +36,18 @@ Get these details first so you can set up the tool quickly when you launch it.
 Open a terminal and run:
 
 ```bash
+dav-tool
+```
+
+Or if you're running from source:
+
+```bash
+python -m dav_tool
+```
+
+Or via Streamlit directly:
+
+```bash
 streamlit run dav_tool/ui/app.py
 ```
 
