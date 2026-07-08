@@ -480,10 +480,6 @@ def _phase2_validation(ctx):
 
     if st.button("Validate Onboarding", use_container_width=True, type="primary"):
         with st.spinner("Running validations..."):
-            # Apply validation config overrides
-            run_onb_compare = run_onb_compare and vc.compare_store_list.enabled
-            run_upc_summary = run_upc_summary and vc.item_validation.enabled
-            run_onb_file_review = run_onb_file_review and vc.file_review.enabled
             _run_validation(
                 fp, ft, pd, ll, sl, rt, cols,
                 storelist_path, storelist_delim, storelist_store_col,

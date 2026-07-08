@@ -754,12 +754,6 @@ def _phase2_validation(ctx):
         prod_paths = resolve_source_paths(prod_paths, source=_ex_val_source)
         test_paths = resolve_source_paths(test_paths, source=_ex_val_source)
         with st.spinner("Running validations..."):
-            # Apply validation config overrides
-            run_store = run_store and vc.store_validation.enabled
-            run_item = run_item and vc.item_validation.enabled
-            run_compare_existing = run_compare_existing and vc.compare_store_list.enabled
-            run_summary = run_summary and vc.item_validation.enabled
-            run_file_review_existing = run_file_review_existing and vc.file_review.enabled
             _execute_validation(
                 prod_paths, test_paths, prod_type, test_type,
                 prod_delim, test_delim,

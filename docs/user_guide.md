@@ -534,6 +534,20 @@ Useful for quickly checking that your files contain the expected data volume.
 
 ---
 
+## Developer Mode
+
+Both pages have a **Developer Mode** checkbox in the sidebar. When enabled, it shows live diagnostics:
+
+- Current pipeline phase
+- File type detection status
+- Memory and CPU usage
+- Aggregation row counts
+- Validation completion status
+
+This is useful for debugging and understanding what the pipeline is doing at each step.
+
+---
+
 ## Tips
 
 - **Large files** — DAV Tool streams data in chunks; it can handle files larger than your computer's RAM

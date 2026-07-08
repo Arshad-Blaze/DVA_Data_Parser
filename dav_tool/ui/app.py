@@ -8,6 +8,8 @@ st.set_page_config(page_title="DAV TOOL", layout="wide")
 
 if "page" not in st.session_state:
     st.session_state.page = "existing"
+if "_cm_selected_path" not in st.session_state:
+    st.session_state["_cm_selected_path"] = ""
 
 st.markdown(
     """
@@ -21,6 +23,10 @@ st.markdown(
 )
 
 render_connection_manager()
+
+selected = st.session_state.get("_cm_selected_path", "")
+if selected:
+    st.info(f"Selected path: **{selected}** — enter it in the folder path field below to use it.", icon="📂")
 
 st.divider()
 

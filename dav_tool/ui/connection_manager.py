@@ -172,6 +172,14 @@ def _render_file_browser():
 
     st.markdown("### Remote File Browser")
 
+    select_cols = st.columns([4, 1])
+    with select_cols[0]:
+        pass
+    with select_cols[1]:
+        if st.button("Use This Path", use_container_width=True, type="primary"):
+            st.session_state["_cm_selected_path"] = st.session_state[_BROWSE_PATH_KEY]
+            st.rerun()
+
     nav_cols = st.columns([1, 1, 4, 1])
     with nav_cols[0]:
         if st.button("← Back", use_container_width=True):
