@@ -4,12 +4,17 @@ import os
 
 import streamlit as st
 
+import polars as pl
+
 from dav_tool.datasource.base import DataSourceError
 from dav_tool.datasource.manager import (
     connect_local, connect_ssh, disconnect,
     get_active_source, is_connected, get_active_config,
 )
 from dav_tool._observability import log_phase
+from dav_tool._parsers import preview_raw
+from dav_tool.detection import is_multiline_record, detect_file_type
+from dav_tool.ui.helpers import get_file_list
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +90,7 @@ def render_connection_manager():
         if is_connected():
             _render_connection_info()
             _render_workflow_selector()
+            _render_selected_preview()
 
 
 def _render_local():
@@ -325,6 +331,67 @@ def _render_paired_file_browsers():
             selected_key=_TEST_PATH_KEY,
             button_label="Use This Path for Test",
         )
+
+
+def _render_selected_preview():
+    """Show a quick data preview for paths already selected in the CM."""
+    source = get_active_source()
+    if source is None:
+        return
+
+    workflow = st.session_state.get(_WORKFLOW_KEY, "onboarding")
+
+    if workflow == "onboarding":
+        path = st.session_state.get(_SELECTED_PATH_KEY)
+        if path:
+            _show_path_preview(path, source, label="Onboarding Data Preview")
+    else:
+        bau_path = st.session_state.get(_BAU_PATH_KEY)
+        test_path = st.session_state.get(_TEST_PATH_KEY)
+        if bau_path or test_path:
+            c1, c2 = st.columns(2)
+            with c1:
+                if bau_path:
+                    _show_path_preview(bau_path, source, label="BAU Preview")
+            with c2:
+                if test_path:
+                    _show_path_preview(test_path, source, label="Test Preview")
+
+
+def _show_path_preview(path, source, label="Data Preview"):
+    """Detect file type and show a raw preview for a selected path."""
+    with st.expander(label, expanded=False):
+        file_paths = get_file_list(path, source=source)
+        if not file_paths:
+            st.caption(f"No files found at `{path}`")
+            return
+
+        fp = file_paths[0]
+        try:
+            if is_multiline_record(fp, source=source):
+                file_type = "multiline"
+                delim = "|"
+            else:
+                file_type, delim = detect_file_type(fp, source=source)
+        except Exception:
+            st.caption("Could not detect file type")
+            return
+
+        if file_type is None:
+            st.caption("Could not detect file type")
+            return
+
+        try:
+            df = preview_raw(file_paths, file_type, delim or ",", n_rows=5, source=source)
+        except Exception:
+            st.caption("Could not generate preview")
+            return
+
+        if df is not None and not df.is_empty():
+            st.dataframe(df.to_pandas(), height=150)
+            st.caption(f"{file_type} — {len(file_paths)} file(s)")
+        else:
+            st.caption(f"{file_type} detected — preview empty")
 
 
 def _navigate_to_path(browse_key, input_key):
