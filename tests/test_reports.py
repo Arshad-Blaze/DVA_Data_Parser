@@ -51,6 +51,53 @@ def test_generate_file_review_multiple_files(tmp_path):
     assert len(result) == 3
 
 
+def test_generate_file_review_precomputed_single_row(tmp_path):
+    """Precomputed (global) summaries must yield ONE aggregated row, not N copied rows."""
+    file_a = tmp_path / "a.csv"
+    file_b = tmp_path / "b.csv"
+    file_a.write_text("Store,UPC,Desc,Units,Price\nS1,1001,Widget,10,50\n")
+    file_b.write_text("Store,UPC,Desc,Units,Price\nS2,1002,Gadget,5,25\n")
+
+    store_agg = pl.DataFrame({"STORE_NUMBER": ["S1", "S2"], "Units": [10.0, 5.0], "Totalprice": [50.0, 25.0]})
+    upc_summary = pl.DataFrame({
+        "UPC_CODE": ["1001", "1002"],
+        "PRODUCT_DESCRIPTION": ["Widget", "Gadget"],
+        "UNITS_SOLD": [10.0, 5.0],
+        "TOTAL_DOLLARS": [50.0, 25.0],
+    })
+
+    result = generate_file_review(
+        [str(file_a), str(file_b)], "delimited", "Store", "UPC", "Units", "Price",
+        delimiter=",",
+        precomputed_store_agg=store_agg, precomputed_upc_summary=upc_summary,
+    )
+    # Global totals → single consolidated row, not one copied row per file.
+    assert len(result) == 1
+    assert result["store_count"].to_list()[0] == 2
+    assert result["upc_count"].to_list()[0] == 2
+    assert result["total_units"].to_list()[0] == 15.0
+    assert result["total_dollars"].to_list()[0] == 75.0
+    assert "files (aggregated)" in result["filename"].to_list()[0]
+
+
+def test_generate_file_review_precomputed_single_file(tmp_path):
+    """Single file with precomputed summaries keeps its own basename."""
+    file_a = tmp_path / "a.csv"
+    file_a.write_text("Store,UPC,Desc,Units,Price\nS1,1001,Widget,10,50\n")
+    store_agg = pl.DataFrame({"STORE_NUMBER": ["S1"], "Units": [10.0], "Totalprice": [50.0]})
+    upc_summary = pl.DataFrame({
+        "UPC_CODE": ["1001"], "PRODUCT_DESCRIPTION": ["Widget"],
+        "UNITS_SOLD": [10.0], "TOTAL_DOLLARS": [50.0],
+    })
+    result = generate_file_review(
+        [str(file_a)], "delimited", "Store", "UPC", "Units", "Price",
+        delimiter=",",
+        precomputed_store_agg=store_agg, precomputed_upc_summary=upc_summary,
+    )
+    assert len(result) == 1
+    assert result["filename"].to_list()[0] == "a.csv"
+
+
 def test_storelevelvalidation_summary_cache(tmp_path):
     prod_file = tmp_path / "prod.csv"
     test_file = tmp_path / "test.csv"

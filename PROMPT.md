@@ -1,80 +1,149 @@
-# DVA Platform Integration & Workflow Completion Sprint
+# DVA Platform Evolution
+# Streaming Configuration Driven Data Onboarding Platform
 
-Read and understand the ENTIRE repository before making any modifications.
+Read the COMPLETE repository before making ANY modifications.
 
-The backend implementation has grown significantly over multiple development phases.
+Understand the architecture first.
 
-The concern is that several backend capabilities may exist but are either:
+Do NOT immediately begin coding.
 
-- not exposed in the UI,
-- partially integrated,
-- disconnected from the workflow,
-- inconsistent with the User Guide,
-- inconsistent with Engineering Documentation.
+------------------------------------------------------------
 
-This sprint is NOT a feature sprint.
+CURRENT STATE
 
-This is a COMPLETE PLATFORM INTEGRATION AUDIT.
+The repository already contains
 
-========================================================
+✓ Parser Engine
+
+✓ Canonical Data Layer
+
+✓ Validation Engine
+
+✓ Aggregation Engine
+
+✓ Reporting
+
+✓ Configuration Builder
+
+✓ Connection Manager
+
+✓ Local Data Source
+
+✓ Remote SSH Data Source
+
+✓ Runtime Metrics
+
+✓ Playwright
+
+✓ Regression Framework
+
+✓ Documentation
+
+The project is NOT being restarted.
+
+The project must EVOLVE.
+
+Reuse as much existing implementation as possible.
+
+------------------------------------------------------------
 
 OBJECTIVE
 
-Treat the application as a production platform.
+Transform the application into a Streaming Configuration Driven Data Onboarding Platform.
 
-Review every implemented module.
+The parser should no longer drive the workflow.
 
-Verify that
+The workflow should drive the parser.
 
-Backend
+------------------------------------------------------------
+
+FIRST PRINCIPLE
+
+The MFT Server is the ONLY Source of Truth.
+
+The application should not require users to manually move retailer files.
+
+Everything should happen directly against the MFT server.
+
+Local mode remains available for testing only.
+
+------------------------------------------------------------
+
+NEW ARCHITECTURE
+
+Presentation Layer
 
 ↓
 
-Workflow
+Workflow Engine
 
 ↓
 
-UI
+Data Source Layer
 
 ↓
 
-Documentation
+Discovery Engine
 
 ↓
 
-Playwright
+Configuration Builder
 
-are fully aligned.
+↓
 
-Do not assume that only the Connection Manager is affected.
+Configuration Validator
 
-Review every module.
+↓
 
-========================================================
+Streaming Parser
+
+↓
+
+Canonical Data Layer
+
+↓
+
+Aggregation Engine
+
+↓
+
+Calculation Engine
+
+↓
+
+Reports
+
+------------------------------------------------------------
+
+DO NOT
+
+Redesign working parser modules.
+
+Redesign validation.
+
+Redesign aggregation.
+
+Redesign reporting.
+
+Reuse them.
+
+------------------------------------------------------------
 
 PHASE 1
 
-Repository Audit
+Repository Review
 
 Review the entire repository.
 
 Understand
 
-Architecture
+Parser
 
 Workflow
 
-Navigation
-
-UI
-
-Backend
-
-Parser
-
-Canonical Layer
-
 Configuration Builder
+
+Connection Manager
 
 Validation
 
@@ -82,245 +151,287 @@ Aggregation
 
 Reporting
 
-Connection Manager
-
 Playwright
-
-Documentation
-
-User Guide
-
-Engineering Guide
-
-Do NOT modify code.
-
-Generate an internal understanding of the complete platform.
-
-========================================================
-
-PHASE 2
-
-Feature Matrix
-
-Create a complete feature matrix.
-
-For EVERY implemented feature identify
-
-Feature Name
-
-Backend Implemented
-
-UI Implemented
-
-Workflow Integrated
-
-Documentation Updated
-
-Playwright Covered
-
-Status
-
-Example
-
-Connection Manager
-
-Backend
-
-YES
 
 UI
-
-PARTIAL
-
-Workflow
-
-PARTIAL
-
-Playwright
-
-NO
-
-Status
-
-Needs Integration
-
-Repeat this for every feature.
-
-========================================================
-
-PHASE 3
-
-Module-by-Module Review
-
-Review
-
-1.
-
-Connection Manager
-
-2.
-
-Configuration Builder
-
-3.
-
-Configuration Review
-
-4.
-
-Configuration Editing
-
-5.
-
-Configuration Driven Processing
-
-6.
-
-Configuration Driven Validation
-
-7.
-
-Parser
-
-8.
-
-Detection
-
-9.
-
-Preview
-
-10.
-
-Column Mapping
-
-11.
-
-Aggregation
-
-12.
-
-Validation
-
-13.
-
-Reports
-
-14.
-
-Runtime Metrics
-
-15.
-
-Processing Metrics
-
-16.
-
-Runtime Logs
-
-17.
-
-Developer Mode
-
-18.
-
-Diagnostics
-
-19.
-
-Memory Metrics
-
-20.
-
-Playwright
-
-21.
-
-Regression Framework
-
-22.
-
-Settings
-
-23.
-
-Help
-
-24.
-
-Documentation Viewer
-
-25.
-
-User Guide
-
-For each module verify
-
-Backend
-
-UI
-
-Workflow
-
-Navigation
 
 State Management
 
 Documentation
 
-========================================================
+Identify reusable components.
 
-PHASE 4
+Produce an internal implementation plan.
 
-Workflow Validation
+Do NOT code yet.
 
-Review both workflows completely.
+------------------------------------------------------------
 
-------------------------------------------------
+PHASE 2
 
-ONBOARDING
+Workflow Refactoring
+
+The application should now follow this workflow.
+
+STEP 1
 
 Launch
 
 ↓
 
+Choose Workflow
+
+Onboarding
+
+Existing
+
+↓
+
+STEP 2
+
 Choose Data Source
 
-↓
+Local
 
-Connection (if remote)
-
-↓
-
-File Selection
+Remote (SSH)
 
 ↓
 
-Detection
+STEP 3
+
+If Remote
+
+Connect
+
+Authenticate
+
+Browse MFT
+
+Select Folder(s)
 
 ↓
 
-Configuration Generation
+STEP 4
+
+If Fixed Width
+
+Ask for Layout
+
+Otherwise continue.
 
 ↓
 
-Configuration Review
+STEP 5
+
+Discovery
+
+Read only SAMPLE data.
+
+Never process the complete dataset.
+
+Discovery must inspect only enough logical records to identify
+
+Encoding
+
+Delimiter
+
+Header
+
+Record Type
+
+Multiline
+
+Header Based
+
+Schema
+
+Possible Data Types
+
+Possible Column Names
+
+Display RAW Preview.
+
+Raw Preview must display exactly what exists in source data.
+
+No canonical conversion.
+
+No validation.
+
+No parsing.
+
+------------------------------------------------------------
+
+PHASE 3
+
+Progressive Configuration Builder
+
+Configuration should NOT appear all at once.
+
+It should be built gradually.
+
+Stage A
+
+File Information
 
 ↓
 
-Configuration Acceptance
+User confirms
 
 ↓
 
-Preview
+Stage B
+
+Record Information
 
 ↓
 
-Column Mapping
+User confirms
 
 ↓
 
-Processing
+Stage C
+
+Schema
+
+↓
+
+User confirms
+
+↓
+
+Stage D
+
+Business Rules
+
+↓
+
+User confirms
+
+↓
+
+Stage E
+
+Validation Configuration
+
+↓
+
+User confirms
+
+↓
+
+Configuration Complete
+
+At every stage
+
+Auto detect
+
+Suggest
+
+Allow correction
+
+Continue
+
+Configuration grows progressively.
+
+------------------------------------------------------------
+
+PHASE 4
+
+Configuration Structure
+
+Configuration must contain
+
+GENERAL
+
+FILE
+
+SCHEMA
+
+BUSINESS RULES
+
+VALIDATION
+
+OUTPUT
+
+Validation section must define
+
+Enabled
+
+Required Columns
+
+Group By Columns
+
+Aggregation Columns
+
+If omitted
+
+Current default validation logic remains.
+
+Configuration overrides defaults.
+
+------------------------------------------------------------
+
+PHASE 5
+
+Configuration Validation
+
+Before processing begins
+
+Validate
+
+Required mappings
+
+Aggregation columns
+
+Group By columns
+
+Layouts
+
+Delimiter
+
+Business Rules
+
+Configuration completeness
+
+Only after successful validation
+
+allow processing.
+
+------------------------------------------------------------
+
+PHASE 6
+
+Streaming Processing
+
+This is the most important phase.
+
+DO NOT
+
+Download the dataset.
+
+DO NOT
+
+Create local copies.
+
+DO NOT
+
+Load entire file unnecessarily.
+
+Instead
+
+Open remote stream
+
+↓
+
+Read sequentially
+
+↓
+
+Parse
+
+↓
+
+Canonical
 
 ↓
 
@@ -328,41 +439,263 @@ Aggregation
 
 ↓
 
+Release memory
+
+↓
+
+Continue
+
+Implement streaming architecture wherever practical.
+
+Large datasets should never require local staging.
+
+------------------------------------------------------------
+
+PHASE 7
+
+Validation Architecture
+
+Separate validation into two independent engines.
+
+ENGINE 1
+
+Aggregation Engine
+
+Input
+
+Group By Columns
+
+Aggregation Columns
+
+Output
+
+Aggregated Dataset
+
+Only aggregation.
+
+No calculations.
+
+------------------------------------------------------------
+
+ENGINE 2
+
+Calculation Engine
+
+Input
+
+Aggregated BAU
+
+Aggregated TEST
+
+Calculate
+
+Difference
+
+Difference %
+
+Sorting
+
+Ranking
+
+Tolerance
+
+Output
+
+Validation Results
+
+This engine should become reusable across all validations.
+
+------------------------------------------------------------
+
+PHASE 8
+
+UI
+
+The UI should guide the user.
+
+One logical page per phase.
+
+1
+
+Connection
+
+↓
+
+2
+
+Discovery
+
+↓
+
+3
+
+Configuration
+
+↓
+
+4
+
+Validation of Configuration
+
+↓
+
+5
+
+Processing
+
+↓
+
+6
+
 Validation
 
 ↓
 
+7
+
 Reports
 
-------------------------------------------------
+Avoid hidden functionality.
 
-EXISTING
+Avoid jumping between unrelated pages.
 
-Launch
+------------------------------------------------------------
+
+PHASE 9
+
+Memory
+
+During discovery
+
+Only sample records.
+
+During processing
+
+Streaming.
+
+Release temporary DataFrames.
+
+Never duplicate large DataFrames.
+
+Never reread datasets unnecessarily.
+
+Continue displaying runtime memory metrics.
+
+------------------------------------------------------------
+
+PHASE 10
+
+Playwright
+
+Update E2E tests.
+
+Verify
+
+Connection
+
+Discovery
+
+Configuration Builder
+
+Configuration Validation
+
+Streaming Processing
+
+Validation
+
+Reports
+
+Regression
+
+------------------------------------------------------------
+
+FUTURE
+
+Do NOT implement now.
+
+Only prepare architecture.
+
+Future features
+
+Reusable Data Source Profiles
+
+Configuration Repository
+
+Profile Versioning
+
+Cloud Data Sources
+
+Enterprise Authentication
+
+------------------------------------------------------------
+
+IMPORTANT
+
+Reuse existing modules.
+
+Move functionality only if necessary.
+
+Do not duplicate code.
+
+Do not rewrite working components.
+
+Integrate them into the new workflow.
+
+If existing modules already solve a problem
+
+reuse them.
+
+------------------------------------------------------------
+
+DELIVERABLES
+
+Updated Workflow
+
+Integrated Connection Manager
+
+Streaming Discovery Engine
+
+Progressive Configuration Builder
+
+Configuration Validator
+
+Streaming Processing
+
+Separated Aggregation Engine
+
+Separated Calculation Engine
+
+Updated UI
+
+Updated Playwright
+
+Updated Documentation
+
+Architecture Diagram
+
+Migration Notes
+
+Memory Report
+
+------------------------------------------------------------
+
+SUCCESS CRITERIA
+
+The application should evolve from
+
+Data Validation Tool
+
+into
+
+Streaming Configuration Driven Data Onboarding Platform
+
+where
+
+Data Source
 
 ↓
 
-Choose Data Source
-
-↓
-
-Connection (if remote)
-
-↓
-
-BAU Selection
-
-↓
-
-TEST Selection
-
-↓
-
-Layouts
-
-↓
-
-Detection
+Discovery
 
 ↓
 
@@ -370,11 +703,7 @@ Configuration
 
 ↓
 
-Preview
-
-↓
-
-Column Mapping
+Streaming Processing
 
 ↓
 
@@ -382,180 +711,12 @@ Validation
 
 ↓
 
-Comparison Reports
+Reports
 
-------------------------------------------------
+is the complete user journey.
 
-Verify every phase exists.
+Every module should have a single responsibility.
 
-Verify navigation.
+The parser should become just one component of the workflow rather than controlling the workflow itself.
+Do this by seperatng tasks into milestone and finish it one by one
 
-Verify buttons.
-
-Verify state transitions.
-
-========================================================
-
-PHASE 5
-
-UI Completion
-
-If backend functionality exists
-
-but UI is incomplete
-
-complete the UI.
-
-Do NOT redesign.
-
-Simply expose existing functionality.
-
-========================================================
-
-PHASE 6
-
-Workflow Completion
-
-No backend capability should remain hidden.
-
-Every implemented feature must be reachable.
-
-Every workflow must be complete.
-
-========================================================
-
-PHASE 7
-
-State Review
-
-Review
-
-session_state
-
-ProcessingContext
-
-Navigation
-
-Back
-
-Next
-
-Reset
-
-Cancel
-
-Connection State
-
-Configuration State
-
-Processing State
-
-Validation State
-
-Ensure state persists correctly.
-
-========================================================
-
-PHASE 8
-
-Playwright
-
-Expand tests.
-
-Verify every workflow.
-
-Verify every screen.
-
-Verify every navigation.
-
-Verify every module.
-
-Verify Local.
-
-Verify Remote.
-
-========================================================
-
-PHASE 9
-
-Documentation Validation
-
-User Guide
-
-Engineering Guide
-
-Runtime Guide
-
-Architecture Guide
-
-must exactly match the implemented application.
-
-If documentation describes a feature
-
-the feature must exist.
-
-If a feature exists
-
-it must be documented.
-
-========================================================
-
-PHASE 10
-
-Final Platform Review
-
-Generate
-
-PlatformIntegrationReport.md
-
-Include
-
-Feature Matrix
-
-Missing Integrations
-
-Completed Integrations
-
-Remaining Future Enhancements
-
-Workflow Diagrams
-
-Known Limitations
-
-Recommendations
-
-========================================================
-
-DO NOT
-
-Do NOT redesign architecture.
-
-Do NOT rewrite parser.
-
-Do NOT rewrite validation.
-
-Do NOT change aggregation logic.
-
-Do NOT change report generation.
-
-Do NOT optimize unrelated code.
-
-Do NOT implement future roadmap items.
-
-Only complete platform integration.
-
-========================================================
-
-SUCCESS CRITERIA
-
-Every backend capability should be accessible through the UI.
-
-Every workflow should be complete.
-
-Every documented feature should be implemented.
-
-Every implemented feature should be documented.
-
-Every implemented feature should have Playwright coverage.
-
-The application should feel like one complete, cohesive platform rather than a collection of independently developed modules.

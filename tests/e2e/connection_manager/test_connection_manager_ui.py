@@ -33,7 +33,9 @@ class TestConnectionManagerLocal:
         expect(page.get_by_text("Host")).to_be_visible()
         expect(page.get_by_text("User")).to_be_visible()
         expect(page.get_by_text("Platform")).to_be_visible()
-        expect(page.get_by_text("Local File System")).to_be_visible()
+        # The Host column shows the connection string "Local File System".
+        # Use exact match to avoid colliding with the "Use Local File System" button.
+        expect(page.get_by_text("Local File System", exact=True)).to_be_visible()
 
     def test_connect_local_shows_file_browser(self, ex_page: Page):
         page = ex_page

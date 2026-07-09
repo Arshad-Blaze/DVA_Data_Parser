@@ -47,14 +47,14 @@ class TestExistingMultilineFlow:
                          multiline_test_data["bau_ml_dir"],
                          multiline_test_data["test_ml_dir"])
         self._flatten_and_apply_schema(ex_page)
-        expect(ex_page.get_by_text("Proceed to Column Mapping")).to_be_visible()
+        expect(ex_page.get_by_text("Progressive Configuration")).to_be_visible()
 
-    def test_proceed_to_column_mapping(self, ex_page: Page, multiline_test_data: dict):
+    def test_proceed_to_configuration(self, ex_page: Page, multiline_test_data: dict):
         page = ex_page
         self._fill_paths(page,
                          multiline_test_data["bau_ml_dir"],
                          multiline_test_data["test_ml_dir"])
         self._flatten_and_apply_schema(page)
-        page.get_by_role("button", name="Proceed to Column Mapping").click()
+        page.get_by_role("button", name="Progressive Configuration").click()
         page.wait_for_timeout(1500)
-        expect(page.get_by_text("Phase 2: Column Mapping")).to_be_visible()
+        expect(page.get_by_text("General Information")).to_be_visible()

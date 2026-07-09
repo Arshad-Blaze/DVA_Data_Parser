@@ -64,17 +64,17 @@ class TestOnboardingHdrTrailerFlow:
         self._fill_layout(page, "Header Layout CSV Path", trl_test_data["trl_header_layout"])
         self._fill_layout(page, "Detail Layout CSV Path", trl_test_data["trl_detail_layout"])
         self._flatten_and_apply_schema(page)
-        expect(page.get_by_text("Proceed to Column Mapping")).to_be_visible()
+        expect(onb_page.get_by_text("Progressive Configuration")).to_be_visible()
 
-    def test_proceed_to_column_mapping(self, onb_page: Page, trl_test_data: dict):
+    def test_proceed_to_configuration(self, onb_page: Page, trl_test_data: dict):
         page = onb_page
         self._fill_folder(page, trl_test_data["trl_data_dir"])
         self._fill_layout(page, "Header Layout CSV Path", trl_test_data["trl_header_layout"])
         self._fill_layout(page, "Detail Layout CSV Path", trl_test_data["trl_detail_layout"])
         self._flatten_and_apply_schema(page)
-        page.get_by_role("button", name="Proceed to Column Mapping").click()
+        page.get_by_role("button", name="Progressive Configuration").click()
         page.wait_for_timeout(1500)
-        expect(page.get_by_text("Phase 2: Column Mapping")).to_be_visible()
+        expect(page.get_by_text("General Information")).to_be_visible()
 
     def test_trailer_fields_appear_in_preview(self, onb_page: Page, trl_test_data: dict):
         page = onb_page

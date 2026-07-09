@@ -2,6 +2,8 @@
 
 Reads only the first N records of a file to detect its structure.
 Never loads the full dataset.
+
+Supports progressive building via stage-specific builders.
 """
 import logging
 import os
@@ -18,7 +20,9 @@ from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
     detect_hdr_prefix, has_header,
 )
-from dav_tool.format_config import FormatConfig, ValidationConfig, ValidationRule
+from dav_tool.format_config import (
+    FormatConfig, ValidationConfig, ValidationRule, ConfigSection,
+)
 from dav_tool.datasource.base import IDataSource
 from dav_tool.datasource.manager import get_active_source
 
@@ -247,3 +251,225 @@ def config_to_summary_dict(cfg: FormatConfig) -> Dict[str, Any]:
     }
 
     return sections
+
+
+# ── Progressive Stage Builders ──────────────────────────────────────
+
+
+def build_file_info_section(
+    cfg: FormatConfig,
+    file_paths: List[str],
+    file_type: Optional[str] = None,
+    delimiter: Optional[str] = None,
+    source: Optional[IDataSource] = None,
+) -> FormatConfig:
+    """Stage A: detect and set file type, encoding, delimiter."""
+    fp = file_paths[0] if file_paths else ""
+    if not fp:
+        return cfg
+
+    if source is None:
+        source = get_active_source()
+
+    local_fp = _resolve_sample(fp, source)
+
+    if not file_type:
+        if is_multiline_record(local_fp):
+            file_type = "multiline"
+        else:
+            file_type, delimiter = detect_file_type(local_fp)
+
+    cfg.file_type = file_type
+    cfg.delimiter = delimiter
+    cfg.encoding = _detect_encoding(local_fp, source)
+    cfg.has_header = has_header(local_fp, delimiter or ",") if file_type != "multiline" else False
+
+    _cleanup_sample(fp, local_fp, source)
+    return cfg
+
+
+def build_record_info_section(
+    cfg: FormatConfig,
+    file_paths: List[str],
+    source: Optional[IDataSource] = None,
+) -> FormatConfig:
+    """Stage B: detect record structure (multiline, HDR, layout)."""
+    fp = file_paths[0] if file_paths else ""
+    if not fp or cfg.file_type != "multiline":
+        return cfg
+
+    if source is None:
+        source = get_active_source()
+
+    local_fp = _resolve_sample(fp, source)
+
+    hdr_prefixes = detect_hdr_prefix(local_fp) if local_fp else []
+    if hdr_prefixes:
+        cfg.header_prefix = hdr_prefixes[0]
+    else:
+        types = detect_record_types(local_fp) if local_fp else ["H", "D"]
+        cfg.ml_record_types = types
+        cfg.ml_delimiter = cfg.delimiter or "|"
+
+    _cleanup_sample(fp, local_fp, source)
+    return cfg
+
+
+def build_schema_section(
+    cfg: FormatConfig,
+    file_paths: List[str],
+    layout: Optional[List[Dict]] = None,
+    header_layout: Optional[List[Dict]] = None,
+    detail_layout: Optional[List[Dict]] = None,
+    trailer_prefix: Optional[str] = None,
+    trailer_layout: Optional[List[Dict]] = None,
+    source: Optional[IDataSource] = None,
+) -> FormatConfig:
+    """Stage C: detect schema, columns, and data types from a sample."""
+    fp = file_paths[0] if file_paths else ""
+    if not fp:
+        return cfg
+
+    if source is None:
+        source = get_active_source()
+
+    local_fp = _resolve_sample(fp, source)
+    file_paths_local = [local_fp]
+
+    sample = _load_sample(
+        file_paths_local, cfg.file_type, cfg.delimiter or ",",
+        layout, cfg.start_line, cfg.record_type,
+        cfg.header_prefix, header_layout, detail_layout,
+        cfg.ml_record_types, cfg.ml_delimiter,
+        trailer_prefix, trailer_layout,
+    )
+
+    if sample is not None and not sample.is_empty():
+        cfg.detected_columns = list(sample.columns)
+        cfg.detected_data_types = _infer_data_types(sample)
+        cfg.schema = list(sample.columns)
+
+        from dav_tool.ui.helpers import smart_column_indices
+        indices = smart_column_indices(sample.columns)
+        mapping = {}
+        for role, (idx, col) in indices.items():
+            if col:
+                mapping[role] = col
+        cfg.suggested_mapping = mapping
+        cfg.store_col = mapping.get("store")
+        cfg.upc_col = mapping.get("upc")
+        cfg.desc_col = mapping.get("description")
+        cfg.units_col = mapping.get("units")
+        cfg.price_col = mapping.get("price")
+
+    _cleanup_sample(fp, local_fp, source)
+    return cfg
+
+
+def build_business_rules_section(
+    cfg: FormatConfig,
+    store_col: Optional[str] = None,
+    upc_col: Optional[str] = None,
+    desc_col: Optional[str] = None,
+    units_col: Optional[str] = None,
+    price_col: Optional[str] = None,
+    price_type: str = "Total Price",
+    implied_dollars: bool = False,
+    implied_units: bool = False,
+) -> FormatConfig:
+    """Stage D: set business rules (column mapping, price settings)."""
+    if store_col:
+        cfg.store_col = store_col
+    if upc_col:
+        cfg.upc_col = upc_col
+    if desc_col:
+        cfg.desc_col = desc_col
+    if units_col:
+        cfg.units_col = units_col
+    if price_col:
+        cfg.price_col = price_col
+    cfg.price_type = price_type
+    cfg.implied_dollars = implied_dollars
+    cfg.implied_units = implied_units
+    return cfg
+
+
+# ── Internal Helpers ────────────────────────────────────────────────
+
+
+def _resolve_sample(fp: str, source: Optional[IDataSource]) -> str:
+    """Download a small sample to local temp for detection."""
+    if source is not None:
+        try:
+            text = source.read_sample(fp, n=SAMPLE_SIZE)
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sample", mode="w")
+            tmp.write(text)
+            tmp.close()
+            return tmp.name
+        except Exception:
+            pass
+    return fp
+
+
+def _cleanup_sample(original_fp: str, local_fp: str, source: Optional[IDataSource]):
+    """Remove temporary sample file if one was created."""
+    if source is not None and local_fp != original_fp:
+        try:
+            os.unlink(local_fp)
+        except Exception:
+            pass
+
+
+def _load_sample(
+    file_paths: List[str],
+    file_type: str,
+    delimiter: str,
+    layout: Optional[List[Dict]],
+    start_line: int,
+    record_type: Optional[str],
+    header_prefix: Optional[str],
+    header_layout: Optional[List[Dict]],
+    detail_layout: Optional[List[Dict]],
+    ml_record_types: Optional[List[str]],
+    ml_delimiter: str,
+    trailer_prefix: Optional[str],
+    trailer_layout: Optional[List[Dict]],
+) -> Optional[pl.DataFrame]:
+    """Load a small sample for schema detection."""
+    fp = file_paths[0] if file_paths else ""
+    if not fp:
+        return None
+
+    if file_type == "multiline":
+        if header_prefix and header_layout and detail_layout:
+            return preview_flattened_multiline_fixed(
+                file_paths, header_prefix, header_layout, detail_layout,
+                n_rows=SAMPLE_SIZE,
+                trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
+            )
+        rtypes = ml_record_types or ["H", "D"]
+        return preview_flattened_multiline(
+            file_paths, rtypes, ml_delimiter, n_rows=SAMPLE_SIZE,
+        )
+
+    if file_type == "fixed" and layout:
+        return preview_raw(
+            file_paths, file_type, delimiter, layout,
+            n_rows=SAMPLE_SIZE,
+        )
+
+    if file_type == "delimited":
+        try:
+            from dav_tool.config import FALLBACK_ENCODING
+            return pl.read_csv(
+                fp, separator=delimiter,
+                n_rows=SAMPLE_SIZE, encoding=FALLBACK_ENCODING,
+            )
+        except Exception:
+            pass
+
+    return preview_raw(
+        file_paths, file_type, delimiter,
+        n_rows=SAMPLE_SIZE,
+    )

@@ -1,15 +1,23 @@
+"""Item-level validation — orchestrates aggregation and calculation.
+
+Aggregation Engine (``_aggregators``) handles parsing → normalization → group-by → sum.
+Calculation Engine (``calculations``) handles diff, pct-diff, and comparison.
+
+This module only wires them together and accepts pre-computed summaries.
+"""
+
 import time
 import polars as pl
 from dav_tool._aggregators import stream_item_aggregate
-from dav_tool.validation._utils import _pct_expr
+from dav_tool.calculations import item_comparison, item_summary
 
 
 def run_item_validation(
-    bau_paths, test_paths,
-    bau_type, test_type,
-    bau_delim, test_delim,
-    bau_layout, test_layout,
-    upc_col, desc_col, units_col, dollars_col,
+    bau_paths=None, test_paths=None,
+    bau_type=None, test_type=None,
+    bau_delim=None, test_delim=None,
+    bau_layout=None, test_layout=None,
+    upc_col=None, desc_col=None, units_col=None, dollars_col=None,
     implied_units_bau=False, implied_dollars_bau=False,
     implied_units_test=False, implied_dollars_test=False,
     start_line=0, record_type=None,
@@ -17,10 +25,18 @@ def run_item_validation(
     column_names=None, header_prefix=None, header_layout=None,
     trailer_prefix=None, trailer_layout=None,
     bau_summary=None, test_summary=None,
+    aggregation_source=None,
 ):
+    """Orchestrate item-level validation.
+
+    Accepts optional pre-computed summaries. When not provided,
+    delegates to the Aggregation Engine (``stream_item_aggregate``).
+    The comparison is computed by the Calculation Engine (``item_comparison``).
+    """
     start_time = time.time()
 
     if bau_summary is None:
+        from dav_tool._aggregators import stream_item_aggregate
         bau_summary = stream_item_aggregate(
             bau_paths, bau_type,
             upc_col, desc_col, units_col, dollars_col,
@@ -35,9 +51,11 @@ def run_item_validation(
             header_layout=header_layout,
             trailer_prefix=trailer_prefix,
             trailer_layout=trailer_layout,
+            source=aggregation_source,
         )
 
     if test_summary is None:
+        from dav_tool._aggregators import stream_item_aggregate
         test_summary = stream_item_aggregate(
             test_paths, test_type,
             upc_col, desc_col, units_col, dollars_col,
@@ -52,41 +70,19 @@ def run_item_validation(
             header_layout=header_layout,
             trailer_prefix=trailer_prefix,
             trailer_layout=trailer_layout,
+            source=aggregation_source,
         )
 
     comparison = create_comparison(bau_summary, test_summary)
-    summary = comparison.group_by("Present In").agg([
-        pl.sum("Units Difference"),
-        pl.sum("Dollar Difference"),
-    ]).sort("Present In")
+    summary = item_summary(comparison)
 
     print(f"Time taken for item validation {time.time() - start_time}")
     return comparison, summary
 
 
 def create_comparison(bau_df, test_df):
-    bau = bau_df.rename({"UNITS_SOLD": "BAU Units", "TOTAL_DOLLARS": "BAU Dollars"})
-    test = test_df.rename({"UNITS_SOLD": "TEST Units", "TOTAL_DOLLARS": "TEST Dollars"})
+    """Compare BAU vs Test item summaries.
 
-    df = bau.join(test, on=["UPC_CODE", "PRODUCT_DESCRIPTION"], how="full")
-
-    df = df.with_columns([
-        pl.when(pl.col("BAU Units").is_null() & pl.col("TEST Units").is_not_null())
-        .then(pl.lit("Present only in TEST"))
-        .when(pl.col("TEST Units").is_null() & pl.col("BAU Units").is_not_null())
-        .then(pl.lit("Present only in BAU"))
-        .otherwise(pl.lit("Present in Both"))
-        .alias("Present In")
-    ])
-
-    for col in ["BAU Units", "TEST Units", "BAU Dollars", "TEST Dollars"]:
-        df = df.with_columns(pl.col(col).cast(pl.Float64).fill_null(0.0))
-
-    df = df.with_columns([
-        (pl.col("BAU Units") - pl.col("TEST Units")).alias("Units Difference"),
-        (pl.col("BAU Dollars") - pl.col("TEST Dollars")).alias("Dollar Difference"),
-        _pct_expr("BAU Units", "TEST Units").alias("Unit % Difference"),
-        _pct_expr("BAU Dollars", "TEST Dollars").alias("Dollar % Difference"),
-    ])
-
-    return df
+    Delegates to the Calculation Engine (``item_comparison``).
+    """
+    return item_comparison(bau_df, test_df)

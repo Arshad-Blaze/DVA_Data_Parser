@@ -1,8 +1,11 @@
+import csv
+import io
 import os
 import polars as pl
-from typing import Iterator, List, Dict, Any, Optional, Union
+from typing import Iterator, List, Dict, Any, Optional, Union, BinaryIO
 
 from dav_tool.config import DEFAULT_ENCODING, FALLBACK_ENCODING, DEFAULT_CHUNK_SIZE, DEFAULT_PREVIEW_ROWS
+from dav_tool.datasource.base import IDataSource
 
 
 def safe_numeric(column: str) -> pl.Expr:
@@ -33,21 +36,41 @@ def load_layout(layout_file: str) -> List[Dict[str, Any]]:
     return layout
 
 
+def _open_text_stream(
+    file_path: str,
+    source: Optional[IDataSource] = None,
+    encoding: str = DEFAULT_ENCODING,
+) -> io.TextIOBase:
+    """Open a text stream from a file path or a remote source.
+
+    When *source* is provided, uses ``source.open_stream()``.
+    Falls back to ``open()`` for local files.
+    """
+    if source is not None:
+        try:
+            raw: BinaryIO = source.open_stream(file_path)
+            return io.TextIOWrapper(raw, encoding=encoding, errors="ignore")
+        except Exception:
+            logger.exception("Failed to open stream for %s", file_path)
+    return open(file_path, "r", encoding=encoding, errors="ignore")
+
+
 def parse_fixed_width_chunks(
     file_paths: Union[str, List[str]],
     layout: List[Dict[str, Any]],
     start_line: int = 0,
     record_type: Optional[str] = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
+    source: Optional[IDataSource] = None,
 ) -> Iterator[pl.DataFrame]:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
 
     for file_path in file_paths:
-        if not os.path.exists(file_path):
+        if source is None and not os.path.exists(file_path):
             continue
 
-        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
+        with _open_text_stream(file_path, source) as f:
             buffer = []
             for i, line in enumerate(f):
                 if i < start_line:
@@ -96,6 +119,65 @@ def scan_delimited(
     return lazy
 
 
+def parse_delimited_chunks(
+    file_paths: Union[str, List[str]],
+    delimiter: str,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    encoding: str = DEFAULT_ENCODING,
+    source: Optional[IDataSource] = None,
+) -> Iterator[pl.DataFrame]:
+    """Read delimited files in chunks from a stream or file path.
+
+    When *source* is provided, uses ``source.open_stream()`` to stream
+    directly from the remote source without downloading the full file.
+    Otherwise falls back to ``open(path, "r")``.
+
+    Each chunk is a ``pl.DataFrame`` with string columns.
+    """
+    if isinstance(file_paths, str):
+        file_paths = [file_paths]
+
+    for file_path in file_paths:
+        if source is not None:
+            try:
+                raw: BinaryIO = source.open_stream(file_path)
+                f: io.TextIOBase = io.TextIOWrapper(raw, encoding=encoding, errors="ignore")
+            except Exception:
+                logger.exception("Failed to open stream for %s, falling back to file path", file_path)
+                if not os.path.exists(file_path):
+                    continue
+                f = open(file_path, "r", encoding=encoding, errors="ignore")
+        else:
+            if not os.path.exists(file_path):
+                continue
+            f = open(file_path, "r", encoding=encoding, errors="ignore")
+
+        with f:
+            reader = csv.reader(f, delimiter=delimiter)
+            try:
+                header = next(reader)
+            except StopIteration:
+                continue
+
+            buffer_rows = []
+            for row in reader:
+                buffer_rows.append(row)
+                if len(buffer_rows) >= chunk_size:
+                    yield _rows_to_df(buffer_rows, header)
+                    buffer_rows.clear()
+
+            if buffer_rows:
+                yield _rows_to_df(buffer_rows, header)
+
+
+def _rows_to_df(rows: List[List[str]], header: List[str]) -> pl.DataFrame:
+    """Convert a batch of rows + header into a polars DataFrame."""
+    data = {}
+    for i, col_name in enumerate(header):
+        data[col_name] = [row[i] if i < len(row) else "" for row in rows]
+    return pl.DataFrame(data)
+
+
 def _fields_to_df(buffer):
     max_cols = max(len(row) for row in buffer)
     data = {}
@@ -110,15 +192,16 @@ def flatten_multiline_chunks(
     record_types: List[str],
     delimiter: str = "|",
     chunk_size: int = DEFAULT_CHUNK_SIZE,
+    source: Optional[IDataSource] = None,
 ) -> Iterator[pl.DataFrame]:
     if isinstance(file_paths, str):
         file_paths = [file_paths]
 
     for file_path in file_paths:
-        if not os.path.exists(file_path):
+        if source is None and not os.path.exists(file_path):
             continue
 
-        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
+        with _open_text_stream(file_path, source) as f:
             buffer = []
             for line in f:
                 line = line.rstrip("\n\r")
@@ -165,6 +248,7 @@ def flatten_multiline_fixed_width(
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     trailer_prefix: Optional[str] = None,
     trailer_layout: Optional[List[Dict[str, Any]]] = None,
+    source: Optional[IDataSource] = None,
 ) -> Iterator[pl.DataFrame]:
     """Flatten HDR-fixed-width files: extract header fields, merge into detail rows.
 
@@ -180,10 +264,10 @@ def flatten_multiline_fixed_width(
         file_paths = [file_paths]
 
     for file_path in file_paths:
-        if not os.path.exists(file_path):
+        if source is None and not os.path.exists(file_path):
             continue
 
-        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
+        with _open_text_stream(file_path, source) as f:
             buffer: List[Dict[str, str]] = []
             current_header: Dict[str, str] = {}
 

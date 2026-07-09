@@ -1,12 +1,23 @@
 import json
 import os
 from dataclasses import dataclass, asdict, field
-from typing import Any, Dict, List, Optional
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 import polars as pl
 
 from dav_tool._parsers import load_layout, preview_flattened_multiline, preview_flattened_multiline_fixed
 from dav_tool.processing_context import ProcessingContext
+
+
+class ConfigSection(Enum):
+    """Logical sections of a FormatConfig, in progressive order."""
+    GENERAL = "GENERAL"
+    FILE = "FILE"
+    SCHEMA = "SCHEMA"
+    BUSINESS_RULES = "BUSINESS_RULES"
+    VALIDATION = "VALIDATION"
+    OUTPUT = "OUTPUT"
 
 
 @dataclass
@@ -18,6 +29,7 @@ class ValidationRule:
     """
     enabled: bool = True
     required_columns: List[str] = field(default_factory=list)
+    group_by_columns: List[str] = field(default_factory=list)
     aggregation_columns: List[str] = field(default_factory=list)
 
 
@@ -26,12 +38,17 @@ class ValidationConfig:
     """Per-validation settings that can be overridden per file/profile."""
     store_validation: ValidationRule = field(default_factory=lambda: ValidationRule(
         required_columns=["STORE_NUMBER", "Units", "Totalprice"],
+        group_by_columns=["STORE_NUMBER"],
+        aggregation_columns=["Units", "Totalprice"],
     ))
     item_validation: ValidationRule = field(default_factory=lambda: ValidationRule(
         required_columns=["UPC_CODE", "PRODUCT_DESCRIPTION", "UNITS_SOLD", "TOTAL_DOLLARS"],
+        group_by_columns=["UPC_CODE", "PRODUCT_DESCRIPTION"],
+        aggregation_columns=["UNITS_SOLD", "TOTAL_DOLLARS"],
     ))
     compare_store_list: ValidationRule = field(default_factory=lambda: ValidationRule(
         required_columns=["STORE_NUMBER"],
+        group_by_columns=["STORE_NUMBER"],
     ))
     file_review: ValidationRule = field(default_factory=lambda: ValidationRule(
         required_columns=["STORE_NUMBER", "UPC_CODE", "UNITS_SOLD", "TOTAL_DOLLARS"],
@@ -39,10 +56,68 @@ class ValidationConfig:
 
 
 @dataclass
+class OutputConfig:
+    """Output configuration for reports and exports."""
+    format: str = "csv"
+    include_file_review: bool = True
+    include_validation_details: bool = True
+    download_results: bool = True
+
+
+# Mapping of section -> tuple of field names
+SECTION_FIELDS: Dict[ConfigSection, Tuple[str, ...]] = {
+    ConfigSection.GENERAL: ("version", "name",),
+    ConfigSection.FILE: (
+        "file_type", "encoding", "has_header", "delimiter",
+        "start_line", "record_type", "layout_file",
+        "header_prefix", "header_layout_file", "detail_layout_file",
+        "trailer_prefix", "trailer_layout_file",
+        "ml_record_types", "ml_delimiter",
+    ),
+    ConfigSection.SCHEMA: (
+        "schema", "detected_columns", "detected_data_types",
+        "suggested_mapping",
+    ),
+    ConfigSection.BUSINESS_RULES: (
+        "store_col", "upc_col", "desc_col", "units_col", "price_col",
+        "price_type", "implied_dollars", "implied_units",
+    ),
+    ConfigSection.VALIDATION: ("validation_config",),
+    ConfigSection.OUTPUT: ("output_config",),
+}
+
+SECTION_LABELS: Dict[ConfigSection, str] = {
+    ConfigSection.GENERAL: "General Information",
+    ConfigSection.FILE: "File Format",
+    ConfigSection.SCHEMA: "Schema & Columns",
+    ConfigSection.BUSINESS_RULES: "Business Rules",
+    ConfigSection.VALIDATION: "Validation Settings",
+    ConfigSection.OUTPUT: "Output Settings",
+}
+
+
+def get_section_fields(section: ConfigSection) -> Tuple[str, ...]:
+    return SECTION_FIELDS.get(section, ())
+
+
+def iter_sections() -> List[ConfigSection]:
+    """Return sections in progressive order (Stage A through F)."""
+    return [
+        ConfigSection.GENERAL,
+        ConfigSection.FILE,
+        ConfigSection.SCHEMA,
+        ConfigSection.BUSINESS_RULES,
+        ConfigSection.VALIDATION,
+        ConfigSection.OUTPUT,
+    ]
+
+
+@dataclass
 class FormatConfig:
     """Serializable description of a data file format.
 
     Can be saved to / loaded from JSON to bypass manual UI setup.
+    Fields are organized into logical sections for progressive building.
     """
     version: int = 2
     name: str = ""
@@ -73,7 +148,33 @@ class FormatConfig:
     implied_dollars: bool = False
     implied_units: bool = False
     validation_config: ValidationConfig = field(default_factory=ValidationConfig)
+    output_config: OutputConfig = field(default_factory=OutputConfig)
     locked: bool = False
+    _completed_sections: set = field(default_factory=set)
+
+    def section_complete(self, section: ConfigSection) -> bool:
+        return section in self._completed_sections
+
+    def mark_section_complete(self, section: ConfigSection):
+        self._completed_sections.add(section)
+
+    def section_fields(self, section: ConfigSection) -> Tuple[str, ...]:
+        return get_section_fields(section)
+
+    def section_label(self, section: ConfigSection) -> str:
+        return SECTION_LABELS.get(section, section.value)
+
+    def next_incomplete_section(self) -> Optional[ConfigSection]:
+        for s in iter_sections():
+            if s not in self._completed_sections:
+                return s
+        return None
+
+    def is_config_complete(self) -> bool:
+        return all(s in self._completed_sections for s in iter_sections())
+
+    def reset_sections(self):
+        self._completed_sections.clear()
 
 
 def load_format_config(path: str) -> FormatConfig:
@@ -82,14 +183,18 @@ def load_format_config(path: str) -> FormatConfig:
         data = json.load(f)
     version = data.pop("version", 1)
     name = data.pop("name", "")
+    cs = data.pop("_completed_sections", set())
     # Handle nested ValidationConfig
     vc_data = data.pop("validation_config", None)
-    cfg = FormatConfig(version=version, name=name, **data)
+    oc_data = data.pop("output_config", None)
+    cfg = FormatConfig(version=version, name=name, _completed_sections=set(cs), **data)
     if vc_data:
         for key in ("store_validation", "item_validation", "compare_store_list", "file_review"):
             rule_data = vc_data.get(key)
             if rule_data:
                 setattr(cfg.validation_config, key, ValidationRule(**rule_data))
+    if oc_data:
+        cfg.output_config = OutputConfig(**oc_data)
     return cfg
 
 

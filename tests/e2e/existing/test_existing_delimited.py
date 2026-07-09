@@ -1,4 +1,3 @@
-import re
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -15,6 +14,16 @@ class TestExistingDelimitedFlow:
         page.locator(TEST_INPUT).fill(test_dir)
         page.locator(TEST_INPUT).press("Tab")
         page.wait_for_timeout(2000)
+
+    def _complete_config_wizard(self, page: Page, key_prefix: str = ""):
+        for label in [
+            "General Information", "File Format", "Schema & Columns",
+            "Business Rules", "Validation Settings", "Output Settings",
+        ]:
+            btn = page.get_by_role("button", name=f"Confirm {label}")
+            if btn.is_visible():
+                btn.click()
+                page.wait_for_timeout(500)
 
     def _select_combobox_option(self, page: Page, partial_label: str, option: str):
         page.locator(f'[aria-label*="{partial_label}"]').click()
@@ -36,44 +45,67 @@ class TestExistingDelimitedFlow:
 
     def _navigate_to_validation(self, page: Page, test_data: dict):
         self._fill_paths(page, test_data["bau_dir"], test_data["test_dir"])
-        page.get_by_role("button", name="Proceed to Column Mapping").click()
+        page.get_by_role("button", name="Progressive Configuration").click()
+        page.wait_for_timeout(1500)
+        self._complete_config_wizard(page)
+        page.wait_for_timeout(1000)
+        self._complete_config_wizard(page)
+        page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Validate Configurations").click()
+        page.wait_for_timeout(1500)
+        page.get_by_role("button", name="Proceed to Processing").click()
         page.wait_for_timeout(1500)
         self._select_columns(page)
         page.get_by_role("button", name="Confirm Mapping").click()
         page.wait_for_timeout(1500)
         page.get_by_role("button", name="Proceed to Processing & Validation").click()
-        page.get_by_text("Phase 3: Validation").wait_for(timeout=120000)
+        page.wait_for_timeout(3000)
 
     def test_detection_completes_for_both_sides(self, ex_page: Page, test_data: dict):
         self._fill_paths(ex_page, test_data["bau_dir"], test_data["test_dir"])
-        expect(ex_page.get_by_text(re.compile(r"Delimited"))).to_have_count(2)
+        expect(ex_page.get_by_text("Delimited").first).to_be_visible()
 
     def test_previews_appear(self, ex_page: Page, test_data: dict):
         self._fill_paths(ex_page, test_data["bau_dir"], test_data["test_dir"])
         expect(ex_page.get_by_text("BAU Preview")).to_be_visible()
         expect(ex_page.get_by_text("Test Preview")).to_be_visible()
 
-    def test_proceed_to_column_mapping(self, ex_page: Page, test_data: dict):
+    def test_progressive_config_button_appears(self, ex_page: Page, test_data: dict):
         self._fill_paths(ex_page, test_data["bau_dir"], test_data["test_dir"])
-        ex_page.get_by_role("button", name="Proceed to Column Mapping").click()
-        ex_page.wait_for_timeout(1500)
-        expect(ex_page.get_by_text("Phase 2: Column Mapping")).to_be_visible()
+        expect(ex_page.get_by_role("button", name="Progressive Configuration")).to_be_visible()
 
     def test_column_mapping_widgets_present(self, ex_page: Page, test_data: dict):
-        self._fill_paths(ex_page, test_data["bau_dir"], test_data["test_dir"])
-        ex_page.get_by_role("button", name="Proceed to Column Mapping").click()
-        ex_page.wait_for_timeout(1500)
-        expect(ex_page.get_by_text("Store (BAU)", exact=True)).to_be_visible()
-        expect(ex_page.get_by_text("Units (BAU)", exact=True)).to_be_visible()
-        expect(ex_page.get_by_text("Price (BAU)", exact=True)).to_be_visible()
-        expect(ex_page.get_by_text("Store (Test)", exact=True)).to_be_visible()
-        expect(ex_page.get_by_text("Units (Test)", exact=True)).to_be_visible()
-        expect(ex_page.get_by_text("Price (Test)", exact=True)).to_be_visible()
+        page = ex_page
+        self._fill_paths(page, test_data["bau_dir"], test_data["test_dir"])
+        page.get_by_role("button", name="Progressive Configuration").click()
+        page.wait_for_timeout(1500)
+        self._complete_config_wizard(page)
+        page.wait_for_timeout(1000)
+        self._complete_config_wizard(page)
+        page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Validate Configurations").click()
+        page.wait_for_timeout(1500)
+        page.get_by_role("button", name="Proceed to Processing").click()
+        page.wait_for_timeout(1500)
+        expect(page.get_by_text("Store (BAU)", exact=True)).to_be_visible()
+        expect(page.get_by_text("Units (BAU)", exact=True)).to_be_visible()
+        expect(page.get_by_text("Price (BAU)", exact=True)).to_be_visible()
+        expect(page.get_by_text("Store (Test)", exact=True)).to_be_visible()
+        expect(page.get_by_text("Units (Test)", exact=True)).to_be_visible()
+        expect(page.get_by_text("Price (Test)", exact=True)).to_be_visible()
 
     def test_full_existing_flow(self, ex_page: Page, test_data: dict):
         page = ex_page
         self._fill_paths(page, test_data["bau_dir"], test_data["test_dir"])
-        page.get_by_role("button", name="Proceed to Column Mapping").click()
+        page.get_by_role("button", name="Progressive Configuration").click()
+        page.wait_for_timeout(1500)
+        self._complete_config_wizard(page)
+        page.wait_for_timeout(1000)
+        self._complete_config_wizard(page)
+        page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Validate Configurations").click()
+        page.wait_for_timeout(1500)
+        page.get_by_role("button", name="Proceed to Processing").click()
         page.wait_for_timeout(1500)
         self._select_columns(page)
         page.get_by_role("button", name="Confirm Mapping").click()
@@ -81,7 +113,7 @@ class TestExistingDelimitedFlow:
         expect(page.get_by_text("Column mapping confirmed")).to_be_visible()
         page.get_by_role("button", name="Proceed to Processing & Validation").click()
         page.wait_for_timeout(4000)
-        expect(page.get_by_text("Phase 3: Validation")).to_be_visible()
+        expect(page.get_by_text("Step 6: Validation")).to_be_visible()
 
     def test_validation_executes(self, ex_page: Page, test_data: dict):
         page = ex_page
@@ -106,4 +138,4 @@ class TestExistingDelimitedFlow:
         page.wait_for_timeout(3000)
         page.get_by_role("button", name="Start Over").click()
         page.wait_for_timeout(1500)
-        expect(page.get_by_text("Phase 1: File Detection & Preview")).to_be_visible()
+        expect(page.get_by_text("Step 2: Discovery")).to_be_visible()

@@ -365,3 +365,72 @@ def test_flatten_multiline_fixed_width_trailer_no_trailer_layout(tmp_path):
     assert len(df) == 1
     assert df["store"].to_list() == ["Store 1"]
     assert "total" not in df.columns
+
+
+def test_store_aggregate_hdr_fixed_uses_detail_layout(tmp_path):
+    """Regression: HDR fixed-width must parse the detail layout.
+
+    The UI passes the detail layout separately (``detail_layout=``) and
+    ``layout=None`` for HDR files. Previously the detail layout was never
+    forwarded, so detail rows were parsed against an empty layout and the
+    store/item aggregation silently produced empty/wrong results.
+    """
+    def hdr_line(store, seq, date):
+        return f"HDR{seq:02d}{store:<4}   {date}\n"
+    def dtl_line(upc, desc, units, price):
+        return f"{upc:<12}{desc:<21}{units:>2}{price:>8}     \n"
+    def trl_line(total_units, total_price):
+        return f"TRL{total_units:>6}{total_price:>9}\n"
+    f = tmp_path / "hdr.txt"
+    f.write_text(
+        hdr_line("S001", 1, "2024-01-15")
+        + dtl_line("100001", "Widget A", "10", "99.90")
+        + dtl_line("100002", "Gadget B", "5", "49.95")
+        + trl_line("15", "149.85")
+    )
+    hdr_layout = [{"field": "Store", "start": 5, "end": 9, "type": "text"}]
+    dtl_layout = [
+        {"field": "UPC", "start": 0, "end": 12, "type": "text"},
+        {"field": "Description", "start": 12, "end": 33, "type": "text"},
+        {"field": "Units", "start": 33, "end": 35, "type": "numeric"},
+        {"field": "Price", "start": 35, "end": 43, "type": "numeric"},
+    ]
+    result = stream_store_aggregate(
+        [str(f)], "multiline", "Store", "Units", "Price",
+        header_prefix="HDR", header_layout=hdr_layout,
+        detail_layout=dtl_layout,
+        trailer_prefix="TRL",
+        column_names=["Store", "UPC", "Description", "Units", "Price"],
+    )
+    assert not result.is_empty(), "HDR detail layout was not applied"
+    assert result["STORE_NUMBER"].to_list() == ["S001"]
+    # Detail rows carry Units/Price; store agg sums them: 10 + 5 = 15.
+    assert result["Units"].to_list() == [15.0]
+
+
+def test_store_aggregate_hdr_fixed_without_detail_layout_raises(tmp_path):
+    """A misconfigured HDR file (no detail layout) must surface an error.
+
+    Without a detail layout, HDR detail rows cannot be parsed, so the
+    required ``Units``/``Price`` columns are absent. The aggregation must
+    raise rather than silently produce wrong numbers.
+    """
+    import pytest
+    def hdr_line(store, seq, date):
+        return f"HDR{seq:02d}{store:<4}   {date}\n"
+    def dtl_line(upc, desc, units, price):
+        return f"{upc:<12}{desc:<21}{units:>2}{price:>8}     \n"
+    f = tmp_path / "hdr.txt"
+    f.write_text(
+        hdr_line("S001", 1, "2024-01-15")
+        + dtl_line("100001", "Widget A", "10", "99.90")
+        + "TRL              1514985\n"
+    )
+    hdr_layout = [{"field": "Store", "start": 5, "end": 9, "type": "text"}]
+    with pytest.raises(Exception):
+        stream_store_aggregate(
+            [str(f)], "multiline", "Store", "Units", "Price",
+            header_prefix="HDR", header_layout=hdr_layout,
+            detail_layout=None,
+            column_names=["Store", "UPC", "Description", "Units", "Price"],
+        )

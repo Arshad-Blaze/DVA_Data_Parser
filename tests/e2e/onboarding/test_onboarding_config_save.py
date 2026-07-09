@@ -14,6 +14,14 @@ class TestOnboardingConfigSave:
         page.locator(ONB_FOLDER_INPUT).press("Tab")
         page.wait_for_timeout(2000)
 
+    def _complete_config_wizard(self, page: Page):
+        for label in [
+            "General Information", "File Format", "Schema & Columns",
+            "Business Rules", "Validation Settings", "Output Settings",
+        ]:
+            page.get_by_role("button", name=f"Confirm {label}").click()
+            page.wait_for_timeout(500)
+
     def _select_combobox_option(self, page: Page, partial_label: str, option: str):
         page.locator(f'[aria-label*="{partial_label}"]').click()
         page.wait_for_timeout(300)
@@ -27,14 +35,18 @@ class TestOnboardingConfigSave:
         self._select_combobox_option(page, "Units Column", "Units")
         self._select_combobox_option(page, "Price Column", "Price")
 
-    def _navigate_to_column_mapping(self, page: Page, test_data: dict):
+    def _navigate_to_processing(self, page: Page, test_data: dict):
         self._fill_folder(page, test_data["onboarding_dir"])
-        page.get_by_role("button", name="Proceed to Column Mapping").click()
+        page.get_by_role("button", name="Progressive Configuration").click()
+        page.wait_for_timeout(1500)
+        self._complete_config_wizard(page)
+        page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Proceed to Processing").click()
         page.wait_for_timeout(1500)
 
     def test_save_config_button_visible_after_mapping(self, onb_page: Page, test_data: dict, tmp_path):
         page = onb_page
-        self._navigate_to_column_mapping(page, test_data)
+        self._navigate_to_processing(page, test_data)
         self._select_columns(page)
         page.get_by_role("button", name="Confirm Mapping").click()
         page.wait_for_timeout(1500)
@@ -43,7 +55,7 @@ class TestOnboardingConfigSave:
 
     def test_save_config_writes_json(self, onb_page: Page, test_data: dict, tmp_path):
         page = onb_page
-        self._navigate_to_column_mapping(page, test_data)
+        self._navigate_to_processing(page, test_data)
         self._select_columns(page)
         page.get_by_role("button", name="Confirm Mapping").click()
         page.wait_for_timeout(1500)
@@ -64,7 +76,7 @@ class TestOnboardingConfigSave:
 
     def test_saved_config_can_be_loaded(self, onb_page: Page, test_data: dict, tmp_path):
         page = onb_page
-        self._navigate_to_column_mapping(page, test_data)
+        self._navigate_to_processing(page, test_data)
         self._select_columns(page)
         page.get_by_role("button", name="Confirm Mapping").click()
         page.wait_for_timeout(1500)
@@ -78,7 +90,7 @@ class TestOnboardingConfigSave:
 
         page.get_by_role("button", name="Start Over").click()
         page.wait_for_timeout(1500)
-        expect(page.get_by_text("Phase 1: File Parsing & Preview")).to_be_visible()
+        expect(page.get_by_text("Step 2: Discovery")).to_be_visible()
 
         self._fill_folder(page, test_data["onboarding_dir"])
         page.wait_for_timeout(500)

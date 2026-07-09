@@ -24,12 +24,24 @@ from dav_tool.ui.helpers import (
     display_execution_summary, display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
     resolve_source_paths,
+    render_phase_progress, validate_config_before_processing, cleanup_dataframes,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
 from dav_tool.format_config import apply_format_config, load_format_config, save_format_config, config_from_ctx
 from dav_tool.config_builder import build_config
-from dav_tool.ui.helpers import display_config_review, edit_and_accept_config
+from dav_tool.ui.helpers import (
+    display_config_review, edit_and_accept_config,
+    progressive_config_wizard,
+)
+
+# Phase constants matching the 7-step workflow
+PHASE_DISCOVERY = 1
+PHASE_CONFIG = 2
+PHASE_CONFIG_VALIDATED = 3
+PHASE_PROCESSING = 4
+PHASE_VALIDATION = 5
+PHASE_REPORTS = 6
 
 
 def _get_validation_config(ctx):
@@ -70,21 +82,34 @@ def run():
         st.session_state.onb_ctx = ProcessingContext()
     ctx = st.session_state.onb_ctx
 
+    render_phase_progress(ctx.phase)
+
     dev_mode = st.sidebar.checkbox("Developer Mode", key="onb_dev_mode")
     if dev_mode:
         display_dev_diagnostics(ctx)
 
-    _phase0_parsing_and_preview(ctx)
-    if ctx.phase >= 1:
-        _phase1_column_mapping(ctx)
-    if ctx.phase >= 2:
-        _phase2_validation(ctx)
+    # Step 2: Discovery (file detection, preview, schema detection)
+    _phase1_discovery(ctx)
+    # Step 3: Configuration (progressive config wizard)
+    if ctx.phase >= PHASE_CONFIG:
+        _phase2_configuration(ctx)
+    # Step 4: Config Validation
+    if ctx.phase >= PHASE_CONFIG_VALIDATED:
+        _phase3_config_validation(ctx)
+    # Step 5: Processing (aggregation)
+    if ctx.phase >= PHASE_PROCESSING:
+        _phase4_processing(ctx)
+    # Step 6-7: Validation + Reports
+    if ctx.phase >= PHASE_VALIDATION:
+        _phase5_validation(ctx)
+    if ctx.phase >= PHASE_REPORTS:
+        _phase6_reports(ctx)
 
 
-def _phase0_parsing_and_preview(ctx):
-    st.markdown("### Phase 1: File Parsing & Preview")
+def _phase1_discovery(ctx):
+    st.markdown("### Step 2: Discovery — File Detection & Preview")
 
-    if ctx.phase >= 1 and ctx.file_paths and ctx.columns:
+    if ctx.phase >= PHASE_CONFIG and ctx.file_paths and ctx.columns:
         return
 
     _onb_source = get_active_source()
@@ -226,58 +251,82 @@ def _phase0_parsing_and_preview(ctx):
 
         if not ctx.config_locked:
             st.success(f"Parsing complete — {len(cols)} column(s) detected")
-            if st.button("Generate Configuration \u2192", use_container_width=True):
+            if st.button("Progressive Configuration \u2192", use_container_width=True):
                 ctx._show_config = True
-                st.rerun()
-
-        if getattr(ctx, '_show_config', False) and not ctx.config_locked:
-            st.divider()
-            st.markdown("### Configuration Review")
-            cfg = build_config(
-                ctx.file_paths,
-                file_type=ctx.file_type,
-                delimiter=ctx.delimiter,
-                layout=ctx.layout,
-                header_prefix=ctx.header_prefix,
-                header_layout=ctx.header_layout,
-                detail_layout=ctx.detail_layout,
-                trailer_prefix=ctx.trailer_prefix,
-                trailer_layout=ctx.trailer_layout,
-                ml_record_types=ctx.ml_record_types,
-                ml_delimiter=ctx.ml_delimiter or "|",
-                source=_onb_source,
-            )
-            ctx._generated_config = cfg
-            accepted = edit_and_accept_config(cfg, key_prefix="onb")
-            if accepted:
-                ctx._generated_config = cfg
-                ctx.config_locked = True
-                ctx._show_config = False
-                # Apply config mapping to context
-                ctx.store_col = cfg.store_col
-                ctx.upc_col = cfg.upc_col
-                ctx.desc_col = cfg.desc_col
-                ctx.units_col = cfg.units_col
-                ctx.price_col = cfg.price_col
-                ctx.price_type = cfg.price_type
-                ctx.implied_dollars = cfg.implied_dollars
-                ctx.implied_units = cfg.implied_units
-                ctx.phase = 1
-                st.rerun()
-
-        if ctx.config_locked:
-            st.success("Configuration locked. Proceed to column mapping.")
-            if st.button("Proceed to Column Mapping  ->", use_container_width=True):
-                ctx.phase = 1
+                ctx.phase = PHASE_CONFIG
                 st.rerun()
 
 
-def _phase1_column_mapping(ctx):
-    if ctx.phase >= 2:
+def _phase2_configuration(ctx):
+    if ctx.phase >= PHASE_CONFIG_VALIDATED:
         return
 
-    st.divider()
-    st.markdown("### Phase 2: Column Mapping")
+    st.markdown("### Step 3: Configuration")
+    _onb_source = get_active_source()
+
+    if getattr(ctx, '_show_config', False) and not ctx.config_locked:
+        cfg = build_config(
+            ctx.file_paths,
+            file_type=ctx.file_type,
+            delimiter=ctx.delimiter,
+            layout=ctx.layout,
+            header_prefix=ctx.header_prefix,
+            header_layout=ctx.header_layout,
+            detail_layout=ctx.detail_layout,
+            trailer_prefix=ctx.trailer_prefix,
+            trailer_layout=ctx.trailer_layout,
+            ml_record_types=ctx.ml_record_types,
+            ml_delimiter=ctx.ml_delimiter or "|",
+            source=_onb_source,
+        )
+        ctx._generated_config = cfg
+        all_done = progressive_config_wizard(
+            cfg, detected_columns=ctx.columns,
+            key_prefix="onb", file_paths=ctx.file_paths,
+        )
+        if all_done:
+            ctx._generated_config = cfg
+            ctx.config_locked = True
+            ctx._show_config = False
+            ctx.store_col = cfg.store_col
+            ctx.upc_col = cfg.upc_col
+            ctx.desc_col = cfg.desc_col
+            ctx.units_col = cfg.units_col
+            ctx.price_col = cfg.price_col
+            ctx.price_type = cfg.price_type
+            ctx.implied_dollars = cfg.implied_dollars
+            ctx.implied_units = cfg.implied_units
+            ctx.phase = PHASE_CONFIG_VALIDATED
+            st.rerun()
+
+    if ctx.config_locked:
+        st.success("Configuration complete. Proceed to validation.")
+        if st.button("Validate Configuration \u2192", use_container_width=True):
+            ctx.phase = PHASE_CONFIG_VALIDATED
+            st.rerun()
+
+
+def _phase3_config_validation(ctx):
+    if ctx.phase >= PHASE_PROCESSING:
+        return
+
+    st.markdown("### Step 4: Validate Configuration")
+    cfg = getattr(ctx, '_generated_config', None)
+    if cfg is not None:
+        if validate_config_before_processing(cfg, key_prefix="onb"):
+            cleanup_dataframes(ctx)
+            ctx.phase = PHASE_PROCESSING
+            st.rerun()
+    else:
+        st.warning("No configuration found. Complete the configuration step first.")
+
+
+def _phase4_processing(ctx):
+    if ctx.phase >= PHASE_VALIDATION:
+        return
+
+    st.markdown("### Step 5: Processing")
+    _onb_source = get_active_source()
 
     fp = ctx.file_paths
     ft = ctx.file_type
@@ -311,105 +360,111 @@ def _phase1_column_mapping(ctx):
             st.dataframe(storelist_df.head(5))
             storelist_store_col = st.selectbox("Storelist Store Column", storelist_df.columns)
 
-    if ctx.phase == 1:
-        if not ctx.mapping_confirmed:
-            mapping_errors = validate_column_mapping(
-                prod_store_col, prod_upc_col, prod_desc_col,
-                prod_units_col, prod_price_col,
+    if not ctx.mapping_confirmed:
+        mapping_errors = validate_column_mapping(
+            prod_store_col, prod_upc_col, prod_desc_col,
+            prod_units_col, prod_price_col,
+        )
+        if mapping_errors:
+            for err in mapping_errors:
+                st.error(f"Column Mapping Error: {err}")
+            st.info(
+                "Please fix the column selections above before confirming. "
+                "Each of the 5 required columns must be unique and properly selected."
             )
-            if mapping_errors:
-                for err in mapping_errors:
-                    st.error(f"Column Mapping Error: {err}")
-                st.info(
-                    "Please fix the column selections above before confirming. "
-                    "Each of the 5 required columns must be unique and properly selected."
-                )
 
-            if st.button("Confirm Mapping", use_container_width=True, disabled=bool(mapping_errors)):
-                log_phase("Column Mapping Confirmed")
-                ctx.store_col = prod_store_col
-                ctx.upc_col = prod_upc_col
-                ctx.desc_col = prod_desc_col
-                ctx.units_col = prod_units_col
-                ctx.price_col = prod_price_col
-                ctx.storelist_path = storelist_path
-                ctx.storelist_delim = storelist_delim
-                ctx.storelist_store_col = storelist_store_col
-                ctx.mapping_confirmed = True
+        if st.button("Confirm Mapping", use_container_width=True, disabled=bool(mapping_errors)):
+            log_phase("Column Mapping Confirmed")
+            ctx.store_col = prod_store_col
+            ctx.upc_col = prod_upc_col
+            ctx.desc_col = prod_desc_col
+            ctx.units_col = prod_units_col
+            ctx.price_col = prod_price_col
+            ctx.storelist_path = storelist_path
+            ctx.storelist_delim = storelist_delim
+            ctx.storelist_store_col = storelist_store_col
+            ctx.mapping_confirmed = True
+            st.rerun()
+    else:
+        st.success("Column mapping confirmed. Ready to process.")
+        save_path = st.text_input("Save config to (optional)", key="onb_save_config_path")
+        if save_path and st.button("Save Config", key="onb_save_config"):
+            sp = clean_path(save_path)
+            if sp:
+                cfg = config_from_ctx(ctx)
+                save_format_config(cfg, sp)
+                st.success(f"Config saved to {sp}")
+        if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
+            log_phase("Processing Started")
+            cleanup_dataframes(ctx)
+            print_memory_snapshot("BEFORE AGGREGATION")
+            try:
+                with st.spinner("Aggregating data (Store + Item in parallel)..."):
+                    def _onb_run(fn, *args, **kw):
+                        t0 = time.perf_counter()
+                        r = fn(*args, **kw)
+                        return r, time.perf_counter() - t0
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+                        futs = [
+                            ex.submit(_onb_run, stream_store_aggregate,
+                                fp, ft, ctx.store_col, ctx.units_col, ctx.price_col,
+                                delimiter=pd, layout=ll,
+                                start_line=sl, record_type=rt,
+                                multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
+                                column_names=ctx.schema,
+                                header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                                detail_layout=ctx.detail_layout,
+                                trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
+                                source=_onb_source,
+                            ),
+                            ex.submit(_onb_run, stream_item_aggregate,
+                                fp, ft,
+                                ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
+                                delimiter=pd, layout=ll,
+                                start_line=sl, record_type=rt,
+                                multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
+                                column_names=ctx.schema,
+                                header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
+                                detail_layout=ctx.detail_layout,
+                                trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
+                                source=_onb_source,
+                            ),
+                        ]
+                        names = ["stream_store_aggregate", "stream_item_aggregate"]
+                        results = []
+                        for i, future in enumerate(futs):
+                            result, elapsed = future.result(timeout=600)
+                            ctx.metrics.record("aggregation", names[i], elapsed)
+                            results.append(result)
+
+                    store_agg, item_agg = results
+
+                ctx.store_agg = store_agg
+                ctx.item_agg = item_agg
+                print_memory_snapshot("AFTER AGGREGATION")
+                log_dataframe_summary()
+                cleanup_dataframes(ctx, keep_attrs=["store_agg", "item_agg"])
+                ctx.phase = PHASE_VALIDATION
                 st.rerun()
-        else:
-            st.success("Column mapping confirmed. Ready to process.")
-            save_path = st.text_input("Save config to (optional)", key="onb_save_config_path")
-            if save_path and st.button("Save Config", key="onb_save_config"):
-                sp = clean_path(save_path)
-                if sp:
-                    cfg = config_from_ctx(ctx)
-                    save_format_config(cfg, sp)
-                    st.success(f"Config saved to {sp}")
-            if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
-                log_phase("Processing Started")
-                print_memory_snapshot("BEFORE AGGREGATION")
-                try:
-                    fp_local = resolve_source_paths(fp, source=_onb_source)
-                    with st.spinner("Aggregating data (Store + Item in parallel)..."):
-                        def _onb_run(fn, *args, **kw):
-                            t0 = time.perf_counter()
-                            r = fn(*args, **kw)
-                            return r, time.perf_counter() - t0
-
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-                            futs = [
-                                ex.submit(_onb_run, stream_store_aggregate,
-                                    fp_local, ft, ctx.store_col, ctx.units_col, ctx.price_col,
-                                    delimiter=pd, layout=ll,
-                                    start_line=sl, record_type=rt,
-                                    multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                                    column_names=ctx.schema,
-                                    header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                                    trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
-                                ),
-                                ex.submit(_onb_run, stream_item_aggregate,
-                                    fp_local, ft,
-                                    ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
-                                    delimiter=pd, layout=ll,
-                                    start_line=sl, record_type=rt,
-                                    multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                                    column_names=ctx.schema,
-                                    header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                                    trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
-                                ),
-                            ]
-                            names = ["stream_store_aggregate", "stream_item_aggregate"]
-                            results = []
-                            for i, future in enumerate(futs):
-                                result, elapsed = future.result(timeout=600)
-                                ctx.metrics.record("aggregation", names[i], elapsed)
-                                results.append(result)
-
-                        store_agg, item_agg = results
-
-                    ctx.store_agg = store_agg
-                    ctx.item_agg = item_agg
-                    print_memory_snapshot("AFTER AGGREGATION")
-                    log_dataframe_summary()
-                    ctx.phase = 2
-                    st.rerun()
-                except Exception as e:
-                    st.error(
-                        f"Data processing failed. This may be due to a column mapping issue, "
-                        f"data format mismatch, or file reading error.\n\n"
-                        f"**Detail:** {str(e)}\n\n"
-                        f"**Suggested fixes:**\n"
-                        f"1. Verify your column selections match the actual data columns.\n"
-                        f"2. Check that the file format is consistent across all files.\n"
-                        f"3. Ensure numeric columns contain valid numbers."
-                    )
-                    logger.error("Aggregation failed: %s", str(e), exc_info=True)
+            except Exception as e:
+                st.error(
+                    f"Data processing failed. This may be due to a column mapping issue, "
+                    f"data format mismatch, or file reading error.\n\n"
+                    f"**Detail:** {str(e)}\n\n"
+                    f"**Suggested fixes:**\n"
+                    f"1. Verify your column selections match the actual data columns.\n"
+                    f"2. Check that the file format is consistent across all files.\n"
+                    f"3. Ensure numeric columns contain valid numbers."
+                )
+                logger.error("Aggregation failed: %s", str(e), exc_info=True)
 
 
-def _phase2_validation(ctx):
-    st.divider()
-    st.markdown("### Phase 3: Validation")
+def _phase5_validation(ctx):
+    if ctx.phase >= PHASE_REPORTS:
+        return
+
+    st.markdown("### Step 6: Validation")
 
     fp = ctx.file_paths
     ft = ctx.file_type
@@ -492,13 +547,19 @@ def _phase2_validation(ctx):
             )
 
     if ctx.done:
-        _display_results()
+        cleanup_dataframes(ctx, keep_attrs=["store_agg", "item_agg"])
+        ctx.phase = PHASE_REPORTS
+        st.rerun()
 
-        display_processing_history()
 
-        if st.button("Start Over", use_container_width=True):
-            _reset_phase()
-            st.rerun()
+def _phase6_reports(ctx):
+    st.markdown("### Step 7: Reports")
+    _display_results()
+    display_processing_history()
+
+    if st.button("Start Over", use_container_width=True):
+        _reset_phase()
+        st.rerun()
 
 
 def _multiline_flow(file_paths):

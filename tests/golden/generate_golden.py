@@ -175,7 +175,7 @@ def generate_hdr_fixed_width(tmp_dir):
     kw = {
         "header_prefix": "HDR",
         "header_layout": HDR_LAYOUT,
-        "layout": DTL_LAYOUT,
+        "detail_layout": DTL_LAYOUT,
         "trailer_prefix": "TRL",
         "trailer_layout": TRL_LAYOUT,
         "column_names": ["Store", "date", "UPC", "Description", "Units", "Price",

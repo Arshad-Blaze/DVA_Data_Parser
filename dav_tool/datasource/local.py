@@ -20,6 +20,10 @@ class LocalDataSource(IDataSource):
     def is_connected(self) -> bool:
         return True
 
+    @property
+    def supports_direct_path(self) -> bool:
+        return True
+
     def list_directory(self, path: str) -> List[DataSourceEntry]:
         path = os.path.abspath(os.path.normpath(path))
         if not os.path.exists(path):

@@ -31,6 +31,16 @@ class IDataSource(ABC):
     def is_connected(self) -> bool:
         ...
 
+    @property
+    def supports_direct_path(self) -> bool:
+        """Whether files can be accessed directly via local file paths.
+        
+        Local filesystems return True; remote sources (SSH, cloud) return False.
+        When True, the Aggregation Engine can use Polars' native streaming
+        instead of the chunked reader to get better performance.
+        """
+        return False
+
     @abstractmethod
     def list_directory(self, path: str) -> List[DataSourceEntry]:
         ...

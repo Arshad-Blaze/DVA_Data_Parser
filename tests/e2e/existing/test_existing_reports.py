@@ -5,7 +5,7 @@ BAU_INPUT = 'input[aria-label="BAU Folder Path"]'
 TEST_INPUT = 'input[aria-label="Test Folder Path"]'
 
 
-class TestExistingValidationConfig:
+class TestExistingReports:
 
     def _fill_paths(self, page: Page, bau_dir: str, test_dir: str):
         page.locator(BAU_INPUT).fill(bau_dir)
@@ -43,7 +43,7 @@ class TestExistingValidationConfig:
         self._select_combobox_option(page, "UPC (Test)", "UPC")
         self._select_combobox_option(page, "Description (Test)", "Description")
 
-    def _navigate_to_validation(self, page: Page, test_data: dict):
+    def _navigate_to_reports(self, page: Page, test_data: dict):
         self._fill_paths(page, test_data["bau_dir"], test_data["test_dir"])
         page.get_by_role("button", name="Progressive Configuration").click()
         page.wait_for_timeout(1500)
@@ -60,23 +60,33 @@ class TestExistingValidationConfig:
         page.wait_for_timeout(1500)
         page.get_by_role("button", name="Proceed to Processing & Validation").click()
         page.wait_for_timeout(3000)
-
-    def test_validation_checkboxes_visible(self, ex_page: Page, test_data: dict):
-        page = ex_page
-        self._navigate_to_validation(page, test_data)
-        expect(page.get_by_text("Store Level Validation")).to_be_visible()
-        expect(page.get_by_text("Item Level Validation")).to_be_visible()
-        expect(page.get_by_text("Compare Store List")).to_be_visible()
-        expect(page.get_by_text("Summary (requires Item)")).to_be_visible()
-        expect(page.get_by_text("File Review Report")).to_be_visible()
-
-    def test_can_toggle_individual_validations(self, ex_page: Page, test_data: dict):
-        page = ex_page
-        self._navigate_to_validation(page, test_data)
-        page.locator("label").filter(has_text="File Review Report").click()
-        page.wait_for_timeout(300)
-        page.locator("label").filter(has_text="Compare Store List").click()
-        page.wait_for_timeout(300)
         page.get_by_role("button", name="Validate").click()
-        page.wait_for_timeout(5000)
-        expect(page.get_by_text("Validation Results")).to_be_visible()
+        page.wait_for_timeout(3000)
+
+    def test_reports_heading(self, ex_page: Page, test_data: dict):
+        page = ex_page
+        self._navigate_to_reports(page, test_data)
+        expect(page.get_by_text("Step 7: Reports")).to_be_visible()
+
+    def test_execution_summary_displayed(self, ex_page: Page, test_data: dict):
+        page = ex_page
+        self._navigate_to_reports(page, test_data)
+        expect(page.get_by_text("Execution Summary")).to_be_visible()
+
+    def test_processing_history_displayed(self, ex_page: Page, test_data: dict):
+        page = ex_page
+        self._navigate_to_reports(page, test_data)
+        expect(page.get_by_text("Processing History")).to_be_visible()
+
+    def test_download_buttons_visible(self, ex_page: Page, test_data: dict):
+        page = ex_page
+        self._navigate_to_reports(page, test_data)
+        expect(page.get_by_role("button", name="Download Store Validation")).to_be_visible()
+        expect(page.get_by_role("button", name="Download Item Validation")).to_be_visible()
+
+    def test_start_over_from_reports(self, ex_page: Page, test_data: dict):
+        page = ex_page
+        self._navigate_to_reports(page, test_data)
+        page.get_by_role("button", name="Start Over").click()
+        page.wait_for_timeout(1500)
+        expect(page.get_by_text("Step 2: Discovery")).to_be_visible()

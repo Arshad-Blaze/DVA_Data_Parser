@@ -34,12 +34,12 @@ class TestOnboardingMultilineFlow:
     def test_apply_schema(self, onb_page: Page, multiline_test_data: dict):
         self._fill_folder(onb_page, multiline_test_data["onboarding_ml_dir"])
         self._flatten_and_apply_schema(onb_page)
-        expect(onb_page.get_by_text("Proceed to Column Mapping")).to_be_visible()
+        expect(onb_page.get_by_text("Progressive Configuration")).to_be_visible()
 
-    def test_proceed_to_column_mapping(self, onb_page: Page, multiline_test_data: dict):
+    def test_proceed_to_configuration(self, onb_page: Page, multiline_test_data: dict):
         page = onb_page
         self._fill_folder(page, multiline_test_data["onboarding_ml_dir"])
         self._flatten_and_apply_schema(page)
-        page.get_by_role("button", name="Proceed to Column Mapping").click()
+        page.get_by_role("button", name="Progressive Configuration").click()
         page.wait_for_timeout(1500)
-        expect(page.get_by_text("Phase 2: Column Mapping")).to_be_visible()
+        expect(page.get_by_text("General Information")).to_be_visible()
