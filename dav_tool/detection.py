@@ -66,13 +66,31 @@ def is_multiline_record(file_path, source: Optional[IDataSource] = None):
         if not lines:
             return False
 
+        # Check for header row: if first line contains values with 3+ alphabetic chars
+        # (column names like "Product", "Store"), it's unlikely to be multiline
+        def _first_line_is_header():
+            if not lines:
+                return False
+            for delim in (",", "|", "\t", ";"):
+                if delim in lines[0]:
+                    parts = lines[0].split(delim)
+                    long_names = sum(1 for p in parts if len(p.strip()) >= 3 and any(c.isalpha() for c in p.strip()))
+                    if long_names >= len(parts) * 0.4:
+                        return True
+                    return False
+            return False
+
         # Check delimited multiline: 2+ single-letter prefixes (H|, D|, etc.)
         alpha_prefixes = set()
+        alpha_count = 0
         for line in lines:
             if len(line) >= 2 and line[0].isalpha() and line[1] in ",|\t;":
                 alpha_prefixes.add(line[0])
+                alpha_count += 1
 
-        if len(alpha_prefixes) >= 2:
+        # Require at least 2 distinct prefixes AND at least 40% of lines match
+        # AND the first line doesn't look like a header
+        if len(alpha_prefixes) >= 2 and alpha_count >= len(lines) * 0.4 and not _first_line_is_header():
             return True
 
         # Check backslash continuations

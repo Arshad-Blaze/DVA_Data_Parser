@@ -125,6 +125,13 @@ def _phase1_discovery(ctx):
         prod_txt = clean_path(st.text_input("Folder Path", key="onb_folder_path"))
 
     file_paths = get_file_list(prod_txt, source=_onb_source)
+
+    if prod_txt and not file_paths:
+        if auto_path and _onb_source is not None:
+            st.error(f"No files found at remote path: `{prod_txt}`")
+        else:
+            st.error(f"No files found at `{prod_txt}`")
+
     file_type = None
     prod_delim = None
     layout_list = None
