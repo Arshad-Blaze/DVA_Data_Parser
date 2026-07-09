@@ -183,12 +183,12 @@ def _phase1_discovery(ctx):
         else:
             # Normal detection flow
             log_phase("Detection Started")
-            if is_multiline_record(file_paths[0]):
+            if is_multiline_record(file_paths[0], source=_onb_source):
                 st.warning("Multi-line structured file detected")
                 file_type = "multiline"
-                _multiline_flow(file_paths)
+                _multiline_flow(file_paths, source=_onb_source)
             else:
-                file_type, prod_delim = detect_file_type(file_paths[0])
+                file_type, prod_delim = detect_file_type(file_paths[0], source=_onb_source)
                 if file_type == "delimited":
                     st.success(f"Delimited ({prod_delim})")
                 else:
@@ -201,7 +201,7 @@ def _phase1_discovery(ctx):
                             layout_list = load_layout(layout_file)
                             st.success("Layout loaded")
 
-        if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0]):
+        if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0], source=_onb_source):
             st.subheader("Fixed Width Settings")
             colA, colB = st.columns(2)
             with colA:
@@ -562,22 +562,22 @@ def _phase6_reports(ctx):
         st.rerun()
 
 
-def _multiline_flow(file_paths):
+def _multiline_flow(file_paths, source=None):
     ctx = st.session_state.onb_ctx
 
     # If config already loaded, skip manual inputs
     if getattr(ctx, '_config_applied', False) and ctx.ml_flattened and ctx.schema:
         return
 
-    hdr_prefixes = detect_hdr_prefix(file_paths[0])
+    hdr_prefixes = detect_hdr_prefix(file_paths[0], source=source)
 
     if hdr_prefixes:
-        _hdr_fixed_flow(file_paths, hdr_prefixes)
+        _hdr_fixed_flow(file_paths, hdr_prefixes, source=source)
     else:
-        _delimited_ml_flow(file_paths)
+        _delimited_ml_flow(file_paths, source=source)
 
 
-def _delimited_ml_flow(file_paths):
+def _delimited_ml_flow(file_paths, source=None):
     ctx = st.session_state.onb_ctx
 
     st.subheader("Raw Preview (with record-type prefixes)")
@@ -585,7 +585,7 @@ def _delimited_ml_flow(file_paths):
     if not raw_preview.is_empty():
         st.dataframe(raw_preview.to_pandas())
 
-    detected_types = detect_record_types(file_paths[0])
+    detected_types = detect_record_types(file_paths[0], source=source)
     rt_default = ",".join(detected_types) if detected_types else "H,D"
 
     ml_record_types = st.text_input(
@@ -608,7 +608,7 @@ def _delimited_ml_flow(file_paths):
         _show_ml_preview_and_schema(file_paths)
 
 
-def _hdr_fixed_flow(file_paths, hdr_prefixes):
+def _hdr_fixed_flow(file_paths, hdr_prefixes, source=None):
     ctx = st.session_state.onb_ctx
     prefix = hdr_prefixes[0]
     st.warning(f"HDR fixed-width file detected (prefix: {prefix})")
