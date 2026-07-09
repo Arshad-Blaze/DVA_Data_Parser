@@ -36,6 +36,18 @@ Get these details first so you can set up the tool quickly when you launch it.
 Open a terminal and run:
 
 ```bash
+dav-tool
+```
+
+Or if you're running from source:
+
+```bash
+python -m dav_tool
+```
+
+Or via Streamlit directly:
+
+```bash
 streamlit run dav_tool/ui/app.py
 ```
 
@@ -62,6 +74,18 @@ Enter the folder path or file path. DAV Tool will automatically detect whether i
 - **Multi-line HDR (delimited)** — shown with a warning, you'll see record-type prefixes like `H|` and `D|`
 - **Multi-line HDR (fixed-width)** — shown with a warning; the HDR prefix (e.g. `HDR`) is auto-detected
 
+#### Quick start: load a saved config
+
+If you've configured DAV Tool before, you can skip the manual setup entirely:
+
+1. Enter your folder path
+2. In the **"Optional: Load Config (JSON)"** field, enter the path to a saved config JSON file
+3. DAV Tool loads all settings automatically — layouts, prefixes, column mapping
+4. The flattened preview appears immediately
+5. Click **"Proceed to Column Mapping"** to go straight to validation
+
+Config files save all parsing settings: file type, delimiter, layout file paths, header/detail/trailer prefixes, and column mapping. They make repeatable processing fast and consistent.
+
 ### Step 2 (Multi-line only): Flatten the data
 
 **For delimited multiline files** (prefixes like `H|`, `D|`):
@@ -79,9 +103,12 @@ Enter the folder path or file path. DAV Tool will automatically detect whether i
 2. DAV Tool shows `HDR prefix detected: HDR`
 3. Enter the **Header Layout CSV** path (describes header fields like Store, Date)
 4. Enter the **Detail Layout CSV** path (describes detail fields like UPC, Description, Units, Price)
-5. Click **Flatten Records**
-6. Review the **Flattened Preview** — header fields are carried into each detail row
-7. Rename columns and click **Apply Schema**
+5. (Optional) If your files have **trailer/TRL lines**, enter:
+   - **Trailer Prefix** — usually `TRL`
+   - **Trailer Layout CSV** — describes trailer fields (e.g. TotalUnits, TotalPrice)
+6. Click **Flatten Records**
+7. Review the **Flattened Preview** — header and trailer fields are carried into each detail row
+8. Rename columns and click **Apply Schema**
 
 ### Step 3: Preview and set options
 
@@ -124,12 +151,15 @@ Enter the folder/file path for:
 - **BAU** (left column) — your current/approved data
 - **Test** (right column) — the new data to compare
 
+Each side also has an **"Optional: BAU Config (JSON)"** / **"Optional: Test Config (JSON)"** field. Load a saved config to skip manual setup for that side.
+
 ### Step 2: Configure each file
 
 Follow the same steps as Onboarding for each file:
 - Multi-line files need flattening and schema naming
 - Fixed-width files need a layout CSV
 - Delimited files are auto-detected
+- **Load a saved config** to bypass all manual setup for a side
 
 ### Step 3: Map columns for both files
 
@@ -233,9 +263,247 @@ HDRS001   2024-01-15
 - Header fields (store, date) are automatically carried into every detail row during flattening
 - You need **two** layout CSVs: one for the header record, one for the detail record
 
-### Layout CSV format
+#### HDR with trailer lines (TRL)
 
-Both header and detail layout CSVs use the same format:
+Some POS formats add a **trailer line** at the end of each transaction:
+
+```
+HDR01S001   2024-01-15
+100001     Widget A            1099.90
+100002     Gadget B             549.95
+TRL   15   149.85
+```
+
+- Lines starting with `TRL` are **trailer** records — they carry summary fields like total units and total dollars
+- Trailer fields are automatically attached to every detail row in that transaction
+- You need a **third layout CSV** for the trailer record (optional)
+- Configurable via **Trailer Prefix** (default `TRL`) and **Trailer Layout CSV** inputs
+
+## Config Files
+
+Instead of going through the manual setup each time, you can save your parsing settings as a **JSON config file** and load it on subsequent runs.
+
+### Sample configurations by file type
+
+#### Delimited (CSV / pipe / tab)
+
+```json
+{
+  "version": 2,
+  "name": "Retailer X — Delimited",
+  "file_type": "delimited",
+  "encoding": "cp1252",
+  "has_header": true,
+  "delimiter": ",",
+  "start_line": 0,
+  "record_type": null,
+  "detected_columns": ["Store", "UPC", "Description", "Units", "Price"],
+  "detected_data_types": {
+    "Store": "String",
+    "UPC": "Int64",
+    "Description": "String",
+    "Units": "Int64",
+    "Price": "Float64"
+  },
+  "suggested_mapping": {
+    "store": "Store",
+    "upc": "UPC",
+    "description": "Description",
+    "units": "Units",
+    "price": "Price"
+  },
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "units_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price",
+  "implied_dollars": false,
+  "implied_units": false,
+  "locked": false
+}
+```
+
+#### Fixed-width
+
+```json
+{
+  "version": 2,
+  "name": "Retailer Y — Fixed-Width",
+  "file_type": "fixed",
+  "encoding": "cp1252",
+  "has_header": false,
+  "delimiter": null,
+  "start_line": 1,
+  "record_type": "U",
+  "layout_file": "/path/to/layout.csv",
+  "detected_columns": ["Store", "UPC", "Description", "Units", "Price"],
+  "detected_data_types": {
+    "Store": "String",
+    "UPC": "Int64",
+    "Description": "String",
+    "Units": "Int64",
+    "Price": "Float64"
+  },
+  "suggested_mapping": {
+    "store": "Store",
+    "upc": "UPC",
+    "description": "Description",
+    "units": "Units",
+    "price": "Price"
+  },
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "units_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price",
+  "implied_dollars": false,
+  "implied_units": false,
+  "locked": false
+}
+```
+
+Layout file paths can be absolute or relative to the config file's directory.
+
+#### Multi-line HDR (delimited)
+
+```json
+{
+  "version": 2,
+  "name": "Retailer Z — Multiline Delimited",
+  "file_type": "multiline",
+  "encoding": "cp1252",
+  "has_header": false,
+  "delimiter": "|",
+  "start_line": 0,
+  "ml_record_types": ["H", "D"],
+  "ml_delimiter": "|",
+  "schema": ["Store", "Date", "UPC", "Description", "Units", "Price"],
+  "detected_columns": ["Store", "Date", "UPC", "Description", "Units", "Price"],
+  "detected_data_types": {
+    "Store": "String",
+    "Date": "String",
+    "UPC": "Int64",
+    "Description": "String",
+    "Units": "Int64",
+    "Price": "Float64"
+  },
+  "suggested_mapping": {
+    "store": "Store",
+    "upc": "UPC",
+    "description": "Description",
+    "units": "Units",
+    "price": "Price"
+  },
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "units_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price",
+  "implied_dollars": false,
+  "implied_units": false,
+  "locked": false
+}
+```
+
+#### HDR Fixed-Width (with Trailer)
+
+```json
+{
+  "version": 2,
+  "name": "Retailer W — HDR Fixed-Width",
+  "file_type": "multiline",
+  "encoding": "cp1252",
+  "has_header": false,
+  "delimiter": null,
+  "start_line": 0,
+  "header_prefix": "HDR",
+  "header_layout_file": "/path/to/header_layout.csv",
+  "detail_layout_file": "/path/to/detail_layout.csv",
+  "trailer_prefix": "TRL",
+  "trailer_layout_file": "/path/to/trailer_layout.csv",
+  "schema": ["Store", "Date", "UPC", "Description", "Units", "Price", "TotalUnits", "TotalPrice"],
+  "detected_columns": ["Store", "Date", "UPC", "Description", "Units", "Price", "TotalUnits", "TotalPrice"],
+  "detected_data_types": {
+    "Store": "String",
+    "Date": "String",
+    "UPC": "Int64",
+    "Description": "String",
+    "Units": "Int64",
+    "Price": "Float64",
+    "TotalUnits": "Int64",
+    "TotalPrice": "Float64"
+  },
+  "suggested_mapping": {
+    "store": "Store",
+    "upc": "UPC",
+    "description": "Description",
+    "units": "Units",
+    "price": "Price"
+  },
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "units_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price",
+  "implied_dollars": false,
+  "implied_units": false,
+  "locked": false
+}
+```
+
+### Config file fields explained
+
+| Field | Description |
+|---|---|
+| `version` | Config format version (currently 2) |
+| `name` | Optional friendly name for this configuration |
+| `file_type` | `delimited`, `fixed`, or `multiline` |
+| `encoding` | File encoding detected (`cp1252`, `utf-8`, etc.) |
+| `has_header` | Whether the file has a header row |
+| `delimiter` | Delimiter character for delimited files |
+| `start_line` | Number of lines to skip at the top |
+| `record_type` | Line prefix filter (e.g. `U` for UPC records only) |
+| `layout_file` | Path to layout CSV (for fixed-width) |
+| `header_prefix` | Multi-character header prefix (e.g. `HDR`) for HDR files |
+| `header_layout_file` | Layout CSV for HDR header records |
+| `detail_layout_file` | Layout CSV for HDR detail records |
+| `trailer_prefix` | Trailer line prefix (e.g. `TRL`) |
+| `trailer_layout_file` | Layout CSV for trailer records |
+| `ml_record_types` | List of record-type prefixes (e.g. `["H", "D"]`) |
+| `ml_delimiter` | Delimiter used inside multiline records |
+| `schema` | Full list of column names after flattening |
+| `detected_columns` | Column names detected from the sample |
+| `detected_data_types` | Map of column name to inferred data type |
+| `suggested_mapping` | Auto-detected column role mapping |
+| `store_col` / `upc_col` / `desc_col` / `units_col` / `price_col` | Mapped column names |
+| `price_type` | `Total Price` or `Unit Price` |
+| `implied_dollars` / `implied_units` | Divide by 100 for implied decimals |
+| `validation_config` | Per-validation enable/disable and column requirements |
+| `locked` | Whether the config has been accepted by the user |
+
+### How to save a config
+
+1. Go through the normal setup flow (folder, layouts, flatten, schema)
+2. In the **Column Mapping** phase, after clicking "Confirm Mapping"
+3. Enter a file path in the **"Save config to"** field
+4. Click **"Save Config"** — a JSON file is written to disk
+
+### How to load a config
+
+1. Launch DAV Tool and navigate to **Onboarding** or **Existing**
+2. Enter your folder path as usual
+3. In the **"Optional: Load Config (JSON)"** field, enter the path to your saved config JSON
+4. DAV Tool loads all settings automatically — layouts, prefixes, column mapping
+5. For multiline files, the flattened preview appears immediately
+6. Click **"Proceed to Column Mapping"** to go straight to validation
+
+Config files let you onboard the same retailer repeatedly without re-entering settings.
+
+### Layout CSV format
 
 ```csv
 From,Length,Field,Type
@@ -263,6 +531,20 @@ When enabled, this generates a compact table with one row per file:
 | total_dollars | Sum of all dollar amounts |
 
 Useful for quickly checking that your files contain the expected data volume.
+
+---
+
+## Developer Mode
+
+Both pages have a **Developer Mode** checkbox in the sidebar. When enabled, it shows live diagnostics:
+
+- Current pipeline phase
+- File type detection status
+- Memory and CPU usage
+- Aggregation row counts
+- Validation completion status
+
+This is useful for debugging and understanding what the pipeline is doing at each step.
 
 ---
 

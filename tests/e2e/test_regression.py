@@ -15,17 +15,17 @@ class TestRegression:
         expect(page.get_by_role("button", name="Existing")).to_be_visible()
         page.get_by_role("button", name="Onboarding").click()
         page.wait_for_timeout(1000)
-        expect(page.get_by_text("Phase 1: File Parsing & Preview")).to_be_visible()
+        expect(page.get_by_text("Step 2: Discovery")).to_be_visible()
         page.get_by_role("button", name="Existing").click()
         page.wait_for_timeout(1000)
-        expect(page.get_by_text("Phase 1: File Detection & Preview")).to_be_visible()
+        expect(page.get_by_text("Step 2: Discovery")).to_be_visible()
 
     def test_cannot_proceed_without_path(self, onb_page: Page):
-        proceed_btn = onb_page.get_by_role("button", name="Proceed to Column Mapping")
+        proceed_btn = onb_page.get_by_role("button", name="Progressive Configuration")
         expect(proceed_btn).not_to_be_visible()
 
     def test_cannot_proceed_without_both_paths(self, ex_page: Page):
-        proceed_btn = ex_page.get_by_role("button", name="Proceed to Column Mapping")
+        proceed_btn = ex_page.get_by_role("button", name="Progressive Configuration")
         expect(proceed_btn).not_to_be_visible()
 
     def test_developer_mode_toggle(self, onb_page: Page):
@@ -54,7 +54,16 @@ class TestRegression:
         page.locator(ONB_FOLDER_INPUT).fill(test_data["onboarding_dir"])
         page.locator(ONB_FOLDER_INPUT).press("Tab")
         page.wait_for_timeout(2000)
-        page.get_by_role("button", name="Proceed to Column Mapping").click()
+        page.get_by_role("button", name="Progressive Configuration").click()
+        page.wait_for_timeout(1500)
+        for label in [
+            "General Information", "File Format", "Schema & Columns",
+            "Business Rules", "Validation Settings", "Output Settings",
+        ]:
+            page.get_by_role("button", name=f"Confirm {label}").click()
+            page.wait_for_timeout(500)
+        page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Proceed to Processing").click()
         page.wait_for_timeout(1500)
 
         def _select_combobox_option(partial_label: str, option: str):
@@ -84,7 +93,16 @@ class TestRegression:
         page.locator(ONB_FOLDER_INPUT).fill(test_data["onboarding_dir"])
         page.locator(ONB_FOLDER_INPUT).press("Tab")
         page.wait_for_timeout(2000)
-        page.get_by_role("button", name="Proceed to Column Mapping").click()
+        page.get_by_role("button", name="Progressive Configuration").click()
+        page.wait_for_timeout(1500)
+        for label in [
+            "General Information", "File Format", "Schema & Columns",
+            "Business Rules", "Validation Settings", "Output Settings",
+        ]:
+            page.get_by_role("button", name=f"Confirm {label}").click()
+            page.wait_for_timeout(500)
+        page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Proceed to Processing").click()
         page.wait_for_timeout(1500)
 
         def _select_combobox_option(partial_label: str, option: str):

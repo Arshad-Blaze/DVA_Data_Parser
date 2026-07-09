@@ -27,10 +27,12 @@ class ProcessingContext:
     record_type: Optional[str] = None
     columns: Optional[List[str]] = None
 
-    # === Multiline / HDR ===
+    # === Multiline / HDR / TRL ===
     header_prefix: Optional[str] = None
     header_layout: Optional[List[Dict[str, Any]]] = None
     detail_layout: Optional[List[Dict[str, Any]]] = None
+    trailer_prefix: Optional[str] = None
+    trailer_layout: Optional[List[Dict[str, Any]]] = None
     ml_record_types: Optional[List[str]] = None
     ml_delimiter: str = "|"
     ml_flattened: bool = False
@@ -52,6 +54,9 @@ class ProcessingContext:
     eff_delimiter: Optional[str] = None
     eff_record_type: Optional[str] = None
     eff_layout: Optional[List[Dict[str, Any]]] = None
+
+    # === Configuration ===
+    config_locked: bool = False
 
     # === Store List (onboarding) ===
     storelist_path: Optional[str] = None

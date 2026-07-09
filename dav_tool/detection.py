@@ -1,8 +1,30 @@
 import os
 import logging
+from typing import List, Optional
+
 from dav_tool.config import DEFAULT_ENCODING
+from dav_tool.datasource.base import IDataSource
 
 logger = logging.getLogger(__name__)
+
+
+def _read_sample_lines(
+    file_path: str,
+    n: int,
+    source: Optional[IDataSource] = None,
+) -> List[str]:
+    """Read up to *n* lines from a file via source stream or local open."""
+    if source is not None:
+        try:
+            raw = source.read_sample(file_path, n=n)
+            return [line.rstrip("\n\r") for line in raw.splitlines()]
+        except Exception:
+            return []
+    try:
+        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
+            return [f.readline().rstrip("\n\r") for _ in range(n)]
+    except Exception:
+        return []
 
 
 def _count_delimiters_outside_quotes(line: str, delimiter: str) -> int:
@@ -16,13 +38,13 @@ def _count_delimiters_outside_quotes(line: str, delimiter: str) -> int:
     return count
 
 
-def detect_file_type(file_path):
+def detect_file_type(file_path, source: Optional[IDataSource] = None):
     try:
         ext = os.path.splitext(file_path)[1].lower()
         if ext in (".xlsx", ".xls"):
             return "excel", None
-        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
-            lines = [f.readline() for _ in range(5)]
+        lines = _read_sample_lines(file_path, 5, source)
+        lines = [l for l in lines if l]
 
         delimiters = [",", "|", "\t", ";"]
         scores = {d: sum(_count_delimiters_outside_quotes(line, d) for line in lines) for d in delimiters}
@@ -36,13 +58,11 @@ def detect_file_type(file_path):
         return None, None
 
 
-def is_multiline_record(file_path):
+def is_multiline_record(file_path, source: Optional[IDataSource] = None):
     """Detect delimited multiline (H|D|) or fixed-width HDR multiline."""
     try:
-        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
-            lines = [f.readline().strip() for _ in range(10)]
-
-        lines = [l for l in lines if l]
+        lines = _read_sample_lines(file_path, 10, source)
+        lines = [l.strip() for l in lines if l.strip()]
         if not lines:
             return False
 
@@ -65,9 +85,13 @@ def is_multiline_record(file_path):
         text_prefixes = set()
         data_count = 0
         for line in lines:
-            if len(line) >= 3 and line[:2].isalpha() and line[2].isdigit():
-                text_prefixes.add(line[:3])
-            elif line and line[0].isdigit():
+            found = False
+            for i in range(2, min(6, len(line))):
+                if line[:i].isalpha() and i < len(line) and line[i].isdigit():
+                    text_prefixes.add(line[:i])
+                    found = True
+                    break
+            if not found and line and line[0].isdigit():
                 data_count += 1
 
         if len(text_prefixes) >= 1 and data_count >= 2:
@@ -79,11 +103,10 @@ def is_multiline_record(file_path):
         return False
 
 
-def detect_hdr_prefix(file_path, sample_lines=20):
+def detect_hdr_prefix(file_path, sample_lines=20, source: Optional[IDataSource] = None):
     """Detect multi-character HDR prefix (e.g. HDR) in fixed-width multiline."""
     try:
-        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
-            lines = [f.readline().strip() for _ in range(sample_lines)]
+        lines = _read_sample_lines(file_path, sample_lines, source)
 
         prefixes = set()
         for line in lines:
@@ -101,10 +124,9 @@ def detect_hdr_prefix(file_path, sample_lines=20):
         return []
 
 
-def detect_record_types(file_path, delimiter=None, sample_lines=50):
+def detect_record_types(file_path, delimiter=None, sample_lines=50, source: Optional[IDataSource] = None):
     try:
-        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
-            lines = [f.readline().strip() for _ in range(sample_lines)]
+        lines = _read_sample_lines(file_path, sample_lines, source)
 
         prefixes = set()
         for line in lines:
@@ -122,10 +144,10 @@ def detect_record_types(file_path, delimiter=None, sample_lines=50):
         return []
 
 
-def has_header(file_path, delimiter=","):
+def has_header(file_path, delimiter=",", source: Optional[IDataSource] = None):
     try:
-        with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
-            first_line = f.readline().strip()
+        lines = _read_sample_lines(file_path, 1, source)
+        first_line = lines[0].strip() if lines else ""
 
         if not first_line:
             return False

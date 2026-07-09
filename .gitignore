@@ -1,15 +1,54 @@
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.env
-.venv
-venv/
-.venv/
+# Build outputs
+__pycache__
+*.pyc
+build/
+dist/
 *.egg-info/
-.pytest_cache/
-.checkpoint.ipynb
-.ipynb_checkpoints/
-*.ipynb
-/dist/
-/build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python virtual environment
+.venv/
+venv/
+
+# Test outputs
+reports/
+*.html
+*.xml
+
+# Temporary files
+*.tmp
+*.log
+
+# IDE/Pycharm
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# Environment variables
+.env
+
+# IDE specific
+*.sublime-project
+*.sublime-workspace
+
+# Editor backups
+*.[0-9]
+
+# Log files
+*.log
+
+# Backup files
+*~

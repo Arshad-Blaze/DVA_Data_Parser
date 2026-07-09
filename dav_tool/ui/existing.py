@@ -1,5 +1,8 @@
+import gc
 import logging
 import os
+import time
+import concurrent.futures
 import streamlit as st
 import polars as pl
 
@@ -12,7 +15,10 @@ from dav_tool._aggregators import (
     stream_store_aggregate, stream_item_aggregate,
 )
 from dav_tool._reports import generate_file_review
-from dav_tool._observability import ProcessingTimer, log_phase, setup_logging
+from dav_tool._observability import (
+    ProcessingTimer, log_phase, setup_logging,
+    print_memory_snapshot, log_dataframe_summary,
+)
 from dav_tool.validation.store import compare_files, storelevelvalidation
 from dav_tool.validation.item import run_item_validation
 from dav_tool.detection import (
@@ -20,15 +26,72 @@ from dav_tool.detection import (
     detect_hdr_prefix,
 )
 from dav_tool.ui.helpers import (
-    clean_path, get_file_list, get_column_names,
+    clean_path, get_file_list, get_column_names, cached_get_column_names,
     display_execution_summary, display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
+    resolve_source_paths,
 )
+from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext, ExistingContext
+from dav_tool.format_config import load_format_config, apply_format_config
+from dav_tool.config_builder import build_config
+from dav_tool.ui.helpers import (
+    display_config_review, edit_and_accept_config,
+    progressive_config_wizard,
+    render_phase_progress, validate_config_before_processing, cleanup_dataframes,
+)
+
+PHASE_DISCOVERY = 1
+PHASE_CONFIG = 2
+PHASE_CONFIG_VALIDATED = 3
+PHASE_PROCESSING = 4
+PHASE_VALIDATION = 5
+PHASE_REPORTS = 6
+
+
+def _get_ex_validation_config(ctx):
+    """Return ValidationConfig from prod/test config or a default."""
+    side = getattr(ctx, 'prod', None)
+    if side is not None:
+        cfg = getattr(side, '_generated_config', None)
+        if cfg is not None and hasattr(cfg, 'validation_config'):
+            return cfg.validation_config
+    from dav_tool.format_config import ValidationConfig
+    return ValidationConfig()
+
+
+def _run_agg_task(agg_fn, file_paths, file_type, *args, **kwargs):
+    """Run a single aggregation, returning (result, elapsed_seconds)."""
+    t0 = time.perf_counter()
+    result = agg_fn(file_paths, file_type, *args, **kwargs)
+    elapsed = time.perf_counter() - t0
+    return result, elapsed
 
 
 def _reset_phase():
+    old = st.session_state.get("ex_ctx")
+    if old is not None:
+        for side_attr in ["prod", "test"]:
+            side = getattr(old, side_attr, None)
+            if side is not None:
+                for attr_name in ["store_agg", "item_agg", "upc_summary", "file_review",
+                                  "store_df", "comparison_df", "summary_df",
+                                  "fr_prod", "fr_test"]:
+                    df = getattr(side, attr_name, None)
+                    if df is not None:
+                        del df
+                del side
+        for attr_name in ["store_df", "comparison_df", "summary_df", "fr_prod", "fr_test"]:
+            df = getattr(old, attr_name, None)
+            if df is not None:
+                del df
+        del old
+        gc.collect()
     st.session_state.ex_ctx = ExistingContext()
+    keys = list(st.session_state.keys())
+    for k in keys:
+        if k.startswith("ex_cfg_") or k.startswith("ex_prod_cfg") or k.startswith("ex_test_cfg") or k == "_show_ex_config":
+            st.session_state.pop(k, None)
 
 
 def run():
@@ -41,22 +104,46 @@ def run():
         st.session_state.ex_ctx = ExistingContext()
     ctx = st.session_state.ex_ctx
 
+    render_phase_progress(ctx.phase)
+
     dev_mode = st.sidebar.checkbox("Developer Mode", key="ex_dev_mode")
     if dev_mode:
         display_dev_diagnostics(ctx)
 
-    _phase0_detection_and_preview(ctx)
-    if ctx.phase >= 1:
-        _phase1_column_mapping(ctx)
-    if ctx.phase >= 2:
-        _phase2_validation(ctx)
+    _phase1_discovery(ctx)
+    if ctx.phase >= PHASE_CONFIG:
+        _phase2_configuration(ctx)
+    if ctx.phase >= PHASE_CONFIG_VALIDATED:
+        _phase3_config_validation(ctx)
+    if ctx.phase >= PHASE_PROCESSING:
+        _phase4_processing(ctx)
+    if ctx.phase >= PHASE_VALIDATION:
+        _phase5_validation(ctx)
+    if ctx.phase >= PHASE_REPORTS:
+        _phase6_reports(ctx)
 
 
-def _phase0_detection_and_preview(ctx):
-    st.markdown("### Phase 1: File Detection & Preview")
+def _phase1_discovery(ctx):
+    st.markdown("### Step 2: Discovery — File Detection & Preview")
 
-    if ctx.phase >= 1 and ctx.prod.file_paths and ctx.test.file_paths:
+    if ctx.phase >= PHASE_CONFIG and ctx.prod.file_paths and ctx.test.file_paths:
         return
+
+    _ex_source = get_active_source()
+
+    auto_bau = st.session_state.get("_cm_bau_path")
+    auto_test = st.session_state.get("_cm_test_path")
+    if auto_bau and auto_test and _ex_source is not None:
+        st.info(f"**BAU:** `{auto_bau}`  |  **Test:** `{auto_test}` *(from Connection Manager)*")
+        if st.button("Change Paths"):
+            st.session_state.pop("_cm_bau_path", None)
+            st.session_state.pop("_cm_test_path", None)
+            st.rerun()
+        prod_txt = clean_path(auto_bau)
+        test_txt = clean_path(auto_test)
+    else:
+        prod_txt = ""
+        test_txt = ""
 
     col1, col2 = st.columns(2)
 
@@ -65,58 +152,89 @@ def _phase0_detection_and_preview(ctx):
 
     with col1:
         st.header("BAU")
-        prod_txt = clean_path(st.text_input("BAU Folder Path", key="ex_bau_folder_path"))
+        if not auto_bau or not auto_test or _ex_source is None:
+            prod_txt = clean_path(st.text_input("BAU Folder Path", key="ex_bau_folder_path"))
+        prod_file_paths = get_file_list(prod_txt, source=_ex_source)
+
+        # Config load for BAU
+        bau_config_file = clean_path(st.text_input("Optional: BAU Config (JSON)", key="ex_bau_config_file"))
+        if bau_config_file and os.path.exists(bau_config_file):
+            if not getattr(ctx.prod, '_config_applied', False):
+                bau_cfg = load_format_config(bau_config_file)
+                apply_format_config(bau_cfg, ctx.prod, os.path.dirname(bau_config_file), prod_file_paths or None)
+                ctx.prod._config_applied = True
+                ctx.prod.file_paths = prod_file_paths
+                st.success(f"BAU config '{bau_cfg.name or 'unnamed'}' loaded")
+                st.rerun()
 
         # Clear failure flag when path changes
         prev_path = st.session_state.get("ex_bau_prev_path")
         if prod_txt != prev_path:
             st.session_state.pop("ex_bau_detection_failed", None)
-            ctx.prod.file_type = None
-            ctx.prod.delimiter = None
-            ctx.prod.layout = None
+            if not getattr(ctx.prod, '_config_applied', False):
+                ctx.prod.file_type = None
+                ctx.prod.delimiter = None
+                ctx.prod.layout = None
             st.session_state["ex_bau_prev_path"] = prod_txt
 
-        prod_file_paths = get_file_list(prod_txt)
-        if prod_txt and not prod_file_paths:
+        if getattr(ctx.prod, '_config_applied', False):
+            st.success(f"Config loaded — {len(ctx.prod.schema or [])} columns") if ctx.prod.ml_flattened else None
+        elif prod_txt and not prod_file_paths:
             st.error(f"No files found at path: {prod_txt}")
         elif prod_txt and prod_file_paths and not ctx.prod.file_type and not st.session_state.get("ex_bau_detection_failed"):
             log_phase(f"BAU Folder Selected — {prod_txt} ({len(prod_file_paths)} files)")
-            if not _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod"):
+            if not _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod", source=_ex_source):
                 st.error(f"Automatic detection failed for BAU files at: {prod_txt}")
                 st.session_state["ex_bau_detection_failed"] = True
             else:
                 st.session_state.pop("ex_bau_detection_failed", None)
         elif prod_txt and prod_file_paths and ctx.prod.file_type:
             if ctx.prod.file_type == "fixed" and not ctx.prod.layout:
-                _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod")
+                _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod", source=_ex_source)
             st.session_state.pop("ex_bau_detection_failed", None)
 
     with col2:
+        _ex_source = get_active_source()
         st.header("Test")
-        test_txt = clean_path(st.text_input("Test Folder Path", key="ex_test_folder_path"))
+        if not auto_bau or not auto_test or _ex_source is None:
+            test_txt = clean_path(st.text_input("Test Folder Path", key="ex_test_folder_path"))
+        test_file_paths = get_file_list(test_txt, source=_ex_source)
+
+        # Config load for Test
+        test_config_file = clean_path(st.text_input("Optional: Test Config (JSON)", key="ex_test_config_file"))
+        if test_config_file and os.path.exists(test_config_file):
+            if not getattr(ctx.test, '_config_applied', False):
+                test_cfg = load_format_config(test_config_file)
+                apply_format_config(test_cfg, ctx.test, os.path.dirname(test_config_file), test_file_paths or None)
+                ctx.test._config_applied = True
+                ctx.test.file_paths = test_file_paths
+                st.success(f"Test config '{test_cfg.name or 'unnamed'}' loaded")
+                st.rerun()
 
         # Clear failure flag when path changes
         prev_path = st.session_state.get("ex_test_prev_path")
         if test_txt != prev_path:
             st.session_state.pop("ex_test_detection_failed", None)
-            ctx.test.file_type = None
-            ctx.test.delimiter = None
-            ctx.test.layout = None
+            if not getattr(ctx.test, '_config_applied', False):
+                ctx.test.file_type = None
+                ctx.test.delimiter = None
+                ctx.test.layout = None
             st.session_state["ex_test_prev_path"] = test_txt
 
-        test_file_paths = get_file_list(test_txt)
-        if test_txt and not test_file_paths:
+        if getattr(ctx.test, '_config_applied', False):
+            st.success(f"Config loaded — {len(ctx.test.schema or [])} columns") if ctx.test.ml_flattened else None
+        elif test_txt and not test_file_paths:
             st.error(f"No files found at path: {test_txt}")
         elif test_txt and test_file_paths and not ctx.test.file_type and not st.session_state.get("ex_test_detection_failed"):
             log_phase(f"Test Folder Selected — {test_txt} ({len(test_file_paths)} files)")
-            if not _detect_and_set(test_file_paths, ctx.test, "Test", "test"):
+            if not _detect_and_set(test_file_paths, ctx.test, "Test", "test", source=_ex_source):
                 st.error(f"Automatic detection failed for Test files at: {test_txt}")
                 st.session_state["ex_test_detection_failed"] = True
             else:
                 st.session_state.pop("ex_test_detection_failed", None)
         elif test_txt and test_file_paths and ctx.test.file_type:
             if ctx.test.file_type == "fixed" and not ctx.test.layout:
-                _detect_and_set(test_file_paths, ctx.test, "Test", "test")
+                _detect_and_set(test_file_paths, ctx.test, "Test", "test", source=_ex_source)
             st.session_state.pop("ex_test_detection_failed", None)
 
     # Retry/manual buttons when detection failed
@@ -126,12 +244,12 @@ def _phase0_detection_and_preview(ctx):
         with cr1:
             if st.button("Retry BAU Detection", key="ex_bau_retry", use_container_width=True):
                 st.session_state.pop("ex_bau_detection_failed", None)
-                if _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod"):
+                if _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod", source=_ex_source):
                     st.rerun()
         with cr2:
             if st.button("Start BAU Detection Manually", key="ex_bau_manual", use_container_width=True):
                 st.session_state.pop("ex_bau_detection_failed", None)
-                if _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod"):
+                if _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod", source=_ex_source):
                     st.rerun()
 
     if test_txt and test_file_paths and not ctx.test.file_type:
@@ -140,12 +258,12 @@ def _phase0_detection_and_preview(ctx):
         with cr1:
             if st.button("Retry Test Detection", key="ex_test_retry", use_container_width=True):
                 st.session_state.pop("ex_test_detection_failed", None)
-                if _detect_and_set(test_file_paths, ctx.test, "Test", "test"):
+                if _detect_and_set(test_file_paths, ctx.test, "Test", "test", source=_ex_source):
                     st.rerun()
         with cr2:
             if st.button("Start Test Detection Manually", key="ex_test_manual", use_container_width=True):
                 st.session_state.pop("ex_test_detection_failed", None)
-                if _detect_and_set(test_file_paths, ctx.test, "Test", "test"):
+                if _detect_and_set(test_file_paths, ctx.test, "Test", "test", source=_ex_source):
                     st.rerun()
 
     if ctx.prod.file_type == "fixed" or ctx.test.file_type == "fixed":
@@ -160,7 +278,7 @@ def _phase0_detection_and_preview(ctx):
 
     ml_delim = "|"
     if ctx.prod.file_type == "multiline" or ctx.test.file_type == "multiline":
-        ml_delim = _multiline_section(prod_file_paths, test_file_paths)
+        ml_delim = _multiline_section(prod_file_paths, test_file_paths, source=_ex_source)
 
     if not (ctx.prod.file_type == "multiline" and ctx.test.file_type == "multiline"):
         _show_regular_previews(
@@ -172,6 +290,7 @@ def _phase0_detection_and_preview(ctx):
             st.session_state.get("fw_start_test", 0),
             st.session_state.get("fw_rec_prod", ""),
             st.session_state.get("fw_rec_test", ""),
+            source=_ex_source,
         )
 
     both_detected = bool(ctx.prod.file_type and ctx.test.file_type)
@@ -181,20 +300,145 @@ def _phase0_detection_and_preview(ctx):
         both_detected = False
 
     if both_detected and ctx.phase == 0:
-        if st.button("Proceed to Column Mapping  ->", use_container_width=True):
-            ctx.prod.file_paths = prod_file_paths
-            ctx.test.file_paths = test_file_paths
-            ctx.ml_delimiter = ml_delim
-            ctx.phase = 1
+        ctx.prod.file_paths = prod_file_paths
+        ctx.test.file_paths = test_file_paths
+        ctx.ml_delimiter = ml_delim
+
+        if st.button("Progressive Configuration \u2192", use_container_width=True):
+            ctx.phase = PHASE_CONFIG
             st.rerun()
 
 
-def _phase1_column_mapping(ctx):
-    if ctx.phase >= 2:
+def _phase2_configuration(ctx):
+    if ctx.phase >= PHASE_CONFIG_VALIDATED:
         return
 
-    st.divider()
-    st.markdown("### Phase 2: Column Mapping")
+    st.markdown("### Step 3: Configuration")
+    _ex_source = get_active_source()
+
+    active_side = st.session_state.get("ex_active_side", "prod")
+
+    if not ctx.prod.config_locked:
+        st.subheader("BAU Configuration")
+        prod_cfg = build_config(
+            ctx.prod.file_paths,
+            file_type=ctx.prod.file_type,
+            delimiter=ctx.prod.delimiter,
+            layout=ctx.prod.layout,
+            header_prefix=ctx.prod.header_prefix,
+            header_layout=ctx.prod.header_layout,
+            detail_layout=ctx.prod.detail_layout,
+            trailer_prefix=ctx.prod.trailer_prefix,
+            trailer_layout=ctx.prod.trailer_layout,
+            ml_record_types=ctx.prod.ml_record_types,
+            ml_delimiter=ctx.ml_delimiter,
+            source=_ex_source,
+        )
+        ctx._prod_cfg = prod_cfg
+        prod_cols = cached_get_column_names(
+            ctx.prod.file_paths, ctx.prod.file_type,
+            ctx.prod.delimiter or ",", ctx.prod.layout,
+            source=_ex_source,
+        )
+        prod_done = progressive_config_wizard(
+            prod_cfg, detected_columns=prod_cols,
+            key_prefix="ex_prod", file_paths=ctx.prod.file_paths,
+        )
+        if prod_done:
+            ctx._prod_cfg = prod_cfg
+            ctx.prod.config_locked = True
+            ctx.prod.store_col = prod_cfg.store_col
+            ctx.prod.upc_col = prod_cfg.upc_col
+            ctx.prod.desc_col = prod_cfg.desc_col
+            ctx.prod.units_col = prod_cfg.units_col
+            ctx.prod.price_col = prod_cfg.price_col
+            ctx.prod.price_type = prod_cfg.price_type
+            ctx.prod.implied_dollars = prod_cfg.implied_dollars
+            ctx.prod.implied_units = prod_cfg.implied_units
+            st.session_state["ex_active_side"] = "test"
+            st.rerun()
+
+    elif not ctx.test.config_locked:
+        st.subheader("Test Configuration")
+        test_cfg = build_config(
+            ctx.test.file_paths,
+            file_type=ctx.test.file_type,
+            delimiter=ctx.test.delimiter,
+            layout=ctx.test.layout,
+            header_prefix=ctx.test.header_prefix,
+            header_layout=ctx.test.header_layout,
+            detail_layout=ctx.test.detail_layout,
+            trailer_prefix=ctx.test.trailer_prefix,
+            trailer_layout=ctx.test.trailer_layout,
+            ml_record_types=ctx.test.ml_record_types,
+            ml_delimiter=ctx.ml_delimiter,
+            source=_ex_source,
+        )
+        ctx._test_cfg = test_cfg
+        test_cols = cached_get_column_names(
+            ctx.test.file_paths, ctx.test.file_type,
+            ctx.test.delimiter or ",", ctx.test.layout,
+            source=_ex_source,
+        )
+        test_done = progressive_config_wizard(
+            test_cfg, detected_columns=test_cols,
+            key_prefix="ex_test", file_paths=ctx.test.file_paths,
+        )
+        if test_done:
+            ctx._test_cfg = test_cfg
+            ctx.test.config_locked = True
+            ctx.test.store_col = test_cfg.store_col
+            ctx.test.upc_col = test_cfg.upc_col
+            ctx.test.desc_col = test_cfg.desc_col
+            ctx.test.units_col = test_cfg.units_col
+            ctx.test.price_col = test_cfg.price_col
+            ctx.test.price_type = test_cfg.price_type
+            ctx.test.implied_dollars = test_cfg.implied_dollars
+            ctx.test.implied_units = test_cfg.implied_units
+            st.rerun()
+
+    if ctx.prod.config_locked and ctx.test.config_locked:
+        st.success("Both configurations locked. Ready to validate.")
+        if st.button("Validate Configurations \u2192", use_container_width=True):
+            ctx.phase = PHASE_CONFIG_VALIDATED
+            st.rerun()
+
+
+def _phase3_config_validation(ctx):
+    if ctx.phase >= PHASE_PROCESSING:
+        return
+
+    st.markdown("### Step 4: Validate Configuration")
+
+    prod_ok = True
+    test_ok = True
+    prod_cfg = getattr(ctx, '_prod_cfg', None)
+    test_cfg = getattr(ctx, '_test_cfg', None)
+
+    st.subheader("BAU Configuration")
+    if prod_cfg is not None:
+        prod_ok = validate_config_before_processing(prod_cfg, key_prefix="ex_prod_val")
+    else:
+        st.warning("No BAU configuration found.")
+
+    st.subheader("Test Configuration")
+    if test_cfg is not None:
+        test_ok = validate_config_before_processing(test_cfg, key_prefix="ex_test_val")
+    else:
+        st.warning("No Test configuration found.")
+
+    if prod_ok and test_ok and st.button("Proceed to Processing \u2192", use_container_width=True, type="primary"):
+        cleanup_dataframes(ctx)
+        ctx.phase = PHASE_PROCESSING
+        st.rerun()
+
+
+def _phase4_processing(ctx):
+    if ctx.phase >= PHASE_VALIDATION:
+        return
+
+    st.markdown("### Step 5: Processing")
+    _ex_source = get_active_source()
 
     prod_paths = ctx.prod.file_paths
     test_paths = ctx.test.file_paths
@@ -237,19 +481,27 @@ def _phase1_column_mapping(ctx):
     hdr_prefix_test, hdr_header_test = _get_hdr_params(ctx.test)
     hdr_detail_prod = ctx.prod.detail_layout
     hdr_detail_test = ctx.test.detail_layout
+    trailer_prefix_prod = ctx.prod.trailer_prefix
+    trailer_layout_prod = ctx.prod.trailer_layout
+    trailer_prefix_test = ctx.test.trailer_prefix
+    trailer_layout_test = ctx.test.trailer_layout
 
     eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
     eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
 
-    prod_cols = get_column_names(
+    prod_cols = cached_get_column_names(
         prod_paths, eff_prod_type, eff_delim_prod,
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+        source=_ex_source,
     )
-    test_cols = get_column_names(
+    test_cols = cached_get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+        source=_ex_source,
     )
 
     st.subheader("Column Mapping")
@@ -278,7 +530,7 @@ def _phase1_column_mapping(ctx):
         isimplied_dollars_test = st.checkbox("Implied dollars (Test)", key="imp_dol_test")
         isimplied_units_test = st.checkbox("Implied units (Test)", key="imp_unt_test")
 
-    if ctx.phase == 1:
+    if ctx.phase == PHASE_PROCESSING:
         if not ctx.prod.mapping_confirmed:
             bau_errors = validate_column_mapping(
                 prod_store_col, prod_upc_col, prod_desc_col,
@@ -332,6 +584,10 @@ def _phase1_column_mapping(ctx):
                 ctx.test.header_prefix = hdr_prefix_test
                 ctx.prod.header_layout = hdr_header_prod
                 ctx.test.header_layout = hdr_header_test
+                ctx.prod.trailer_prefix = trailer_prefix_prod
+                ctx.test.trailer_prefix = trailer_prefix_test
+                ctx.prod.trailer_layout = trailer_layout_prod
+                ctx.test.trailer_layout = trailer_layout_test
                 ctx.prod.eff_layout = eff_layout_prod_cols
                 ctx.test.eff_layout = eff_layout_test_cols
                 ctx.prod.mapping_confirmed = True
@@ -341,67 +597,101 @@ def _phase1_column_mapping(ctx):
             st.success("Column mapping confirmed. Ready to process.")
             if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
                 log_phase("Processing Started")
+                cleanup_dataframes(ctx)
+                print_memory_snapshot("BEFORE AGGREGATION (EXISTING)")
                 try:
-                    with st.spinner("Aggregating BAU store-level data..."):
-                        with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_store_aggregate"):
-                            prod_store_agg = stream_store_aggregate(
-                            prod_paths, prod_type,
-                            ctx.prod.store_col, ctx.prod.units_col, ctx.prod.price_col,
-                            delimiter=prod_delim, layout=prod_layout_list,
-                            price_type=ctx.prod.price_type,
-                            implied_dollars=ctx.prod.implied_dollars,
-                            implied_units=ctx.prod.implied_units,
-                            start_line=prod_start_line, record_type=prod_record_type,
-                            multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
-                            multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
-                            header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-                        )
-                    with st.spinner("Aggregating Test store-level data..."):
-                        with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_store_aggregate"):
-                            test_store_agg = stream_store_aggregate(
-                            test_paths, test_type,
-                            ctx.test.store_col, ctx.test.units_col, ctx.test.price_col,
-                            delimiter=test_delim, layout=test_layout_list,
-                            price_type=ctx.test.price_type,
-                            implied_dollars=ctx.test.implied_dollars,
-                            implied_units=ctx.test.implied_units,
-                            start_line=test_start_line, record_type=test_record_type,
-                            multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
-                            multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
-                            header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-                        )
-                    with st.spinner("Aggregating BAU item-level data..."):
-                        with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_item_aggregate"):
-                            prod_item_agg = stream_item_aggregate(
-                            prod_paths, prod_type,
-                            ctx.prod.upc_col, ctx.prod.desc_col, ctx.prod.units_col, ctx.prod.price_col,
-                            delimiter=prod_delim, layout=prod_layout_list,
-                            implied_units=ctx.prod.implied_units,
-                            implied_dollars=ctx.prod.implied_dollars,
-                            start_line=prod_start_line, record_type=prod_record_type,
-                            multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
-                            multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
-                            header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-                        )
-                    with st.spinner("Aggregating Test item-level data..."):
-                        with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_item_aggregate"):
-                            test_item_agg = stream_item_aggregate(
-                            test_paths, test_type,
-                            ctx.test.upc_col, ctx.test.desc_col, ctx.test.units_col, ctx.test.price_col,
-                            delimiter=test_delim, layout=test_layout_list,
-                            implied_units=ctx.test.implied_units,
-                            implied_dollars=ctx.test.implied_dollars,
-                            start_line=test_start_line, record_type=test_record_type,
-                            multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
-                            multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
-                            header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-                        )
+                    _ex_source = get_active_source()
+
+                    with st.spinner("Aggregating data (running BAU/Test, Store/Item in parallel)..."):
+                        prod_ml_rtypes_prod = ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None
+                        test_ml_rtypes = ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None
+
+                        def _submit(ex, fn, paths, ftype, *args, **kw):
+                            return ex.submit(_run_agg_task, fn, paths, ftype, *args, **kw)
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+                            futs = [
+                                _submit(ex, stream_store_aggregate,
+                                    prod_paths, prod_type,
+                                    ctx.prod.store_col, ctx.prod.units_col, ctx.prod.price_col,
+                                    delimiter=prod_delim, layout=prod_layout_list,
+                                    price_type=ctx.prod.price_type,
+                                    implied_dollars=ctx.prod.implied_dollars,
+                                    implied_units=ctx.prod.implied_units,
+                                    start_line=prod_start_line, record_type=prod_record_type,
+                                    multiline_record_types=prod_ml_rtypes_prod,
+                                    multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
+                                    header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+                                    detail_layout=hdr_detail_prod,
+                                    trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+                                    source=_ex_source,
+                                ),
+                                _submit(ex, stream_store_aggregate,
+                                    test_paths, test_type,
+                                    ctx.test.store_col, ctx.test.units_col, ctx.test.price_col,
+                                    delimiter=test_delim, layout=test_layout_list,
+                                    price_type=ctx.test.price_type,
+                                    implied_dollars=ctx.test.implied_dollars,
+                                    implied_units=ctx.test.implied_units,
+                                    start_line=test_start_line, record_type=test_record_type,
+                                    multiline_record_types=test_ml_rtypes,
+                                    multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
+                                    header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+                                    detail_layout=hdr_detail_test,
+                                    trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+                                    source=_ex_source,
+                                ),
+                                _submit(ex, stream_item_aggregate,
+                                    prod_paths, prod_type,
+                                    ctx.prod.upc_col, ctx.prod.desc_col, ctx.prod.units_col, ctx.prod.price_col,
+                                    delimiter=prod_delim, layout=prod_layout_list,
+                                    implied_units=ctx.prod.implied_units,
+                                    implied_dollars=ctx.prod.implied_dollars,
+                                    start_line=prod_start_line, record_type=prod_record_type,
+                                    multiline_record_types=prod_ml_rtypes_prod,
+                                    multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
+                                    header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+                                    detail_layout=hdr_detail_prod,
+                                    trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+                                    source=_ex_source,
+                                ),
+                                _submit(ex, stream_item_aggregate,
+                                    test_paths, test_type,
+                                    ctx.test.upc_col, ctx.test.desc_col, ctx.test.units_col, ctx.test.price_col,
+                                    delimiter=test_delim, layout=test_layout_list,
+                                    implied_units=ctx.test.implied_units,
+                                    implied_dollars=ctx.test.implied_dollars,
+                                    start_line=test_start_line, record_type=test_record_type,
+                                    multiline_record_types=test_ml_rtypes,
+                                    multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
+                                    header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+                                    detail_layout=hdr_detail_test,
+                                    trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+                                    source=_ex_source,
+                                ),
+                            ]
+                            names = ["BAU stream_store_aggregate", "Test stream_store_aggregate",
+                                     "BAU stream_item_aggregate", "Test stream_item_aggregate"]
+                            results = []
+                            for i, future in enumerate(futs):
+                                try:
+                                    result, elapsed = future.result(timeout=600)
+                                    ctx.metrics.record("aggregation", names[i], elapsed)
+                                    results.append(result)
+                                except Exception as e:
+                                    logger.error("%s failed: %s", names[i], str(e), exc_info=True)
+                                    raise
+
+                        prod_store_agg, test_store_agg, prod_item_agg, test_item_agg = results
 
                     ctx.prod.store_agg = prod_store_agg
                     ctx.test.store_agg = test_store_agg
                     ctx.prod.item_agg = prod_item_agg
                     ctx.test.item_agg = test_item_agg
-                    ctx.phase = 2
+                    print_memory_snapshot("AFTER AGGREGATION (EXISTING)")
+                    log_dataframe_summary()
+                    cleanup_dataframes(ctx, keep_attrs=["prod.store_agg", "prod.item_agg", "test.store_agg", "test.item_agg"])
+                    ctx.phase = PHASE_VALIDATION
                     st.rerun()
                 except Exception as e:
                     st.error(
@@ -416,9 +706,12 @@ def _phase1_column_mapping(ctx):
                     logger.error("Aggregation failed: %s", str(e), exc_info=True)
 
 
-def _phase2_validation(ctx):
-    st.divider()
-    st.markdown("### Phase 3: Validation")
+def _phase5_validation(ctx):
+    if ctx.phase >= PHASE_REPORTS:
+        return
+
+    st.markdown("### Step 6: Validation")
+    _ex_source = get_active_source()
 
     prod_paths = ctx.prod.file_paths
     test_paths = ctx.test.file_paths
@@ -456,17 +749,25 @@ def _phase2_validation(ctx):
     hdr_prefix_test, hdr_header_test = _get_hdr_params(ctx.test)
     hdr_detail_prod = ctx.prod.detail_layout
     hdr_detail_test = ctx.test.detail_layout
+    trailer_prefix_prod = ctx.prod.trailer_prefix
+    trailer_layout_prod = ctx.prod.trailer_layout
+    trailer_prefix_test = ctx.test.trailer_prefix
+    trailer_layout_test = ctx.test.trailer_layout
     eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
     eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
-    prod_cols = get_column_names(
+    prod_cols = cached_get_column_names(
         prod_paths, eff_prod_type, eff_delim_prod,
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+        source=_ex_source,
     )
-    test_cols = get_column_names(
+    test_cols = cached_get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+        source=_ex_source,
     )
 
     prod_store_col = ctx.prod.store_col
@@ -519,12 +820,15 @@ def _phase2_validation(ctx):
         with c1:
             st.metric("Parse Time", f"{m.parse_time:.2f}s")
             st.metric("Aggregation Time", f"{m.aggregation_time:.2f}s")
+            st.metric("Current Memory", f"{m.current_memory:.1f} MB")
         with c2:
             st.metric("Validation Time", f"{m.validation_time:.2f}s")
             st.metric("Report Time", f"{m.report_time:.2f}s")
+            st.metric("Memory Released", f"{m.memory_released_mb:.1f} MB")
         with c3:
             st.metric("Total Time", f"{m.total_execution_time:.2f}s")
             st.metric("Peak Memory", f"{m.peak_memory:.1f} MB")
+            st.metric("Peak Phase", m.peak_memory_phase or "—")
 
     with st.expander("Schema Details", expanded=False):
         st.markdown(f"**BAU Columns ({len(prod_cols)})**: {', '.join(prod_cols)}")
@@ -536,15 +840,16 @@ def _phase2_validation(ctx):
         st.markdown(f"- Store: {test_store_col}, UPC: {test_upc_col}")
         st.markdown(f"- Description: {test_desc_col}, Units: {test_units_col}, Price: {test_price_col}")
 
+    vc = _get_ex_validation_config(ctx)
     st.subheader("Select Validations")
     colA, colB = st.columns(2)
     with colA:
-        run_store = st.checkbox("Store Level Validation", value=True)
-        run_item = st.checkbox("Item Level Validation", value=True)
+        run_store = st.checkbox("Store Level Validation", value=vc.store_validation.enabled)
+        run_item = st.checkbox("Item Level Validation", value=vc.item_validation.enabled)
     with colB:
-        run_compare_existing = st.checkbox("Compare Store List", value=True)
-        run_summary = st.checkbox("Summary (requires Item)", value=True)
-        run_file_review_existing = st.checkbox("File Review Report", value=False)
+        run_compare_existing = st.checkbox("Compare Store List", value=vc.compare_store_list.enabled)
+        run_summary = st.checkbox("Summary (requires Item)", value=vc.item_validation.enabled)
+        run_file_review_existing = st.checkbox("File Review Report", value=vc.file_review.enabled)
 
     if st.button("Validate", use_container_width=True, type="primary"):
         with st.spinner("Running validations..."):
@@ -559,11 +864,20 @@ def _phase2_validation(ctx):
                 ctx.prod.implied_dollars, ctx.prod.implied_units,
                 ctx.test.implied_dollars, ctx.test.implied_units,
                 run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
+                trailer_prefix_prod=trailer_prefix_prod, trailer_layout_prod=trailer_layout_prod,
+                trailer_prefix_test=trailer_prefix_test, trailer_layout_test=trailer_layout_test,
             )
 
     if ctx.validation_done:
-        _display_results()
+        cleanup_dataframes(ctx, keep_attrs=["prod.store_agg", "prod.item_agg", "test.store_agg", "test.item_agg"])
+        ctx.phase = PHASE_REPORTS
+        st.rerun()
 
+
+def _phase6_reports(ctx):
+    st.markdown("### Step 7: Reports")
+
+    _display_results()
     display_processing_history()
 
     if st.button("Start Over", use_container_width=True):
@@ -571,19 +885,19 @@ def _phase2_validation(ctx):
         st.rerun()
 
 
-def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = ""):
+def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = "", source=None):
     log_phase(f"Detection Started — {side_label}")
 
     try:
-        if is_multiline_record(file_paths[0]):
+        if is_multiline_record(file_paths[0], source=source):
             st.warning(f"Multi-line structured file detected ({side_label})")
             side_ctx.file_type = "multiline"
-            hdr_prefixes = detect_hdr_prefix(file_paths[0])
+            hdr_prefixes = detect_hdr_prefix(file_paths[0], source=source)
             side_ctx.header_prefix = hdr_prefixes[0] if hdr_prefixes else None
             log_phase(f"Detection Completed — {side_label}: multiline")
             return True
         else:
-            ftype, delim = detect_file_type(file_paths[0])
+            ftype, delim = detect_file_type(file_paths[0], source=source)
             if ftype is None:
                 st.error(f"Could not detect file type for {side_label}")
             elif ftype == "delimited":
@@ -619,7 +933,7 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
     return False
 
 
-def _multiline_section(prod_paths, test_paths):
+def _multiline_section(prod_paths, test_paths, source=None):
     ctx = st.session_state.ex_ctx
     st.subheader("Multiline Record Settings")
     mc1, mc2 = st.columns(2)
@@ -627,22 +941,33 @@ def _multiline_section(prod_paths, test_paths):
     with mc1:
         if ctx.prod.file_type == "multiline":
             st.markdown("**BAU Multiline**")
-            raw_p = preview_raw(prod_paths, "multiline", n_rows=5)
-            if not raw_p.is_empty():
-                st.dataframe(raw_p.to_pandas(), height=150)
-            _multiline_side_inputs(prod_paths, ctx.prod, "BAU", "prod")
+            if getattr(ctx.prod, '_config_applied', False) and ctx.prod.ml_flattened:
+                st.success("Config loaded (flattened)")
+            else:
+                raw_p = preview_raw(prod_paths, "multiline", n_rows=5, source=source)
+                if not raw_p.is_empty():
+                    st.dataframe(raw_p.to_pandas(), height=150)
+                _multiline_side_inputs(prod_paths, ctx.prod, "BAU", "prod", source=source)
 
     with mc2:
         if ctx.test.file_type == "multiline":
             st.markdown("**Test Multiline**")
-            raw_t = preview_raw(test_paths, "multiline", n_rows=5)
-            if not raw_t.is_empty():
-                st.dataframe(raw_t.to_pandas(), height=150)
-            _multiline_side_inputs(test_paths, ctx.test, "Test", "test")
+            if getattr(ctx.test, '_config_applied', False) and ctx.test.ml_flattened:
+                st.success("Config loaded (flattened)")
+            else:
+                raw_t = preview_raw(test_paths, "multiline", n_rows=5, source=source)
+                if not raw_t.is_empty():
+                    st.dataframe(raw_t.to_pandas(), height=150)
+                _multiline_side_inputs(test_paths, ctx.test, "Test", "test", source=source)
 
     ml_delim = st.selectbox("Multiline Delimiter", [",", "|", "\t", ";"], index=0, key="existing_ml_delim")
 
-    if st.button("Flatten Records", key="existing_flatten"):
+    prod_configured = getattr(ctx.prod, '_config_applied', False) and ctx.prod.ml_flattened
+    test_configured = getattr(ctx.test, '_config_applied', False) and ctx.test.ml_flattened
+    both_pre_flattened = prod_configured and test_configured
+    if both_pre_flattened:
+        st.info("Both sides configured — ready to proceed.")
+    elif st.button("Flatten Records", key="existing_flatten"):
         ctx.ml_delimiter = ml_delim
         if ctx.prod.file_type == "multiline":
             _store_ml_config(ctx.prod, "prod")
@@ -651,12 +976,12 @@ def _multiline_section(prod_paths, test_paths):
         st.rerun()
 
     if ctx.prod.ml_flattened or ctx.test.ml_flattened:
-        _flattened_preview_and_schema(prod_paths, test_paths, ml_delim)
+        _flattened_preview_and_schema(prod_paths, test_paths, ml_delim, source=source)
 
     return ml_delim
 
 
-def _multiline_side_inputs(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = ""):
+def _multiline_side_inputs(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = "", source=None):
     if not file_paths:
         return
     if side_ctx.header_prefix:
@@ -670,8 +995,15 @@ def _multiline_side_inputs(file_paths, side_ctx: ProcessingContext, side_label: 
         if df and os.path.exists(clean_path(df)):
             side_ctx.detail_layout = load_layout(clean_path(df))
             st.success("Detail layout ready")
+
+        tf = st.text_input(f"{side_label} Trailer Layout CSV (optional)", key=f"ex_hdr_trailer_file_{key_prefix}")
+        tr_prefix = st.text_input(f"{side_label} Trailer Prefix", value="TRL", key=f"ex_tr_prefix_{key_prefix}")
+        if tf and os.path.exists(clean_path(tf)):
+            side_ctx.trailer_layout = load_layout(clean_path(tf))
+            side_ctx.trailer_prefix = tr_prefix.strip() or None
+            st.success("Trailer layout ready")
     else:
-        detected = detect_record_types(file_paths[0])
+        detected = detect_record_types(file_paths[0], source=source)
         rt_default = ",".join(detected) if detected else "H,D"
         st.text_input(
             f"{side_label} Record Type Flags",
@@ -686,7 +1018,7 @@ def _store_ml_config(side_ctx: ProcessingContext, key_prefix: str = ""):
     side_ctx.ml_flattened = True
 
 
-def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
+def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim, source=None):
     ctx = st.session_state.ex_ctx
     mc1, mc2 = st.columns(2)
     with mc1:
@@ -699,9 +1031,12 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     ctx.prod.header_layout or [],
                     ctx.prod.detail_layout or [],
                     n_rows=10,
+                    trailer_prefix=ctx.prod.trailer_prefix,
+                    trailer_layout=ctx.prod.trailer_layout,
+                    source=source,
                 )
             else:
-                fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=10)
+                fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=10, source=source)
             if not fp.is_empty():
                 st.dataframe(fp.to_pandas())
     with mc2:
@@ -714,9 +1049,12 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     ctx.test.header_layout or [],
                     ctx.test.detail_layout or [],
                     n_rows=10,
+                    trailer_prefix=ctx.test.trailer_prefix,
+                    trailer_layout=ctx.test.trailer_layout,
+                    source=source,
                 )
             else:
-                fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=10)
+                fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=10, source=source)
             if not fp.is_empty():
                 st.dataframe(fp.to_pandas())
 
@@ -733,9 +1071,12 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     ctx.prod.header_layout or [],
                     ctx.prod.detail_layout or [],
                     n_rows=5,
+                    trailer_prefix=ctx.prod.trailer_prefix,
+                    trailer_layout=ctx.prod.trailer_layout,
+                    source=source,
                 )
             else:
-                fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=5)
+                fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=5, source=source)
             if not fp.is_empty():
                 st.markdown("**BAU Column Names**")
                 for i, col in enumerate(fp.columns):
@@ -751,9 +1092,12 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     ctx.test.header_layout or [],
                     ctx.test.detail_layout or [],
                     n_rows=5,
+                    trailer_prefix=ctx.test.trailer_prefix,
+                    trailer_layout=ctx.test.trailer_layout,
+                    source=source,
                 )
             else:
-                fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=5)
+                fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=5, source=source)
             if not fp.is_empty():
                 st.markdown("**Test Column Names**")
                 for i, col in enumerate(fp.columns):
@@ -772,19 +1116,22 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
 def _show_regular_previews(prod_paths, test_paths, prod_type, test_type,
                            prod_delim, test_delim, prod_layout_list, test_layout_list,
                            prod_start_line, test_start_line,
-                           prod_record_type, test_record_type):
+                           prod_record_type, test_record_type,
+                           source=None):
     if prod_paths and test_paths and prod_type and test_type:
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("BAU Preview")
             pv = preview_raw(prod_paths, prod_type, prod_delim or ",", prod_layout_list,
-                              n_rows=10, start_line=prod_start_line, record_type=prod_record_type)
+                              n_rows=10, start_line=prod_start_line, record_type=prod_record_type,
+                              source=source)
             if not pv.is_empty():
                 st.table(pv.to_pandas().iloc[:10, :10].astype(str))
         with c2:
             st.subheader("Test Preview")
             tv = preview_raw(test_paths, test_type, test_delim or ",", test_layout_list,
-                              n_rows=10, start_line=test_start_line, record_type=test_record_type)
+                              n_rows=10, start_line=test_start_line, record_type=test_record_type,
+                              source=source)
             if not tv.is_empty():
                 st.table(tv.to_pandas().iloc[:10, :10].astype(str))
 
@@ -805,6 +1152,8 @@ def _execute_validation(
     isimplied_dollars_prod, isimplied_units_prod,
     isimplied_dollars_test, isimplied_units_test,
     run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
+    trailer_prefix_prod=None, trailer_layout_prod=None,
+    trailer_prefix_test=None, trailer_layout_test=None,
 ):
     ctx = st.session_state.ex_ctx
     log_phase("Validation Started")
@@ -850,6 +1199,8 @@ def _execute_validation(
                 multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
                 header_prefix=ctx.prod.header_prefix,
                 header_layout=ctx.prod.header_layout,
+                trailer_prefix=trailer_prefix_prod,
+                trailer_layout=trailer_layout_prod,
                 prod_summary=prod_store_agg, test_summary=test_store_agg,
             )
         ctx.store_df = store_df
@@ -869,6 +1220,8 @@ def _execute_validation(
                 multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
                 header_prefix=ctx.prod.header_prefix,
                 header_layout=ctx.prod.header_layout,
+                trailer_prefix=trailer_prefix_prod,
+                trailer_layout=trailer_layout_prod,
                 bau_summary=prod_item_agg, test_summary=test_item_agg,
             )
         ctx.comparison_df = comparison_df
@@ -894,9 +1247,14 @@ def _execute_validation(
                 isimplied_dollars_test, isimplied_units_test,
                 hdr_prefix_prod, hdr_prefix_test,
                 hdr_header_prod, hdr_header_test,
+                trailer_prefix_prod, trailer_layout_prod,
+                trailer_prefix_test, trailer_layout_test,
+                source=get_active_source(),
             )
         log_phase("Reports Generated")
 
+    print_memory_snapshot("AFTER VALIDATION (EXISTING)")
+    log_dataframe_summary()
     record_execution(ctx.metrics)
     log_phase("Validation Completed")
     log_phase(f"Execution Summary — {ctx.metrics.rows_processed} rows, "
@@ -913,6 +1271,7 @@ def _compare_stores(
     prod_store_agg=None, test_store_agg=None,
 ):
     ctx = st.session_state.ex_ctx
+    _ex_source = get_active_source()
 
     if prod_store_agg is not None:
         prod_series = prod_store_agg.select(["STORE_NUMBER"])
@@ -928,6 +1287,10 @@ def _compare_stores(
                 multiline_delimiter=ctx.ml_delimiter, column_names=ctx.prod.schema,
                 header_prefix=ctx.prod.header_prefix,
                 header_layout=ctx.prod.header_layout,
+                detail_layout=ctx.prod.detail_layout,
+                trailer_prefix=ctx.prod.trailer_prefix,
+                trailer_layout=ctx.prod.trailer_layout,
+                source=_ex_source,
             ).select(["STORE_NUMBER"])
 
     if test_store_agg is not None:
@@ -944,6 +1307,10 @@ def _compare_stores(
                 multiline_delimiter=ctx.ml_delimiter, column_names=ctx.test.schema,
                 header_prefix=ctx.test.header_prefix,
                 header_layout=ctx.test.header_layout,
+                detail_layout=ctx.test.detail_layout,
+                trailer_prefix=ctx.test.trailer_prefix,
+                trailer_layout=ctx.test.trailer_layout,
+                source=_ex_source,
             ).select(["STORE_NUMBER"])
 
     if not prod_series.is_empty() and not test_series.is_empty():
@@ -967,37 +1334,59 @@ def _generate_file_reviews(
     isimplied_dollars_test, isimplied_units_test,
     hdr_prefix_prod=None, hdr_prefix_test=None,
     hdr_header_prod=None, hdr_header_test=None,
+    trailer_prefix_prod=None, trailer_layout_prod=None,
+    trailer_prefix_test=None, trailer_layout_test=None,
+    source=None,
 ):
     ctx = st.session_state.ex_ctx
 
-    with ProcessingTimer(ctx.metrics, "report", "BAU generate_file_review"):
-        fr_prod = generate_file_review(
-            prod_paths, prod_type, prod_store_col, prod_upc_col,
-            prod_units_col, prod_price_col,
-            delimiter=prod_delim, layout=prod_layout_list,
-            price_type=price_type_bau,
-            implied_dollars=isimplied_dollars_prod,
-            implied_units=isimplied_units_prod,
-            start_line=prod_start_line, record_type=prod_record_type,
-            multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
-            multiline_delimiter=ctx.ml_delimiter, column_names=ctx.prod.schema,
-            header_prefix=hdr_prefix_prod,
-            header_layout=hdr_header_prod,
-        )
-    with ProcessingTimer(ctx.metrics, "report", "Test generate_file_review"):
-        fr_test = generate_file_review(
-            test_paths, test_type, test_store_col, test_upc_col,
-            test_units_col, test_price_col,
-            delimiter=test_delim, layout=test_layout_list,
-            price_type=price_type_test,
-            implied_dollars=isimplied_dollars_test,
-            implied_units=isimplied_units_test,
-            start_line=test_start_line, record_type=test_record_type,
-            multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
-            multiline_delimiter=ctx.ml_delimiter, column_names=ctx.test.schema,
-            header_prefix=hdr_prefix_test,
-            header_layout=hdr_header_test,
-        )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        futs = [
+            ex.submit(_run_agg_task, generate_file_review,
+                prod_paths, prod_type, prod_store_col, prod_upc_col,
+                prod_units_col, prod_price_col,
+                delimiter=prod_delim, layout=prod_layout_list,
+                price_type=price_type_bau,
+                implied_dollars=isimplied_dollars_prod,
+                implied_units=isimplied_units_prod,
+                start_line=prod_start_line, record_type=prod_record_type,
+                multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
+                multiline_delimiter=ctx.ml_delimiter, column_names=ctx.prod.schema,
+                header_prefix=hdr_prefix_prod,
+                header_layout=hdr_header_prod,
+                trailer_prefix=trailer_prefix_prod,
+                trailer_layout=trailer_layout_prod,
+                precomputed_store_agg=ctx.prod.store_agg,
+                precomputed_upc_summary=ctx.prod.item_agg,
+                source=source,
+            ),
+            ex.submit(_run_agg_task, generate_file_review,
+                test_paths, test_type, test_store_col, test_upc_col,
+                test_units_col, test_price_col,
+                delimiter=test_delim, layout=test_layout_list,
+                price_type=price_type_test,
+                implied_dollars=isimplied_dollars_test,
+                implied_units=isimplied_units_test,
+                start_line=test_start_line, record_type=test_record_type,
+                multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
+                multiline_delimiter=ctx.ml_delimiter, column_names=ctx.test.schema,
+                header_prefix=hdr_prefix_test,
+                header_layout=hdr_header_test,
+                trailer_prefix=trailer_prefix_test,
+                trailer_layout=trailer_layout_test,
+                precomputed_store_agg=ctx.test.store_agg,
+                precomputed_upc_summary=ctx.test.item_agg,
+                source=source,
+            ),
+        ]
+        names = ["BAU generate_file_review", "Test generate_file_review"]
+        for i, future in enumerate(futs):
+            result, elapsed = future.result(timeout=600)
+            ctx.metrics.record("report", names[i], elapsed)
+            if i == 0:
+                fr_prod = result
+            else:
+                fr_test = result
     ctx.fr_prod = fr_prod
     ctx.fr_test = fr_test
 

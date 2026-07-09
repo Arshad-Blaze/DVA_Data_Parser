@@ -11,7 +11,12 @@ from playwright.sync_api import Page, BrowserContext
 from _pytest.nodes import Item
 from _pytest.runner import CallInfo
 
-from tests.e2e.sample_data import create_flow_test_data
+from tests.e2e.sample_data import (
+    create_flow_test_data,
+    create_multiline_flow_test_data,
+    create_hdr_trailer_test_data,
+    create_config_test_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +69,14 @@ def streamlit_server() -> Generator[str, None, None]:
     )
     app_path = os.path.join(repo_root, "dav_tool", "ui", "app.py")
 
+    venv_dir = os.path.join(repo_root, "venv", "bin")
     env = os.environ.copy()
     env["STREAMLIT_SERVER_PORT"] = str(port)
     env["STREAMLIT_SERVER_HEADLESS"] = "true"
     env["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     env["PYTHONPATH"] = f"{repo_root}:{env.get('PYTHONPATH', '')}"
+    current_path = env.get("PATH", "")
+    env["PATH"] = f"{venv_dir}:{current_path}" if venv_dir not in current_path else current_path
 
     process = subprocess.Popen(
         ["streamlit", "run", app_path,
@@ -114,6 +122,27 @@ def streamlit_server() -> Generator[str, None, None]:
 def test_data() -> Generator[Dict[str, str], None, None]:
     with tempfile.TemporaryDirectory(prefix="dav_e2e_") as tmpdir:
         data = create_flow_test_data(tmpdir)
+        yield data
+
+
+@pytest.fixture(scope="session")
+def multiline_test_data() -> Generator[Dict[str, str], None, None]:
+    with tempfile.TemporaryDirectory(prefix="dav_ml_e2e_") as tmpdir:
+        data = create_multiline_flow_test_data(tmpdir)
+        yield data
+
+
+@pytest.fixture(scope="session")
+def trl_test_data() -> Generator[Dict[str, str], None, None]:
+    with tempfile.TemporaryDirectory(prefix="dav_trl_e2e_") as tmpdir:
+        data = create_hdr_trailer_test_data(tmpdir)
+        yield data
+
+
+@pytest.fixture(scope="session")
+def config_test_data() -> Generator[Dict[str, str], None, None]:
+    with tempfile.TemporaryDirectory(prefix="dav_cfg_e2e_") as tmpdir:
+        data = create_config_test_data(tmpdir)
         yield data
 
 

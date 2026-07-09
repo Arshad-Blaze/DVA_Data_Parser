@@ -39,6 +39,7 @@
 │  dav_tool/config.py       dav_tool/types.py         │
 │  dav_tool/processing_context.py                     │
 │  dav_tool/_normalizer.py                            │
+│  dav_tool/format_config.py                          │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -236,6 +237,32 @@ cat /tmp/dav_test_results/full_test_report.txt
 
 ---
 
+## Configuration Layer
+
+### `dav_tool/format_config.py`
+
+| Function | Description |
+|---|---|
+| `FormatConfig` | Dataclass with all parsing settings: file_type, delimiter, layout paths, multiline/HDR/TRL config, column mapping |
+| `load_format_config(path)` | Loads a `FormatConfig` from JSON file |
+| `save_format_config(config, path)` | Saves a `FormatConfig` to JSON file |
+| `apply_format_config(config, ctx, config_dir, file_paths)` | Applies config to a `ProcessingContext` — sets fields, loads layout CSVs (resolved relative to config dir), flattens multiline data, auto-applies schema |
+| `config_from_ctx(ctx)` | Builds a `FormatConfig` from a configured `ProcessingContext` (used for saving) |
+
+Layout file paths in the config are resolved relative to the config file's directory (or kept absolute). `apply_format_config` is purely additive — it modifies `ProcessingContext` fields without touching parser/aggregator/validation code.
+
+### Usage flow
+
+```
+User provides config JSON → load_format_config() → apply_format_config() → ctx populated
+                                                                              ↓
+                                                              For multiline: flatten + schema auto-applied
+                                                                              ↓
+                                                              UI shows preview → user proceeds to column mapping
+```
+
+---
+
 ## Observability Layer
 
 ### `dav_tool/_observability.py`
@@ -358,3 +385,25 @@ Benchmarked on a machine with 3.7 GB RAM (1 GB available). Tests at 50 MB, 100 M
 - **Peak memory grows sub-linearly** — 50 MB → 148 MB, 500 MB → 799 MB (item_agg peaks at ~1.6× file size).
 - **Folder mode is faster** than single-file for equivalent total size (parallel file reads, same streaming).
 - **Practical limit** for 3.7 GB RAM machine is ~600–700 MB input (item_agg peaks near 1 GB). Larger datasets require chunking or more RAM.
+
+---
+
+## Developer Mode & Diagnostics
+
+The **Developer Mode** checkbox (available in the sidebar of both Onboarding and Existing pages) exposes live diagnostic information from `ProcessingMetrics`:
+
+| Diagnostic | Source | Description |
+|---|---|---|
+| **Phase** | `ctx.phase` | Current pipeline phase (0=file selection, 1=column mapping, 2=validation) |
+| **Parser Type** | `ctx.file_type` | Detected file type |
+| **BAU/Test Type** | `ctx.prod.file_type` / `ctx.test.file_type` | Per-side file type in Existing flow |
+| **Schema/Columns** | `ctx.layout` / `ctx.schema` | Detected column names |
+| **Current Memory** | `metrics.current_memory` | RSS memory at render time (MB) |
+| **Peak Memory** | `metrics.peak_memory` | Peak RSS recorded (MB) |
+| **Current CPU** | `metrics.current_cpu` | Current CPU usage (%) |
+| **Chunks Processed** | `metrics.chunks_processed` | Streaming chunks processed |
+| **Store Agg Rows** | `ctx.store_agg.height` | Store aggregation row count |
+| **Item Agg Rows** | `ctx.item_agg.height` | Item aggregation row count |
+| **Validation Done** | `ctx.done` / `ctx.validation_done` | Whether validation completed |
+
+Rendered by `display_dev_diagnostics()` in `dav_tool/ui/helpers.py`. All values are read-only — no pipeline behavior is affected.

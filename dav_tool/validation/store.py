@@ -1,10 +1,19 @@
+"""Store-level validation — orchestrates aggregation and calculation.
+
+Aggregation Engine (``_aggregators``) handles parsing → normalization → group-by → sum.
+Calculation Engine (``calculations``) handles diff, pct-diff, and comparison.
+
+This module only wires them together and accepts pre-computed summaries.
+"""
+
 import time
 import polars as pl
 from dav_tool._aggregators import stream_store_aggregate
-from dav_tool.validation._utils import _pct_expr
+from dav_tool.calculations import store_diffs
 
 
 def compare_files(prod_file, test_file, col1, col2):
+    """Compare two DataFrames by a single column and return missing sets."""
     prod_store = prod_file[col1]
     test_store = test_file[col2]
 
@@ -29,56 +38,38 @@ def compare_files(prod_file, test_file, col1, col2):
 def _compare_store_summaries(prod_summary, test_summary):
     """Compare two store-level aggregated DataFrames and produce diff columns.
 
-    prod_summary and test_summary must have canonical columns:
-    STORE_NUMBER (str), Units (f64), Totalprice (f64).
+    Delegates to ``dav_tool.calculations.store_diffs``.
     """
-    if prod_summary.is_empty() and test_summary.is_empty():
-        return pl.DataFrame()
-
-    merged = prod_summary.join(
-        test_summary, on="STORE_NUMBER", how="full", suffix="_Test"
-    ).fill_null(0)
-
-    rename_map = {}
-    if "Units" in merged.columns:
-        rename_map["Units"] = "Units_Prod"
-    if "Totalprice" in merged.columns:
-        rename_map["Totalprice"] = "Totalprice_Prod"
-    if rename_map:
-        merged = merged.rename(rename_map)
-
-    for col_name in ["Units_Prod", "Totalprice_Prod", "Units_Test", "Totalprice_Test"]:
-        if col_name not in merged.columns:
-            merged = merged.with_columns(pl.lit(0.0).alias(col_name))
-
-    merged = merged.with_columns([
-        (pl.col("Units_Prod") - pl.col("Units_Test")).alias("Units_Diff"),
-        (pl.col("Totalprice_Prod") - pl.col("Totalprice_Test")).alias("Sales_Diff"),
-        _pct_expr("Units_Prod", "Units_Test").alias("Units_Diff_%"),
-        _pct_expr("Totalprice_Prod", "Totalprice_Test").alias("Sales_Diff_%"),
-    ])
-
-    return merged.sort("STORE_NUMBER")
+    return store_diffs(prod_summary, test_summary)
 
 
 def storelevelvalidation(
-    prod_paths, test_paths,
-    prod_type, test_type,
-    prod_delim, test_delim,
-    prod_layout, test_layout,
-    prod_store_col, prod_units_col, prod_price_col,
-    test_store_col, test_units_col, test_price_col,
-    price_type_bau, price_type_test,
-    isimplied_dollars_prod, isimplied_units_prod,
-    isimplied_dollars_test, isimplied_units_test,
+    prod_paths=None, test_paths=None,
+    prod_type=None, test_type=None,
+    prod_delim=None, test_delim=None,
+    prod_layout=None, test_layout=None,
+    prod_store_col=None, prod_units_col=None, prod_price_col=None,
+    test_store_col=None, test_units_col=None, test_price_col=None,
+    price_type_bau="Total Price", price_type_test="Total Price",
+    isimplied_dollars_prod=False, isimplied_units_prod=False,
+    isimplied_dollars_test=False, isimplied_units_test=False,
     start_line=0, record_type=None,
     multiline_record_types=None, multiline_delimiter="|",
     column_names=None, header_prefix=None, header_layout=None,
+    trailer_prefix=None, trailer_layout=None,
     prod_summary=None, test_summary=None,
+    aggregation_source=None,
 ):
+    """Orchestrate store-level validation.
+
+    Accepts optional pre-computed summaries. When not provided,
+    delegates to the Aggregation Engine (``stream_store_aggregate``).
+    The comparison is computed by the Calculation Engine (``store_diffs``).
+    """
     start_time = time.time()
 
     if prod_summary is None:
+        from dav_tool._aggregators import stream_store_aggregate
         prod_summary = stream_store_aggregate(
             prod_paths, prod_type,
             prod_store_col, prod_units_col, prod_price_col,
@@ -92,9 +83,13 @@ def storelevelvalidation(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
+            source=aggregation_source,
         )
 
     if test_summary is None:
+        from dav_tool._aggregators import stream_store_aggregate
         test_summary = stream_store_aggregate(
             test_paths, test_type,
             test_store_col, test_units_col, test_price_col,
@@ -108,6 +103,9 @@ def storelevelvalidation(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
+            source=aggregation_source,
         )
 
     result = _compare_store_summaries(prod_summary, test_summary)
@@ -118,8 +116,8 @@ def storelevelvalidation(
 def storelevelvalidation_from_df(prod_df, test_df):
     """Validate store-level data from canonical DataFrames.
 
-    prod_df and test_df must already have canonical columns:
-    STORE_NUMBER (str), Units (f64), Totalprice (f64).
+    Aggregation is done here (simple group-by), comparison is delegated
+    to the Calculation Engine.
     """
     prod_summary = prod_df.group_by("STORE_NUMBER").agg([pl.sum("Units"), pl.sum("Totalprice")])
     test_summary = test_df.group_by("STORE_NUMBER").agg([pl.sum("Units"), pl.sum("Totalprice")])

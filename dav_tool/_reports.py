@@ -1,8 +1,32 @@
+import gc
 import os
 import polars as pl
 from typing import List, Dict, Optional, Union
 
 from dav_tool._aggregators import stream_store_aggregate, stream_upc_summary
+from dav_tool.datasource.base import IDataSource
+
+
+def _summarize(store_agg: Optional[pl.DataFrame], upc_summary: Optional[pl.DataFrame]) -> dict:
+    """Build a single summary dict from store/upc aggregation frames."""
+    store_count = store_agg.height if store_agg is not None else 0
+    upc_count = upc_summary.height if upc_summary is not None else 0
+    total_units = (
+        upc_summary["UNITS_SOLD"].sum()
+        if upc_summary is not None and "UNITS_SOLD" in upc_summary.columns
+        else 0.0
+    )
+    total_dollars = (
+        upc_summary["TOTAL_DOLLARS"].sum()
+        if upc_summary is not None and "TOTAL_DOLLARS" in upc_summary.columns
+        else 0.0
+    )
+    return {
+        "store_count": store_count,
+        "upc_count": upc_count,
+        "total_units": float(total_units),
+        "total_dollars": round(float(total_dollars), 2),
+    }
 
 
 def generate_file_review(
@@ -25,12 +49,39 @@ def generate_file_review(
     column_names: Optional[List[str]] = None,
     header_prefix: Optional[str] = None,
     header_layout: Optional[List[Dict]] = None,
+    detail_layout: Optional[List[Dict]] = None,
+    trailer_prefix: Optional[str] = None,
+    trailer_layout: Optional[List[Dict]] = None,
+    precomputed_store_agg: Optional[pl.DataFrame] = None,
+    precomputed_upc_summary: Optional[pl.DataFrame] = None,
+    source: Optional[IDataSource] = None,
 ) -> pl.DataFrame:
+    """Generate per-file summary statistics.
+
+    When *precomputed_store_agg* and *precomputed_upc_summary* are provided
+    (from a previous aggregate pass), they are used directly instead of
+    re-parsing the dataset. These summaries are global (aggregated across all
+    input files), so the report returns a single consolidated row rather than
+    repeating the same global totals once per file.
+
+    When precomputed summaries are NOT provided, each file is streamed
+    sequentially (opening a remote stream when *source* is given) and
+    aggregated independently, producing one correct row per file.
+    """
     if isinstance(file_paths, str):
         file_paths = [file_paths]
+    file_list = list(file_paths)
+
+    if precomputed_store_agg is not None and precomputed_upc_summary is not None:
+        summary = _summarize(precomputed_store_agg, precomputed_upc_summary)
+        if len(file_list) == 1:
+            fname = os.path.basename(file_list[0])
+        else:
+            fname = f"{len(file_list)} files (aggregated)"
+        return pl.DataFrame([{"filename": fname, **summary}])
 
     rows = []
-    for f in file_paths:
+    for f in file_list:
         fname = os.path.basename(f)
 
         sa = stream_store_aggregate(
@@ -44,6 +95,10 @@ def generate_file_review(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            detail_layout=detail_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
+            source=source,
         )
 
         ua = stream_upc_summary(
@@ -56,6 +111,10 @@ def generate_file_review(
             column_names=column_names,
             header_prefix=header_prefix,
             header_layout=header_layout,
+            detail_layout=detail_layout,
+            trailer_prefix=trailer_prefix,
+            trailer_layout=trailer_layout,
+            source=source,
         )
 
         store_count = sa.height if sa is not None and not sa.is_empty() else 0
@@ -70,5 +129,8 @@ def generate_file_review(
             "total_units": float(total_units),
             "total_dollars": round(float(total_dollars), 2),
         })
+        del sa, ua
+        gc.collect()
 
     return pl.DataFrame(rows)
+

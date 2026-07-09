@@ -1,529 +1,722 @@
-# Runtime Stabilization Sprint
+# DVA Platform Evolution
+# Streaming Configuration Driven Data Onboarding Platform
 
-Read and understand the entire repository before making any modifications.
+Read the COMPLETE repository before making ANY modifications.
 
-The parser architecture, canonical data layer, validation engine, aggregation layer and reporting flow are COMPLETE.
+Understand the architecture first.
 
-Do NOT redesign the architecture.
-
-Do NOT refactor modules unless absolutely necessary.
-
-Do NOT optimize code that is already working.
-
-This sprint is ONLY for runtime stabilization, UX improvements and regression elimination.
-
-All Playwright tests must continue to pass after every change.
+Do NOT immediately begin coding.
 
 ------------------------------------------------------------
 
-## Current Status
+CURRENT STATE
 
-The application is functionally complete.
+The repository already contains
 
-Playwright E2E framework is integrated.
+✓ Parser Engine
 
-Regression suite is available.
+✓ Canonical Data Layer
 
-Architecture review is complete.
+✓ Validation Engine
 
-The objective is to eliminate runtime issues before implementing multiline record support.
+✓ Aggregation Engine
 
-------------------------------------------------------------
+✓ Reporting
 
-## General Rules
+✓ Configuration Builder
 
-1.
+✓ Connection Manager
 
-Do NOT introduce architectural changes.
+✓ Local Data Source
 
-2.
+✓ Remote SSH Data Source
 
-Do NOT rewrite parser logic.
+✓ Runtime Metrics
 
-3.
+✓ Playwright
 
-Do NOT change validation calculations.
+✓ Regression Framework
 
-4.
+✓ Documentation
 
-Do NOT change report generation.
+The project is NOT being restarted.
 
-5.
+The project must EVOLVE.
 
-Do NOT change canonical DataFrame structure.
-
-6.
-
-Fix only confirmed runtime issues.
-
-7.
-
-Every change must preserve existing functionality.
-
-8.
-
-After every fix
-
-Run
-
-pytest
-
-Playwright
-
-Verify no regression
-
-Stop
+Reuse as much existing implementation as possible.
 
 ------------------------------------------------------------
 
-# TASK 1
+OBJECTIVE
 
-Smart Column Auto Mapping
+Transform the application into a Streaming Configuration Driven Data Onboarding Platform.
 
-Current issue
+The parser should no longer drive the workflow.
 
-Every mapping dropdown defaults to the first column.
+The workflow should drive the parser.
 
-Users can accidentally map
+------------------------------------------------------------
 
-Store -> Store
+FIRST PRINCIPLE
 
-Units -> Store
+The MFT Server is the ONLY Source of Truth.
 
-Price -> Store
+The application should not require users to manually move retailer files.
 
-etc.
+Everything should happen directly against the MFT server.
 
-causing DuplicateError.
+Local mode remains available for testing only.
 
-Implement intelligent default mapping.
+------------------------------------------------------------
 
-Match columns using
+NEW ARCHITECTURE
 
-case-insensitive
-
-substring matching
-
-synonyms where applicable
-
-Examples
-
-Store
-
-Store Number
-
-Store_ID
-
-STORE
+Presentation Layer
 
 ↓
 
-Store
-
-UPC
-
-UPC_CODE
-
-Item UPC
+Workflow Engine
 
 ↓
 
-UPC
-
-Description
-
-Item Description
-
-DESC
+Data Source Layer
 
 ↓
 
-Description
-
-Units
-
-Qty
-
-Quantity
+Discovery Engine
 
 ↓
 
-Units
-
-Price
-
-Total Price
-
-Sales
-
-Amount
+Configuration Builder
 
 ↓
 
-Price
+Configuration Validator
 
-If no confident match exists
+↓
 
-leave the dropdown unselected.
+Streaming Parser
 
-------------------------------------------------------------
+↓
 
-# TASK 2
+Canonical Data Layer
 
-Column Mapping Validation
+↓
 
-Before allowing
+Aggregation Engine
 
-Confirm Mapping
+↓
 
-validate
+Calculation Engine
 
-Required fields selected
-
-No duplicate column selection
-
-All required mappings exist
-
-If validation fails
-
-show friendly Streamlit error.
-
-Never expose Polars exceptions.
-
-Disable Confirm Mapping until validation succeeds.
-
-------------------------------------------------------------
-
-# TASK 3
-
-Friendly Runtime Errors
-
-Replace technical exceptions with user friendly messages.
-
-Examples
-
-Missing Store List
-
-Duplicate Mapping
-
-Missing Required Column
-
-Aggregation Failure
-
-Invalid Layout
-
-Invalid Delimiter
-
-Missing Header
-
-Unknown File Type
-
-Unexpected Parsing Failure
-
-Every error should explain
-
-What happened
-
-Why
-
-How to fix it
-
-------------------------------------------------------------
-
-# TASK 4
-
-Processing Feedback
-
-Every long running phase must display progress.
-
-Detection
-
-Preview
-
-Parsing
-
-Canonical Conversion
-
-Aggregation
-
-Validation
-
-Report Generation
-
-Use
-
-st.spinner()
-
-or
-
-st.status()
-
-or
-
-st.progress()
-
-Display current phase.
-
-Example
-
-Reading File...
-
-Parsing Records...
-
-Generating Canonical Dataset...
-
-Aggregating Store Data...
-
-Running Validation...
-
-Generating Reports...
-
-Completed
-
-------------------------------------------------------------
-
-# TASK 5
-
-Execution Timing
-
-Capture timings for
-
-Detection
-
-Preview
-
-Column Mapping Load
-
-Parsing
-
-Canonical Conversion
-
-Aggregation
-
-Validation
+↓
 
 Reports
 
-Display timings
+------------------------------------------------------------
 
-inside a collapsed
+DO NOT
 
-Processing Metrics
+Redesign working parser modules.
 
-expander.
+Redesign validation.
 
-Do not clutter the main UI.
+Redesign aggregation.
+
+Redesign reporting.
+
+Reuse them.
 
 ------------------------------------------------------------
 
-# TASK 6
+PHASE 1
 
-Runtime Diagnostics
+Repository Review
 
-Create expandable sections
+Review the entire repository.
 
-Detection Details
+Understand
 
-Parser Details
+Parser
 
-Schema Details
+Workflow
 
-Validation Details
+Configuration Builder
 
-Processing Metrics
+Connection Manager
 
-Runtime Logs
+Validation
 
-Default
+Aggregation
 
-Collapsed
+Reporting
 
-Only populate expensive diagnostics when the user expands them.
+Playwright
 
-Do not render unnecessary large tables automatically.
+UI
+
+State Management
+
+Documentation
+
+Identify reusable components.
+
+Produce an internal implementation plan.
+
+Do NOT code yet.
 
 ------------------------------------------------------------
 
-# TASK 7
+PHASE 2
 
-Workflow State Review
+Workflow Refactoring
 
-Review both
+The application should now follow this workflow.
+
+STEP 1
+
+Launch
+
+↓
+
+Choose Workflow
 
 Onboarding
 
 Existing
 
-Verify
+↓
 
-Every phase transition
+STEP 2
 
-Every session_state variable
+Choose Data Source
 
-ProcessingContext
+Local
 
-Navigation
+Remote (SSH)
 
-Reset
+↓
 
-History
+STEP 3
 
-No stale state
+If Remote
 
-No duplicated state
+Connect
 
-No unnecessary reruns.
+Authenticate
+
+Browse MFT
+
+Select Folder(s)
+
+↓
+
+STEP 4
+
+If Fixed Width
+
+Ask for Layout
+
+Otherwise continue.
+
+↓
+
+STEP 5
+
+Discovery
+
+Read only SAMPLE data.
+
+Never process the complete dataset.
+
+Discovery must inspect only enough logical records to identify
+
+Encoding
+
+Delimiter
+
+Header
+
+Record Type
+
+Multiline
+
+Header Based
+
+Schema
+
+Possible Data Types
+
+Possible Column Names
+
+Display RAW Preview.
+
+Raw Preview must display exactly what exists in source data.
+
+No canonical conversion.
+
+No validation.
+
+No parsing.
 
 ------------------------------------------------------------
 
-# TASK 8
+PHASE 3
 
-Performance Review
+Progressive Configuration Builder
 
-Review
+Configuration should NOT appear all at once.
 
-Detection
+It should be built gradually.
 
-Preview
+Stage A
 
-Column Mapping
+File Information
+
+↓
+
+User confirms
+
+↓
+
+Stage B
+
+Record Information
+
+↓
+
+User confirms
+
+↓
+
+Stage C
+
+Schema
+
+↓
+
+User confirms
+
+↓
+
+Stage D
+
+Business Rules
+
+↓
+
+User confirms
+
+↓
+
+Stage E
+
+Validation Configuration
+
+↓
+
+User confirms
+
+↓
+
+Configuration Complete
+
+At every stage
+
+Auto detect
+
+Suggest
+
+Allow correction
+
+Continue
+
+Configuration grows progressively.
+
+------------------------------------------------------------
+
+PHASE 4
+
+Configuration Structure
+
+Configuration must contain
+
+GENERAL
+
+FILE
+
+SCHEMA
+
+BUSINESS RULES
+
+VALIDATION
+
+OUTPUT
+
+Validation section must define
+
+Enabled
+
+Required Columns
+
+Group By Columns
+
+Aggregation Columns
+
+If omitted
+
+Current default validation logic remains.
+
+Configuration overrides defaults.
+
+------------------------------------------------------------
+
+PHASE 5
+
+Configuration Validation
+
+Before processing begins
+
+Validate
+
+Required mappings
+
+Aggregation columns
+
+Group By columns
+
+Layouts
+
+Delimiter
+
+Business Rules
+
+Configuration completeness
+
+Only after successful validation
+
+allow processing.
+
+------------------------------------------------------------
+
+PHASE 6
+
+Streaming Processing
+
+This is the most important phase.
+
+DO NOT
+
+Download the dataset.
+
+DO NOT
+
+Create local copies.
+
+DO NOT
+
+Load entire file unnecessarily.
+
+Instead
+
+Open remote stream
+
+↓
+
+Read sequentially
+
+↓
+
+Parse
+
+↓
+
+Canonical
+
+↓
+
+Aggregation
+
+↓
+
+Release memory
+
+↓
+
+Continue
+
+Implement streaming architecture wherever practical.
+
+Large datasets should never require local staging.
+
+------------------------------------------------------------
+
+PHASE 7
+
+Validation Architecture
+
+Separate validation into two independent engines.
+
+ENGINE 1
+
+Aggregation Engine
+
+Input
+
+Group By Columns
+
+Aggregation Columns
+
+Output
+
+Aggregated Dataset
+
+Only aggregation.
+
+No calculations.
+
+------------------------------------------------------------
+
+ENGINE 2
+
+Calculation Engine
+
+Input
+
+Aggregated BAU
+
+Aggregated TEST
+
+Calculate
+
+Difference
+
+Difference %
+
+Sorting
+
+Ranking
+
+Tolerance
+
+Output
+
+Validation Results
+
+This engine should become reusable across all validations.
+
+------------------------------------------------------------
+
+PHASE 8
+
+UI
+
+The UI should guide the user.
+
+One logical page per phase.
+
+1
+
+Connection
+
+↓
+
+2
+
+Discovery
+
+↓
+
+3
+
+Configuration
+
+↓
+
+4
+
+Validation of Configuration
+
+↓
+
+5
 
 Processing
 
+↓
+
+6
+
 Validation
 
-Find
+↓
 
-Repeated parsing
+7
 
-Repeated preview generation
+Reports
 
-Repeated aggregation
+Avoid hidden functionality.
 
-Repeated detection
-
-Repeated folder scanning
-
-Repeated file reading
-
-If repeated work exists
-
-remove it
-
-without changing architecture.
+Avoid jumping between unrelated pages.
 
 ------------------------------------------------------------
 
-# TASK 9
+PHASE 9
 
-Playwright Expansion
+Memory
 
-Extend Playwright suite.
+During discovery
+
+Only sample records.
+
+During processing
+
+Streaming.
+
+Release temporary DataFrames.
+
+Never duplicate large DataFrames.
+
+Never reread datasets unnecessarily.
+
+Continue displaying runtime memory metrics.
+
+------------------------------------------------------------
+
+PHASE 10
+
+Playwright
+
+Update E2E tests.
 
 Verify
 
-Detection
+Connection
 
-Preview
+Discovery
 
-Column Mapping
+Configuration Builder
+
+Configuration Validation
+
+Streaming Processing
 
 Validation
 
 Reports
 
-Timing metrics
-
-Friendly errors
-
-Processing spinner
-
-Column auto mapping
-
-Regression cases
-
-Capture screenshots after every phase.
-
-Generate HTML report.
+Regression
 
 ------------------------------------------------------------
 
-# TASK 10
+FUTURE
 
-Final Engineering Review
+Do NOT implement now.
 
-Produce
+Only prepare architecture.
 
-Engineering Review.md
+Future features
 
-Include
+Reusable Data Source Profiles
 
-Architecture score
+Configuration Repository
 
-Maintainability
+Profile Versioning
 
-Performance
+Cloud Data Sources
 
-Memory usage
-
-UI responsiveness
-
-Parser quality
-
-Validation quality
-
-Test coverage
-
-Technical debt
-
-Immediate improvements
-
-Future roadmap
-
-Multiline readiness
+Enterprise Authentication
 
 ------------------------------------------------------------
 
-# Deliverables
+IMPORTANT
 
-Updated application
+Reuse existing modules.
 
-Passing pytest suite
+Move functionality only if necessary.
 
-Passing Playwright suite
+Do not duplicate code.
 
-Runtime issues resolved
+Do not rewrite working components.
 
-Engineering review
+Integrate them into the new workflow.
 
-Updated HTML report
+If existing modules already solve a problem
 
-Regression report
-
-Execution summary
+reuse them.
 
 ------------------------------------------------------------
 
-# DO NOT
+DELIVERABLES
 
-Do not redesign architecture.
+Updated Workflow
 
-Do not implement multiline yet.
+Integrated Connection Manager
 
-Do not refactor parser.
+Streaming Discovery Engine
 
-Do not change validation calculations.
+Progressive Configuration Builder
 
-Do not optimize unrelated code.
+Configuration Validator
 
-Do not introduce breaking changes.
+Streaming Processing
+
+Separated Aggregation Engine
+
+Separated Calculation Engine
+
+Updated UI
+
+Updated Playwright
+
+Updated Documentation
+
+Architecture Diagram
+
+Migration Notes
+
+Memory Report
 
 ------------------------------------------------------------
 
-# Success Criteria
+SUCCESS CRITERIA
 
-The application should feel production-ready.
+The application should evolve from
 
-Users should be able to complete both Onboarding and Existing workflows without crashes, confusion or unnecessary waiting.
+Data Validation Tool
 
-Only after this sprint is complete should multiline record handling begin.
+into
+
+Streaming Configuration Driven Data Onboarding Platform
+
+where
+
+Data Source
+
+↓
+
+Discovery
+
+↓
+
+Configuration
+
+↓
+
+Streaming Processing
+
+↓
+
+Validation
+
+↓
+
+Reports
+
+is the complete user journey.
+
+Every module should have a single responsibility.
+
+The parser should become just one component of the workflow rather than controlling the workflow itself.
+Do this by seperatng tasks into milestone and finish it one by one
+

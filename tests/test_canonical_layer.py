@@ -1,4 +1,6 @@
 """Tests for the canonical data layer (normalizer)."""
+import csv
+import os
 import polars as pl
 from dav_tool._normalizer import (
     apply_column_names,
@@ -9,7 +11,8 @@ from dav_tool._normalizer import (
     upc_normalize_exprs,
     normalize_upc_chunk,
 )
-from dav_tool._aggregators import stream_store_aggregate
+from dav_tool._aggregators import stream_store_aggregate, stream_item_aggregate, stream_upc_summary
+from dav_tool._parsers import flatten_multiline_fixed_width, preview_flattened_multiline_fixed
 
 
 def test_apply_column_names():
@@ -134,3 +137,300 @@ def test_normalize_empty_chunk():
     assert result.is_empty()
     assert "STORE_NUMBER" in result.columns
     assert "Units" in result.columns
+
+
+def test_multiline_canonical_equivalence_delimited(tmp_path):
+    data = [
+        ("S001", "100001", "Widget A", "10", "99.90"),
+        ("S001", "100002", "Gadget B", "5", "49.95"),
+        ("S002", "100001", "Widget A", "8", "79.92"),
+        ("S003", "100003", "Doohickey", "20", "199.80"),
+    ]
+    csv_path = os.path.join(tmp_path, "single.csv")
+    with open(csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Store", "UPC", "Description", "Units", "Price"])
+        for row in data:
+            w.writerow(row)
+
+    ml_path = os.path.join(tmp_path, "multiline.txt")
+    with open(ml_path, "w") as f:
+        for store, upc, desc, units, price in data:
+            f.write(f"H|{store}|2024-01-15\n")
+            f.write(f"D|{store}|{upc}|{desc}|{units}|{price}\n")
+
+    ml_cols = ["Store", "UPC", "Description", "Units", "Price"]
+    single_store = stream_store_aggregate(
+        [csv_path], "delimited", "Store", "Units", "Price", delimiter=","
+    )
+    ml_store = stream_store_aggregate(
+        [ml_path], "multiline", "Store", "Units", "Price",
+        multiline_record_types=["D"], multiline_delimiter="|",
+        column_names=ml_cols,
+    )
+    assert single_store.shape == ml_store.shape, "Store agg shape mismatch"
+    assert single_store.sort("STORE_NUMBER").to_dicts() == ml_store.sort("STORE_NUMBER").to_dicts(), (
+        f"Store agg mismatch:\n{single_store.sort('STORE_NUMBER')}\n{ml_store.sort('STORE_NUMBER')}"
+    )
+
+    single_item = stream_item_aggregate(
+        [csv_path], "delimited", "UPC", "Description", "Units", "Price", delimiter=","
+    )
+    ml_item = stream_item_aggregate(
+        [ml_path], "multiline", "UPC", "Description", "Units", "Price",
+        multiline_record_types=["D"], multiline_delimiter="|",
+        column_names=ml_cols,
+    )
+    assert single_item.shape == ml_item.shape, "Item agg shape mismatch"
+    assert single_item.sort("UPC_CODE").to_dicts() == ml_item.sort("UPC_CODE").to_dicts(), (
+        f"Item agg mismatch:\n{single_item.sort('UPC_CODE')}\n{ml_item.sort('UPC_CODE')}"
+    )
+
+    single_upc = stream_upc_summary(
+        [csv_path], "delimited", "UPC", "Units", "Price", delimiter=","
+    )
+    ml_upc = stream_upc_summary(
+        [ml_path], "multiline", "UPC", "Units", "Price",
+        multiline_record_types=["D"], multiline_delimiter="|",
+        column_names=ml_cols,
+    )
+    assert single_upc.shape == ml_upc.shape, "UPC summary shape mismatch"
+    assert single_upc.sort("UPC").to_dicts() == ml_upc.sort("UPC").to_dicts(), (
+        f"UPC summary mismatch:\n{single_upc.sort('UPC')}\n{ml_upc.sort('UPC')}"
+    )
+
+
+def test_flatten_multiline_fixed_width_backward_compat(tmp_path):
+    """No trailer params = old behavior preserved (chunk-based flush)."""
+    f = tmp_path / "test.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "DTL002Item B\n"
+        "HDR002Store 2\n"
+        "DTL003Item C\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10
+    ))
+    assert len(chunks) == 1, "No trailer = single chunk expected"
+    df = chunks[0]
+    assert len(df) == 3, "3 detail rows expected"
+    assert "store" in df.columns
+    assert "item" in df.columns
+
+
+def test_flatten_multiline_fixed_width_with_trailer(tmp_path):
+    """TRL groups HDR+DTLs into transaction, TRL fields attach to DTL rows."""
+    f = tmp_path / "test.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "DTL002Item B\n"
+        "TRL001   100\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 9, "end": 12, "type": "numeric"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    ))
+    assert len(chunks) == 1, "One TRL = one flush"
+    df = chunks[0]
+    assert len(df) == 2, "2 detail rows expected"
+    assert "store" in df.columns
+    assert "item" in df.columns
+    assert "total" in df.columns
+    assert df["total"].to_list() == ["100", "100"]
+
+
+def test_flatten_multiline_fixed_width_trailer_chunk_size_ignored(tmp_path):
+    """With trailer active, chunk_size is ignored — TRL controls flush."""
+    f = tmp_path / "test.txt"
+    lines = []
+    for i in range(5):
+        lines.append(f"HDR00{i}  Store{i}\n")
+        lines.append(f"DTL00{i}  Item{i}\n")
+        lines.append(f"TRL00{i}  {i*10:>3}\n")
+    f.write_text("".join(lines))
+    hdr_layout = [{"field": "store", "start": 8, "end": 16, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 8, "end": 16, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 8, "end": 12, "type": "numeric"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=1,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    ))
+    assert len(chunks) == 5, "5 TRL = 5 flushes, ignoring chunk_size=1"
+    for i, chunk in enumerate(chunks):
+        assert len(chunk) == 1, f"Chunk {i}: 1 DTL expected"
+        assert chunk["total"].to_list() == [str(i * 10)]
+
+
+def test_flatten_multiline_fixed_width_trailer_no_trl_at_end(tmp_path):
+    """HDR without trailing TRL at EOF yields remaining DTLs."""
+    f = tmp_path / "test.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "TRL001   100\n"
+        "HDR002Store 2\n"
+        "DTL002Item B\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 9, "end": 12, "type": "numeric"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    ))
+    assert len(chunks) == 2
+    assert len(chunks[0]) == 1
+    assert "store" in chunks[0].columns
+    assert "total" in chunks[0].columns
+    assert chunks[0]["store"].to_list() == ["Store 1"]
+    assert chunks[0]["total"].to_list() == ["100"]
+    assert len(chunks[1]) == 1
+    assert "store" in chunks[1].columns
+    assert "total" not in chunks[1].columns
+
+
+def test_flatten_multiline_fixed_width_multiple_transactions(tmp_path):
+    """Multiple HDR-DTLs-TRL groups all produce separate transactions."""
+    f = tmp_path / "multitxn.txt"
+    f.write_text(
+        "HDR001Store A\n"
+        "DTL001Item 1\n"
+        "DTL002Item 2\n"
+        "TRL001 1000\n"
+        "HDR002Store B\n"
+        "DTL003Item 3\n"
+        "TRL002 2000\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 13, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 7, "end": 11, "type": "numeric"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    ))
+    assert len(chunks) == 2
+    assert len(chunks[0]) == 2
+    assert chunks[0]["store"].to_list() == ["Store A", "Store A"]
+    assert chunks[0]["total"].to_list() == ["1000", "1000"]
+    assert len(chunks[1]) == 1
+    assert chunks[1]["store"].to_list() == ["Store B"]
+    assert chunks[1]["total"].to_list() == ["2000"]
+
+
+def test_preview_flattened_multiline_fixed_with_trailer(tmp_path):
+    """Preview function correctly passes trailer params through."""
+    f = tmp_path / "preview.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "DTL002Item B\n"
+        "TRL001   100\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    trl_layout = [{"field": "total", "start": 9, "end": 12, "type": "numeric"}]
+    result = preview_flattened_multiline_fixed(
+        [str(f)], "HDR", hdr_layout, dtl_layout, n_rows=5,
+        trailer_prefix="TRL", trailer_layout=trl_layout,
+    )
+    assert len(result) == 2
+    assert "total" in result.columns
+    assert result["total"].to_list() == ["100", "100"]
+
+
+def test_flatten_multiline_fixed_width_trailer_no_trailer_layout(tmp_path):
+    """TRL with prefix but no layout still flushes; no extra columns."""
+    f = tmp_path / "test.txt"
+    f.write_text(
+        "HDR001Store 1\n"
+        "DTL001Item A\n"
+        "TRL001   100\n"
+    )
+    hdr_layout = [{"field": "store", "start": 6, "end": 13, "type": "text"}]
+    dtl_layout = [{"field": "item", "start": 6, "end": 12, "type": "text"}]
+    chunks = list(flatten_multiline_fixed_width(
+        [str(f)], "HDR", hdr_layout, dtl_layout, chunk_size=10,
+        trailer_prefix="TRL",
+    ))
+    assert len(chunks) == 1
+    df = chunks[0]
+    assert len(df) == 1
+    assert df["store"].to_list() == ["Store 1"]
+    assert "total" not in df.columns
+
+
+def test_store_aggregate_hdr_fixed_uses_detail_layout(tmp_path):
+    """Regression: HDR fixed-width must parse the detail layout.
+
+    The UI passes the detail layout separately (``detail_layout=``) and
+    ``layout=None`` for HDR files. Previously the detail layout was never
+    forwarded, so detail rows were parsed against an empty layout and the
+    store/item aggregation silently produced empty/wrong results.
+    """
+    def hdr_line(store, seq, date):
+        return f"HDR{seq:02d}{store:<4}   {date}\n"
+    def dtl_line(upc, desc, units, price):
+        return f"{upc:<12}{desc:<21}{units:>2}{price:>8}     \n"
+    def trl_line(total_units, total_price):
+        return f"TRL{total_units:>6}{total_price:>9}\n"
+    f = tmp_path / "hdr.txt"
+    f.write_text(
+        hdr_line("S001", 1, "2024-01-15")
+        + dtl_line("100001", "Widget A", "10", "99.90")
+        + dtl_line("100002", "Gadget B", "5", "49.95")
+        + trl_line("15", "149.85")
+    )
+    hdr_layout = [{"field": "Store", "start": 5, "end": 9, "type": "text"}]
+    dtl_layout = [
+        {"field": "UPC", "start": 0, "end": 12, "type": "text"},
+        {"field": "Description", "start": 12, "end": 33, "type": "text"},
+        {"field": "Units", "start": 33, "end": 35, "type": "numeric"},
+        {"field": "Price", "start": 35, "end": 43, "type": "numeric"},
+    ]
+    result = stream_store_aggregate(
+        [str(f)], "multiline", "Store", "Units", "Price",
+        header_prefix="HDR", header_layout=hdr_layout,
+        detail_layout=dtl_layout,
+        trailer_prefix="TRL",
+        column_names=["Store", "UPC", "Description", "Units", "Price"],
+    )
+    assert not result.is_empty(), "HDR detail layout was not applied"
+    assert result["STORE_NUMBER"].to_list() == ["S001"]
+    # Detail rows carry Units/Price; store agg sums them: 10 + 5 = 15.
+    assert result["Units"].to_list() == [15.0]
+
+
+def test_store_aggregate_hdr_fixed_without_detail_layout_raises(tmp_path):
+    """A misconfigured HDR file (no detail layout) must surface an error.
+
+    Without a detail layout, HDR detail rows cannot be parsed, so the
+    required ``Units``/``Price`` columns are absent. The aggregation must
+    raise rather than silently produce wrong numbers.
+    """
+    import pytest
+    def hdr_line(store, seq, date):
+        return f"HDR{seq:02d}{store:<4}   {date}\n"
+    def dtl_line(upc, desc, units, price):
+        return f"{upc:<12}{desc:<21}{units:>2}{price:>8}     \n"
+    f = tmp_path / "hdr.txt"
+    f.write_text(
+        hdr_line("S001", 1, "2024-01-15")
+        + dtl_line("100001", "Widget A", "10", "99.90")
+        + "TRL              1514985\n"
+    )
+    hdr_layout = [{"field": "Store", "start": 5, "end": 9, "type": "text"}]
+    with pytest.raises(Exception):
+        stream_store_aggregate(
+            [str(f)], "multiline", "Store", "Units", "Price",
+            header_prefix="HDR", header_layout=hdr_layout,
+            detail_layout=None,
+            column_names=["Store", "UPC", "Description", "Units", "Price"],
+        )
