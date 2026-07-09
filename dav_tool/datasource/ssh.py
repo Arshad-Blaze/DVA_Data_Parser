@@ -152,11 +152,11 @@ class SSHDataSource(IDataSource):
     def read_sample(self, path: str, n: int = 100) -> str:
         rpath = self._resolve(path)
         try:
-            with self._sftp.open(rpath, "r") as f:
+            with self._sftp.open(rpath, "rb") as f:
                 lines = []
                 for _ in range(n):
                     try:
-                        lines.append(next(f))
+                        lines.append(next(f).decode("utf-8", errors="replace"))
                     except StopIteration:
                         break
                 return "".join(lines)
