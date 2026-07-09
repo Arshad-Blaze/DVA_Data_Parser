@@ -31,7 +31,8 @@ def _cache_key(paths, file_type, delimiter, record_type) -> str:
 
 def cached_get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
                              record_type=None, header_prefix=None, header_layout=None,
-                             trailer_prefix=None, trailer_layout=None):
+                             trailer_prefix=None, trailer_layout=None,
+                             source=None):
     """get_column_names with a session-state cache to avoid re-reading on reruns."""
     if _COLUMN_CACHE_KEY not in st.session_state:
         st.session_state[_COLUMN_CACHE_KEY] = {}
@@ -41,7 +42,8 @@ def cached_get_column_names(paths, file_type, delimiter=",", layout=None, start_
         return cache[key]
     cols = get_column_names(paths, file_type, delimiter, layout, start_line,
                             record_type, header_prefix, header_layout,
-                            trailer_prefix, trailer_layout)
+                            trailer_prefix, trailer_layout,
+                            source=source)
     cache[key] = cols
     return cols
 
@@ -243,15 +245,16 @@ def load_storelist(path, delimiter, source=None):
 
 def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
                      record_type=None, header_prefix=None, header_layout=None,
-                     trailer_prefix=None, trailer_layout=None):
+                     trailer_prefix=None, trailer_layout=None,
+                     source=None):
     if not paths:
         return []
     try:
         if file_type == "delimited":
-            df = safe_read_csv(paths[0], separator=delimiter, n_rows=5)
+            df = safe_read_csv(paths[0], separator=delimiter, n_rows=5, source=source)
             return df.columns
         elif file_type == "fixed" and layout:
-            chunks = list(parse_fixed_width_chunks(paths[:1], layout, start_line, record_type, chunk_size=5))
+            chunks = list(parse_fixed_width_chunks(paths[:1], layout, start_line, record_type, chunk_size=5, source=source))
             if chunks:
                 return chunks[0].columns
         elif file_type == "multiline":
@@ -259,10 +262,11 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
                 flat = preview_flattened_multiline_fixed(
                     paths, header_prefix, header_layout, layout or [], n_rows=5,
                     trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
+                    source=source,
                 )
             else:
                 rt_list = record_type.split(",") if record_type else ["H", "D"]
-                flat = preview_flattened_multiline(paths, rt_list, delimiter, n_rows=5)
+                flat = preview_flattened_multiline(paths, rt_list, delimiter, n_rows=5, source=source)
             if not flat.is_empty():
                 return flat.columns
     except Exception as e:

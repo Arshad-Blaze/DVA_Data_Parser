@@ -150,6 +150,7 @@ def _phase1_discovery(ctx):
                         ctx.detail_layout, n_rows=10,
                         trailer_prefix=ctx.trailer_prefix,
                         trailer_layout=ctx.trailer_layout,
+                        source=_onb_source,
                     )
                     if not flat.is_empty():
                         st.dataframe(flat.to_pandas().head(10))
@@ -157,6 +158,7 @@ def _phase1_discovery(ctx):
                     st.subheader("Flattened Preview (from config)")
                     flat = preview_flattened_multiline(
                         file_paths, ctx.ml_record_types, ctx.ml_delimiter, n_rows=10,
+                        source=_onb_source,
                     )
                     if not flat.is_empty():
                         st.dataframe(flat.to_pandas().head(10))
@@ -174,10 +176,12 @@ def _phase1_discovery(ctx):
                         header_layout=ctx.header_layout,
                         trailer_prefix=ctx.trailer_prefix,
                         trailer_layout=ctx.trailer_layout,
+                        source=_onb_source,
                     )
                     st.subheader("Data Preview")
                     df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
-                                              n_rows=10, start_line=start_line, record_type=record_type)
+                                              n_rows=10, start_line=start_line, record_type=record_type,
+                                              source=_onb_source)
                     if not df_preview.is_empty():
                         st.dataframe(df_preview.to_pandas().head(10))
         else:
@@ -212,7 +216,8 @@ def _phase1_discovery(ctx):
         if file_type and file_type != "multiline" and file_paths and not getattr(ctx, '_config_applied', False):
             st.subheader("Data Preview")
             df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
-                                      n_rows=10, start_line=start_line, record_type=record_type)
+                                      n_rows=10, start_line=start_line, record_type=record_type,
+                                      source=_onb_source)
             if not df_preview.is_empty():
                 st.dataframe(df_preview.to_pandas().head(10))
 
@@ -227,7 +232,7 @@ def _phase1_discovery(ctx):
                     cols = []
             elif file_type and file_paths:
                 cols = get_column_names(file_paths, file_type, prod_delim or ",", layout_list,
-                                         start_line, record_type)
+                                         start_line, record_type, source=_onb_source)
 
     if cols:
         log_phase(f"Schema Generated — {len(cols)} columns")
@@ -474,6 +479,8 @@ def _phase5_validation(ctx):
     rt = ctx.record_type
     cols = ctx.columns
 
+    _onb_source = get_active_source()
+
     prod_store_col = ctx.store_col
     prod_upc_col = ctx.upc_col
     prod_desc_col = ctx.desc_col
@@ -544,6 +551,7 @@ def _phase5_validation(ctx):
                 header_layout=ctx.header_layout,
                 trailer_prefix=ctx.trailer_prefix,
                 trailer_layout=ctx.trailer_layout,
+                source=_onb_source,
             )
 
     if ctx.done:
@@ -581,7 +589,7 @@ def _delimited_ml_flow(file_paths, source=None):
     ctx = st.session_state.onb_ctx
 
     st.subheader("Raw Preview (with record-type prefixes)")
-    raw_preview = preview_raw(file_paths, "multiline", n_rows=10)
+    raw_preview = preview_raw(file_paths, "multiline", n_rows=10, source=source)
     if not raw_preview.is_empty():
         st.dataframe(raw_preview.to_pandas())
 
@@ -605,7 +613,7 @@ def _delimited_ml_flow(file_paths, source=None):
             st.rerun()
 
     if ctx.ml_flattened:
-        _show_ml_preview_and_schema(file_paths)
+        _show_ml_preview_and_schema(file_paths, source=source)
 
 
 def _hdr_fixed_flow(file_paths, hdr_prefixes, source=None):
@@ -614,7 +622,7 @@ def _hdr_fixed_flow(file_paths, hdr_prefixes, source=None):
     st.warning(f"HDR fixed-width file detected (prefix: {prefix})")
 
     st.subheader("Raw Preview")
-    raw_preview = preview_raw(file_paths, "multiline", n_rows=10)
+    raw_preview = preview_raw(file_paths, "multiline", n_rows=10, source=source)
     if not raw_preview.is_empty():
         st.dataframe(raw_preview.to_pandas())
 
@@ -658,16 +666,16 @@ def _hdr_fixed_flow(file_paths, hdr_prefixes, source=None):
             st.rerun()
 
     if ctx.ml_flattened:
-        _show_hdr_fixed_preview_and_schema(file_paths, prefix)
+        _show_hdr_fixed_preview_and_schema(file_paths, prefix, source=source)
 
 
-def _show_ml_preview_and_schema(file_paths):
+def _show_ml_preview_and_schema(file_paths, source=None):
     ctx = st.session_state.onb_ctx
 
     st.subheader("Flattened Preview")
     rt_list = ctx.ml_record_types
     flat_preview = preview_flattened_multiline(
-        file_paths, rt_list, ctx.ml_delimiter, n_rows=10
+        file_paths, rt_list, ctx.ml_delimiter, n_rows=10, source=source,
     )
     if not flat_preview.is_empty():
         st.dataframe(flat_preview.to_pandas())
@@ -684,7 +692,7 @@ def _show_ml_preview_and_schema(file_paths):
         st.rerun()
 
 
-def _show_hdr_fixed_preview_and_schema(file_paths, prefix):
+def _show_hdr_fixed_preview_and_schema(file_paths, prefix, source=None):
     ctx = st.session_state.onb_ctx
 
     st.subheader("Flattened Preview")
@@ -693,6 +701,7 @@ def _show_hdr_fixed_preview_and_schema(file_paths, prefix):
     flat_preview = preview_flattened_multiline_fixed(
         file_paths, prefix, hdr_header_layout, hdr_detail_layout, n_rows=10,
         trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
+        source=source,
     )
     if not flat_preview.is_empty():
         st.dataframe(flat_preview.to_pandas())
@@ -717,7 +726,10 @@ def _run_validation(
     prod_store_col, prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
     header_prefix=None, header_layout=None,
     trailer_prefix=None, trailer_layout=None,
+    source=None,
 ):
+    if source is None:
+        source = get_active_source()
     ctx = st.session_state.onb_ctx
     log_phase("Validation Started")
 
@@ -774,6 +786,7 @@ def _run_validation(
                 trailer_layout=trailer_layout,
                 precomputed_store_agg=ctx.store_agg,
                 precomputed_upc_summary=ctx.item_agg,
+                source=source,
             )
         ctx.file_review = fr
         log_phase("Reports Generated")

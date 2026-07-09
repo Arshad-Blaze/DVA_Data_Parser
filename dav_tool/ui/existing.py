@@ -273,6 +273,7 @@ def _phase1_discovery(ctx):
             st.session_state.get("fw_start_test", 0),
             st.session_state.get("fw_rec_prod", ""),
             st.session_state.get("fw_rec_test", ""),
+            source=_ex_source,
         )
 
     both_detected = bool(ctx.prod.file_type and ctx.test.file_type)
@@ -320,6 +321,7 @@ def _phase2_configuration(ctx):
         prod_cols = cached_get_column_names(
             ctx.prod.file_paths, ctx.prod.file_type,
             ctx.prod.delimiter or ",", ctx.prod.layout,
+            source=_ex_source,
         )
         prod_done = progressive_config_wizard(
             prod_cfg, detected_columns=prod_cols,
@@ -359,6 +361,7 @@ def _phase2_configuration(ctx):
         test_cols = cached_get_column_names(
             ctx.test.file_paths, ctx.test.file_type,
             ctx.test.delimiter or ",", ctx.test.layout,
+            source=_ex_source,
         )
         test_done = progressive_config_wizard(
             test_cfg, detected_columns=test_cols,
@@ -418,6 +421,7 @@ def _phase4_processing(ctx):
         return
 
     st.markdown("### Step 5: Processing")
+    _ex_source = get_active_source()
 
     prod_paths = ctx.prod.file_paths
     test_paths = ctx.test.file_paths
@@ -473,12 +477,14 @@ def _phase4_processing(ctx):
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
         trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+        source=_ex_source,
     )
     test_cols = cached_get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
         trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+        source=_ex_source,
     )
 
     st.subheader("Column Mapping")
@@ -688,6 +694,7 @@ def _phase5_validation(ctx):
         return
 
     st.markdown("### Step 6: Validation")
+    _ex_source = get_active_source()
 
     prod_paths = ctx.prod.file_paths
     test_paths = ctx.test.file_paths
@@ -736,12 +743,14 @@ def _phase5_validation(ctx):
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
         trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+        source=_ex_source,
     )
     test_cols = cached_get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
         trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+        source=_ex_source,
     )
 
     prod_store_col = ctx.prod.store_col
@@ -918,7 +927,7 @@ def _multiline_section(prod_paths, test_paths, source=None):
             if getattr(ctx.prod, '_config_applied', False) and ctx.prod.ml_flattened:
                 st.success("Config loaded (flattened)")
             else:
-                raw_p = preview_raw(prod_paths, "multiline", n_rows=5)
+                raw_p = preview_raw(prod_paths, "multiline", n_rows=5, source=source)
                 if not raw_p.is_empty():
                     st.dataframe(raw_p.to_pandas(), height=150)
                 _multiline_side_inputs(prod_paths, ctx.prod, "BAU", "prod", source=source)
@@ -929,7 +938,7 @@ def _multiline_section(prod_paths, test_paths, source=None):
             if getattr(ctx.test, '_config_applied', False) and ctx.test.ml_flattened:
                 st.success("Config loaded (flattened)")
             else:
-                raw_t = preview_raw(test_paths, "multiline", n_rows=5)
+                raw_t = preview_raw(test_paths, "multiline", n_rows=5, source=source)
                 if not raw_t.is_empty():
                     st.dataframe(raw_t.to_pandas(), height=150)
                 _multiline_side_inputs(test_paths, ctx.test, "Test", "test", source=source)
@@ -950,7 +959,7 @@ def _multiline_section(prod_paths, test_paths, source=None):
         st.rerun()
 
     if ctx.prod.ml_flattened or ctx.test.ml_flattened:
-        _flattened_preview_and_schema(prod_paths, test_paths, ml_delim)
+        _flattened_preview_and_schema(prod_paths, test_paths, ml_delim, source=source)
 
     return ml_delim
 
@@ -992,7 +1001,7 @@ def _store_ml_config(side_ctx: ProcessingContext, key_prefix: str = ""):
     side_ctx.ml_flattened = True
 
 
-def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
+def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim, source=None):
     ctx = st.session_state.ex_ctx
     mc1, mc2 = st.columns(2)
     with mc1:
@@ -1007,9 +1016,10 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     n_rows=10,
                     trailer_prefix=ctx.prod.trailer_prefix,
                     trailer_layout=ctx.prod.trailer_layout,
+                    source=source,
                 )
             else:
-                fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=10)
+                fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=10, source=source)
             if not fp.is_empty():
                 st.dataframe(fp.to_pandas())
     with mc2:
@@ -1024,9 +1034,10 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     n_rows=10,
                     trailer_prefix=ctx.test.trailer_prefix,
                     trailer_layout=ctx.test.trailer_layout,
+                    source=source,
                 )
             else:
-                fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=10)
+                fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=10, source=source)
             if not fp.is_empty():
                 st.dataframe(fp.to_pandas())
 
@@ -1045,9 +1056,10 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     n_rows=5,
                     trailer_prefix=ctx.prod.trailer_prefix,
                     trailer_layout=ctx.prod.trailer_layout,
+                    source=source,
                 )
             else:
-                fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=5)
+                fp = preview_flattened_multiline(prod_paths, ctx.prod.ml_record_types or [], ml_delim, n_rows=5, source=source)
             if not fp.is_empty():
                 st.markdown("**BAU Column Names**")
                 for i, col in enumerate(fp.columns):
@@ -1065,9 +1077,10 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
                     n_rows=5,
                     trailer_prefix=ctx.test.trailer_prefix,
                     trailer_layout=ctx.test.trailer_layout,
+                    source=source,
                 )
             else:
-                fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=5)
+                fp = preview_flattened_multiline(test_paths, ctx.test.ml_record_types or [], ml_delim, n_rows=5, source=source)
             if not fp.is_empty():
                 st.markdown("**Test Column Names**")
                 for i, col in enumerate(fp.columns):
@@ -1086,19 +1099,22 @@ def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim):
 def _show_regular_previews(prod_paths, test_paths, prod_type, test_type,
                            prod_delim, test_delim, prod_layout_list, test_layout_list,
                            prod_start_line, test_start_line,
-                           prod_record_type, test_record_type):
+                           prod_record_type, test_record_type,
+                           source=None):
     if prod_paths and test_paths and prod_type and test_type:
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("BAU Preview")
             pv = preview_raw(prod_paths, prod_type, prod_delim or ",", prod_layout_list,
-                              n_rows=10, start_line=prod_start_line, record_type=prod_record_type)
+                              n_rows=10, start_line=prod_start_line, record_type=prod_record_type,
+                              source=source)
             if not pv.is_empty():
                 st.table(pv.to_pandas().iloc[:10, :10].astype(str))
         with c2:
             st.subheader("Test Preview")
             tv = preview_raw(test_paths, test_type, test_delim or ",", test_layout_list,
-                              n_rows=10, start_line=test_start_line, record_type=test_record_type)
+                              n_rows=10, start_line=test_start_line, record_type=test_record_type,
+                              source=source)
             if not tv.is_empty():
                 st.table(tv.to_pandas().iloc[:10, :10].astype(str))
 
@@ -1216,6 +1232,7 @@ def _execute_validation(
                 hdr_header_prod, hdr_header_test,
                 trailer_prefix_prod, trailer_layout_prod,
                 trailer_prefix_test, trailer_layout_test,
+                source=get_active_source(),
             )
         log_phase("Reports Generated")
 
@@ -1302,6 +1319,7 @@ def _generate_file_reviews(
     hdr_header_prod=None, hdr_header_test=None,
     trailer_prefix_prod=None, trailer_layout_prod=None,
     trailer_prefix_test=None, trailer_layout_test=None,
+    source=None,
 ):
     ctx = st.session_state.ex_ctx
 
@@ -1323,6 +1341,7 @@ def _generate_file_reviews(
                 trailer_layout=trailer_layout_prod,
                 precomputed_store_agg=ctx.prod.store_agg,
                 precomputed_upc_summary=ctx.prod.item_agg,
+                source=source,
             ),
             ex.submit(_run_agg_task, generate_file_review,
                 test_paths, test_type, test_store_col, test_upc_col,
@@ -1340,6 +1359,7 @@ def _generate_file_reviews(
                 trailer_layout=trailer_layout_test,
                 precomputed_store_agg=ctx.test.store_agg,
                 precomputed_upc_summary=ctx.test.item_agg,
+                source=source,
             ),
         ]
         names = ["BAU generate_file_review", "Test generate_file_review"]
