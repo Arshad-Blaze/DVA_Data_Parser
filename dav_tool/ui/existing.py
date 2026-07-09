@@ -130,6 +130,21 @@ def _phase1_discovery(ctx):
         return
 
     _ex_source = get_active_source()
+
+    auto_bau = st.session_state.get("_cm_bau_path")
+    auto_test = st.session_state.get("_cm_test_path")
+    if auto_bau and auto_test and _ex_source is not None:
+        st.info(f"**BAU:** `{auto_bau}`  |  **Test:** `{auto_test}` *(from Connection Manager)*")
+        if st.button("Change Paths"):
+            st.session_state.pop("_cm_bau_path", None)
+            st.session_state.pop("_cm_test_path", None)
+            st.rerun()
+        prod_txt = clean_path(auto_bau)
+        test_txt = clean_path(auto_test)
+    else:
+        prod_txt = ""
+        test_txt = ""
+
     col1, col2 = st.columns(2)
 
     prod_file_paths = []
@@ -137,7 +152,8 @@ def _phase1_discovery(ctx):
 
     with col1:
         st.header("BAU")
-        prod_txt = clean_path(st.text_input("BAU Folder Path", key="ex_bau_folder_path"))
+        if not auto_bau or not auto_test or _ex_source is None:
+            prod_txt = clean_path(st.text_input("BAU Folder Path", key="ex_bau_folder_path"))
         prod_file_paths = get_file_list(prod_txt, source=_ex_source)
 
         # Config load for BAU
@@ -180,7 +196,8 @@ def _phase1_discovery(ctx):
     with col2:
         _ex_source = get_active_source()
         st.header("Test")
-        test_txt = clean_path(st.text_input("Test Folder Path", key="ex_test_folder_path"))
+        if not auto_bau or not auto_test or _ex_source is None:
+            test_txt = clean_path(st.text_input("Test Folder Path", key="ex_test_folder_path"))
         test_file_paths = get_file_list(test_txt, source=_ex_source)
 
         # Config load for Test

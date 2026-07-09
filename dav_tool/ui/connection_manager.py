@@ -19,6 +19,18 @@ _BROWSE_PATH_KEY = "_cm_browse_path"
 _BROWSE_HISTORY_KEY = "_cm_browse_history"
 _SEARCH_KEY = "_cm_search"
 
+_WORKFLOW_KEY = "_cm_workflow"
+_SELECTED_PATH_KEY = "_cm_selected_path"
+_BAU_PATH_KEY = "_cm_bau_path"
+_TEST_PATH_KEY = "_cm_test_path"
+
+_BAU_BROWSE_PATH_KEY = "_cm_bau_browse_path"
+_BAU_BROWSE_HISTORY_KEY = "_cm_bau_browse_history"
+_BAU_SEARCH_KEY = "_cm_bau_search"
+_TEST_BROWSE_PATH_KEY = "_cm_test_browse_path"
+_TEST_BROWSE_HISTORY_KEY = "_cm_test_browse_history"
+_TEST_SEARCH_KEY = "_cm_test_search"
+
 
 def _init_state():
     if _CONN_KEY not in st.session_state:
@@ -31,6 +43,20 @@ def _init_state():
         st.session_state[_BROWSE_HISTORY_KEY] = []
     if _SEARCH_KEY not in st.session_state:
         st.session_state[_SEARCH_KEY] = ""
+    if _WORKFLOW_KEY not in st.session_state:
+        st.session_state[_WORKFLOW_KEY] = "onboarding"
+    if _BAU_BROWSE_PATH_KEY not in st.session_state:
+        st.session_state[_BAU_BROWSE_PATH_KEY] = "/"
+    if _BAU_BROWSE_HISTORY_KEY not in st.session_state:
+        st.session_state[_BAU_BROWSE_HISTORY_KEY] = []
+    if _BAU_SEARCH_KEY not in st.session_state:
+        st.session_state[_BAU_SEARCH_KEY] = ""
+    if _TEST_BROWSE_PATH_KEY not in st.session_state:
+        st.session_state[_TEST_BROWSE_PATH_KEY] = "/"
+    if _TEST_BROWSE_HISTORY_KEY not in st.session_state:
+        st.session_state[_TEST_BROWSE_HISTORY_KEY] = []
+    if _TEST_SEARCH_KEY not in st.session_state:
+        st.session_state[_TEST_SEARCH_KEY] = ""
 
 
 def render_connection_manager():
@@ -58,7 +84,7 @@ def render_connection_manager():
 
         if is_connected():
             _render_connection_info()
-            _render_file_browser()
+            _render_workflow_selector()
 
 
 def _render_local():
@@ -79,6 +105,7 @@ def _render_remote_connect():
 
     if connected and cfg and cfg.type == "ssh":
         if st.button("Disconnect", use_container_width=True):
+            _clear_paths()
             disconnect()
             st.session_state[_CONN_KEY] = False
             st.rerun()
@@ -138,6 +165,11 @@ def _render_remote_connect():
                     logger.error("SSH connection error", exc_info=True)
 
 
+def _clear_paths():
+    for key in [_SELECTED_PATH_KEY, _BAU_PATH_KEY, _TEST_PATH_KEY]:
+        st.session_state.pop(key, None)
+
+
 def _render_connection_info():
     source = get_active_source()
     if source is None:
@@ -165,52 +197,92 @@ def _render_connection_info():
             log_phase("Connection: " + conn_str, session_id)
 
 
-def _render_file_browser():
+def _render_workflow_selector():
+    workflow = st.radio(
+        "Workflow",
+        options=["Onboarding", "Existing Comparison"],
+        index=0 if st.session_state.get(_WORKFLOW_KEY, "onboarding") == "onboarding" else 1,
+        horizontal=True,
+        key="cm_workflow_radio",
+    )
+    new_wf = workflow.lower().replace(" ", "_")
+    old_wf = st.session_state.get(_WORKFLOW_KEY, "onboarding")
+
+    if new_wf != old_wf:
+        if new_wf == "onboarding":
+            st.session_state.pop(_BAU_PATH_KEY, None)
+            st.session_state.pop(_TEST_PATH_KEY, None)
+        else:
+            st.session_state.pop(_SELECTED_PATH_KEY, None)
+
+    st.session_state[_WORKFLOW_KEY] = new_wf
+
+    if new_wf == "onboarding":
+        _render_file_browser(
+            browse_key=_BROWSE_PATH_KEY,
+            history_key=_BROWSE_HISTORY_KEY,
+            search_key=_SEARCH_KEY,
+            selected_key=_SELECTED_PATH_KEY,
+            button_label="Use This Path for Onboarding",
+        )
+    else:
+        _render_paired_file_browsers()
+
+
+def _render_file_browser(
+    browse_key="_cm_browse_path",
+    history_key="_cm_browse_history",
+    search_key="_cm_search",
+    selected_key="_cm_selected_path",
+    button_label="Use This Path",
+    heading=None,
+):
     source = get_active_source()
     if source is None:
         return
 
-    st.markdown("### Remote File Browser")
+    if heading:
+        st.markdown(heading)
 
     select_cols = st.columns([4, 1])
     with select_cols[0]:
         pass
     with select_cols[1]:
-        if st.button("Use This Path", use_container_width=True, type="primary"):
-            st.session_state["_cm_selected_path"] = st.session_state[_BROWSE_PATH_KEY]
+        if st.button(button_label, use_container_width=True, type="primary", key=f"use_{selected_key}"):
+            st.session_state[selected_key] = st.session_state[browse_key]
             st.rerun()
 
     nav_cols = st.columns([1, 1, 4, 1])
     with nav_cols[0]:
-        if st.button("← Back", use_container_width=True):
-            history = st.session_state[_BROWSE_HISTORY_KEY]
+        if st.button("← Back", use_container_width=True, key=f"back_{selected_key}"):
+            history = st.session_state[history_key]
             if history:
-                st.session_state[_BROWSE_PATH_KEY] = history.pop()
+                st.session_state[browse_key] = history.pop()
                 st.rerun()
     with nav_cols[1]:
-        if st.button("↻ Refresh", use_container_width=True):
+        if st.button("↻ Refresh", use_container_width=True, key=f"refresh_{selected_key}"):
             st.rerun()
     with nav_cols[2]:
         st.text_input(
-            "Path", value=st.session_state[_BROWSE_PATH_KEY],
-            key="cm_browse_input",
+            "Path", value=st.session_state[browse_key],
+            key=f"browse_input_{selected_key}",
             label_visibility="collapsed",
-            on_change=_navigate_to_path,
+            on_change=lambda: _navigate_to_path(browse_key, f"browse_input_{selected_key}"),
         )
     with nav_cols[3]:
         st.text_input(
-            "Search", value="", key=_SEARCH_KEY,
+            "Search", value="", key=search_key,
             placeholder="Filter...",
             label_visibility="collapsed",
         )
 
     try:
-        entries = source.list_directory(st.session_state[_BROWSE_PATH_KEY])
+        entries = source.list_directory(st.session_state[browse_key])
     except DataSourceError as e:
         st.error(str(e))
         return
 
-    search = st.session_state.get(_SEARCH_KEY, "").lower()
+    search = st.session_state.get(search_key, "").lower()
     if search:
         entries = [e for e in entries if search in e.name.lower()]
 
@@ -224,19 +296,41 @@ def _render_file_browser():
         label = f"{icon} {entry.name}{size_str}"
 
         if entry.is_dir:
-            if st.button(label, key=f"browse_{entry.path}", use_container_width=True):
-                history = st.session_state[_BROWSE_HISTORY_KEY]
-                history.append(st.session_state[_BROWSE_PATH_KEY])
-                st.session_state[_BROWSE_PATH_KEY] = entry.path
+            if st.button(label, key=f"dir_{selected_key}_{entry.path}", use_container_width=True):
+                history = st.session_state[history_key]
+                history.append(st.session_state[browse_key])
+                st.session_state[browse_key] = entry.path
                 st.rerun()
         else:
             st.markdown(f"{label}")
 
 
-def _navigate_to_path():
-    path = st.session_state.get("cm_browse_input", "").strip()
+def _render_paired_file_browsers():
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**BAU Production Data**")
+        _render_file_browser(
+            browse_key=_BAU_BROWSE_PATH_KEY,
+            history_key=_BAU_BROWSE_HISTORY_KEY,
+            search_key=_BAU_SEARCH_KEY,
+            selected_key=_BAU_PATH_KEY,
+            button_label="Use This Path for BAU",
+        )
+    with c2:
+        st.markdown("**Test/Comparison Data**")
+        _render_file_browser(
+            browse_key=_TEST_BROWSE_PATH_KEY,
+            history_key=_TEST_BROWSE_HISTORY_KEY,
+            search_key=_TEST_SEARCH_KEY,
+            selected_key=_TEST_PATH_KEY,
+            button_label="Use This Path for Test",
+        )
+
+
+def _navigate_to_path(browse_key, input_key):
+    path = st.session_state.get(input_key, "").strip()
     if path:
-        st.session_state[_BROWSE_PATH_KEY] = path
+        st.session_state[browse_key] = path
 
 
 def _fmt_size(size: int) -> str:

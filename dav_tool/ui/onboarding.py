@@ -113,7 +113,17 @@ def _phase1_discovery(ctx):
         return
 
     _onb_source = get_active_source()
-    prod_txt = clean_path(st.text_input("Folder Path", key="onb_folder_path"))
+
+    auto_path = st.session_state.get("_cm_selected_path")
+    if auto_path and _onb_source is not None:
+        st.info(f"**Folder:** `{auto_path}` *(from Connection Manager)*")
+        if st.button("Change"):
+            st.session_state.pop("_cm_selected_path", None)
+            st.rerun()
+        prod_txt = clean_path(auto_path)
+    else:
+        prod_txt = clean_path(st.text_input("Folder Path", key="onb_folder_path"))
+
     file_paths = get_file_list(prod_txt, source=_onb_source)
     file_type = None
     prod_delim = None
