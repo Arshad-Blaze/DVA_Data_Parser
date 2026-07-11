@@ -18,12 +18,14 @@ def _read_sample_lines(
         try:
             raw = source.read_sample(file_path, n=n)
             return [line.rstrip("\n\r") for line in raw.splitlines()]
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to read sample from source for %s: %s", file_path, e)
             return []
     try:
         with open(file_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:
             return [f.readline().rstrip("\n\r") for _ in range(n)]
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to read local sample for %s: %s", file_path, e)
         return []
 
 

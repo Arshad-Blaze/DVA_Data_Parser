@@ -1,483 +1,272 @@
-# DVA Platform Evolution
-# Streaming Configuration Driven Data Onboarding Platform
+# DVA Platform v3 - Workflow Refactoring Sprint
 
-Read the COMPLETE repository before making ANY modifications.
+Read the ENTIRE repository before modifying any code.
 
-Understand the architecture first.
+Read all architecture review documents generated during the audit.
 
-Do NOT immediately begin coding.
+Do NOT ignore the existing implementation.
 
-------------------------------------------------------------
+This is NOT a rewrite.
 
-CURRENT STATE
+This is an evolution of the current architecture.
 
-The repository already contains
+The parser, aggregation engine, validation engine and reporting engine are considered stable and must be reused.
 
-✓ Parser Engine
-
-✓ Canonical Data Layer
-
-✓ Validation Engine
-
-✓ Aggregation Engine
-
-✓ Reporting
-
-✓ Configuration Builder
-
-✓ Connection Manager
-
-✓ Local Data Source
-
-✓ Remote SSH Data Source
-
-✓ Runtime Metrics
-
-✓ Playwright
-
-✓ Regression Framework
-
-✓ Documentation
-
-The project is NOT being restarted.
-
-The project must EVOLVE.
-
-Reuse as much existing implementation as possible.
-
-------------------------------------------------------------
+============================================================
 
 OBJECTIVE
 
-Transform the application into a Streaming Configuration Driven Data Onboarding Platform.
+Transform the current parser-driven application into a workflow-driven platform.
 
-The parser should no longer drive the workflow.
+The workflow should orchestrate every component.
 
-The workflow should drive the parser.
+The parser should become one service inside the workflow.
 
-------------------------------------------------------------
+============================================================
 
-FIRST PRINCIPLE
+CORE PRINCIPLES
 
-The MFT Server is the ONLY Source of Truth.
+1.
 
-The application should not require users to manually move retailer files.
+Do NOT rewrite working code.
 
-Everything should happen directly against the MFT server.
+2.
 
-Local mode remains available for testing only.
+Reuse existing modules whenever possible.
 
-------------------------------------------------------------
+3.
 
-NEW ARCHITECTURE
+Reduce coupling.
 
-Presentation Layer
+4.
 
-↓
+Reduce memory usage.
 
-Workflow Engine
+5.
 
-↓
+Move business logic out of UI.
 
-Data Source Layer
+6.
 
-↓
+Configuration should drive processing.
 
-Discovery Engine
+7.
 
-↓
+Connection Manager becomes the primary entry point.
 
-Configuration Builder
+8.
 
-↓
+Support streaming-first architecture.
 
-Configuration Validator
+============================================================
 
-↓
+CURRENT PROBLEMS TO ADDRESS
 
-Streaming Parser
+Based on the architecture review:
 
-↓
+• UI contains business logic.
 
-Canonical Data Layer
+• onboarding.py and existing.py have become orchestration layers mixed with rendering.
 
-↓
+• Parameter explosion exists throughout aggregation.
 
-Aggregation Engine
+• ValidationConfig is only partially driving processing.
 
-↓
+• Large DataFrames remain alive too long.
 
-Calculation Engine
+• Configuration is not yet the single source of truth.
 
-↓
+• Workflow still revolves around parser instead of configuration.
 
-Reports
+Do NOT attempt to solve everything at once.
 
-------------------------------------------------------------
+============================================================
 
-DO NOT
+GOAL OF THIS SPRINT
 
-Redesign working parser modules.
+The purpose of this sprint is NOT feature development.
 
-Redesign validation.
+The purpose is architectural stabilization.
 
-Redesign aggregation.
-
-Redesign reporting.
-
-Reuse them.
-
-------------------------------------------------------------
-
-PHASE 1
-
-Repository Review
-
-Review the entire repository.
-
-Understand
-
-Parser
-
-Workflow
-
-Configuration Builder
-
-Connection Manager
-
-Validation
-
-Aggregation
-
-Reporting
-
-Playwright
-
-UI
-
-State Management
-
-Documentation
-
-Identify reusable components.
-
-Produce an internal implementation plan.
-
-Do NOT code yet.
-
-------------------------------------------------------------
-
-PHASE 2
-
-Workflow Refactoring
-
-The application should now follow this workflow.
+============================================================
 
 STEP 1
 
-Launch
+Review Current Workflow
 
-↓
-
-Choose Workflow
+Understand both workflows completely.
 
 Onboarding
 
 Existing
 
-↓
+Connection Manager
+
+Configuration Builder
+
+Processing
+
+Validation
+
+Reports
+
+Document how data flows today.
+
+Identify duplicated orchestration.
+
+Do not modify parser logic.
+
+============================================================
 
 STEP 2
 
-Choose Data Source
+Introduce Workflow Layer
 
-Local
+Create a dedicated workflow layer.
 
-Remote (SSH)
+The workflow layer owns
 
-↓
-
-STEP 3
-
-If Remote
-
-Connect
-
-Authenticate
-
-Browse MFT
-
-Select Folder(s)
+Connection
 
 ↓
-
-STEP 4
-
-If Fixed Width
-
-Ask for Layout
-
-Otherwise continue.
-
-↓
-
-STEP 5
 
 Discovery
 
-Read only SAMPLE data.
-
-Never process the complete dataset.
-
-Discovery must inspect only enough logical records to identify
-
-Encoding
-
-Delimiter
-
-Header
-
-Record Type
-
-Multiline
-
-Header Based
-
-Schema
-
-Possible Data Types
-
-Possible Column Names
-
-Display RAW Preview.
-
-Raw Preview must display exactly what exists in source data.
-
-No canonical conversion.
-
-No validation.
-
-No parsing.
-
-------------------------------------------------------------
-
-PHASE 3
-
-Progressive Configuration Builder
-
-Configuration should NOT appear all at once.
-
-It should be built gradually.
-
-Stage A
-
-File Information
-
 ↓
 
-User confirms
+Configuration
 
 ↓
-
-Stage B
-
-Record Information
-
-↓
-
-User confirms
-
-↓
-
-Stage C
-
-Schema
-
-↓
-
-User confirms
-
-↓
-
-Stage D
-
-Business Rules
-
-↓
-
-User confirms
-
-↓
-
-Stage E
-
-Validation Configuration
-
-↓
-
-User confirms
-
-↓
-
-Configuration Complete
-
-At every stage
-
-Auto detect
-
-Suggest
-
-Allow correction
-
-Continue
-
-Configuration grows progressively.
-
-------------------------------------------------------------
-
-PHASE 4
-
-Configuration Structure
-
-Configuration must contain
-
-GENERAL
-
-FILE
-
-SCHEMA
-
-BUSINESS RULES
-
-VALIDATION
-
-OUTPUT
-
-Validation section must define
-
-Enabled
-
-Required Columns
-
-Group By Columns
-
-Aggregation Columns
-
-If omitted
-
-Current default validation logic remains.
-
-Configuration overrides defaults.
-
-------------------------------------------------------------
-
-PHASE 5
 
 Configuration Validation
 
-Before processing begins
+↓
 
-Validate
-
-Required mappings
-
-Aggregation columns
-
-Group By columns
-
-Layouts
-
-Delimiter
-
-Business Rules
-
-Configuration completeness
-
-Only after successful validation
-
-allow processing.
-
-------------------------------------------------------------
-
-PHASE 6
-
-Streaming Processing
-
-This is the most important phase.
-
-DO NOT
-
-Download the dataset.
-
-DO NOT
-
-Create local copies.
-
-DO NOT
-
-Load entire file unnecessarily.
-
-Instead
-
-Open remote stream
+Processing
 
 ↓
 
-Read sequentially
+Validation
 
 ↓
 
-Parse
+Reports
 
-↓
+UI pages should only render workflow state.
 
-Canonical
+UI must no longer orchestrate processing directly.
 
-↓
+============================================================
 
-Aggregation
+STEP 3
 
-↓
+Separate Business Logic From UI
 
-Release memory
+Move
 
-↓
+column normalization
 
-Continue
+implied decimal logic
 
-Implement streaming architecture wherever practical.
+mapping validation
 
-Large datasets should never require local staging.
+configuration transformation
 
-------------------------------------------------------------
+processing preparation
 
-PHASE 7
+into service modules.
 
-Validation Architecture
+UI should only
 
-Separate validation into two independent engines.
+display
 
-ENGINE 1
+collect user input
+
+call workflow services
+
+============================================================
+
+STEP 4
+
+Configuration Driven Processing
+
+Configuration becomes the processing contract.
+
+Everything required for processing must exist inside the configuration.
+
+Parser must not infer information again after configuration has been accepted.
+
+If configuration exists
+
+parser trusts it.
+
+============================================================
+
+STEP 5
+
+Processing Context Cleanup
+
+Review ProcessingContext.
+
+Only retain objects required by the current phase.
+
+Release intermediate DataFrames immediately after use.
+
+Store only
+
+Aggregated Results
+
+Validation Results
+
+Execution Metrics
+
+Reports
+
+Never retain unnecessary intermediate objects.
+
+============================================================
+
+STEP 6
+
+Parameter Refactoring
+
+Replace large parameter lists.
+
+Create
+
+ParserOptions
+
+ConnectionOptions
+
+ProcessingOptions
+
+ValidationOptions
+
+AggregationOptions
+
+These objects become immutable.
+
+Aggregation functions should receive option objects rather than 20+ parameters.
+
+============================================================
+
+STEP 7
+
+Validation Refactoring
+
+Separate validation into two engines.
 
 Aggregation Engine
 
 Input
 
-Group By Columns
+Group By
 
 Aggregation Columns
 
 Output
 
-Aggregated Dataset
-
-Only aggregation.
-
-No calculations.
-
-------------------------------------------------------------
-
-ENGINE 2
+Aggregated Data
 
 Calculation Engine
 
@@ -487,211 +276,201 @@ Aggregated BAU
 
 Aggregated TEST
 
-Calculate
+Output
 
 Difference
 
 Difference %
 
-Sorting
+Tolerance
 
 Ranking
 
-Tolerance
-
-Output
+Sorting
 
 Validation Results
 
-This engine should become reusable across all validations.
+Validation configuration should define
 
-------------------------------------------------------------
+Group By Columns
 
-PHASE 8
+Aggregation Columns
 
-UI
+Enabled
 
-The UI should guide the user.
+Required Columns
 
-One logical page per phase.
+The engine should consume configuration rather than hardcoded logic.
 
-1
+============================================================
+
+STEP 8
+
+Streaming Architecture
+
+The MFT server is the source of truth.
+
+Avoid copying files locally whenever practical.
+
+Use streaming readers.
+
+Process sequentially.
+
+Release memory continuously.
+
+Parser should support IDataSource streams directly.
+
+============================================================
+
+STEP 9
+
+Connection Manager
+
+Connection Manager becomes the first step of every workflow.
+
+Local mode remains supported for development.
+
+Remote mode becomes the preferred production workflow.
+
+Parser must remain completely independent of the connection implementation.
+
+============================================================
+
+STEP 10
+
+Memory Optimization
+
+Review every DataFrame lifecycle.
+
+Remove duplicate DataFrames.
+
+Avoid repeated parsing.
+
+Avoid repeated previews.
+
+Avoid repeated canonical conversion.
+
+Release objects aggressively.
+
+Keep developer diagnostics.
+
+Improve the DataFrame registry instead of removing it.
+
+============================================================
+
+STEP 11
+
+Workflow Navigation
+
+The workflow becomes
 
 Connection
 
 ↓
 
-2
-
 Discovery
 
 ↓
 
-3
-
-Configuration
+Progressive Configuration
 
 ↓
 
-4
-
-Validation of Configuration
+Configuration Validation
 
 ↓
-
-5
 
 Processing
 
 ↓
 
-6
-
 Validation
 
 ↓
 
-7
-
 Reports
 
-Avoid hidden functionality.
+Each phase has a single responsibility.
 
-Avoid jumping between unrelated pages.
+Avoid hidden transitions.
 
-------------------------------------------------------------
+Avoid duplicated processing paths.
 
-PHASE 9
+============================================================
 
-Memory
+STEP 12
 
-During discovery
+Do NOT Implement Future Features
 
-Only sample records.
+Do NOT implement
 
-During processing
+Retailer Profiles
 
-Streaming.
+Cloud Storage
 
-Release temporary DataFrames.
+Authentication
 
-Never duplicate large DataFrames.
+CI/CD
 
-Never reread datasets unnecessarily.
+Deployment
 
-Continue displaying runtime memory metrics.
+RBAC
 
-------------------------------------------------------------
+Monitoring
 
-PHASE 10
+Those belong to later milestones.
 
-Playwright
+============================================================
 
-Update E2E tests.
+EXPECTED DELIVERABLES
 
-Verify
+1.
 
-Connection
+Workflow Layer
 
-Discovery
+2.
 
-Configuration Builder
+Cleaner UI
 
-Configuration Validation
+3.
 
-Streaming Processing
+Configuration-driven processing
 
-Validation
+4.
 
-Reports
+Reduced memory footprint
 
-Regression
+5.
 
-------------------------------------------------------------
+Option objects replacing parameter explosion
 
-FUTURE
+6.
 
-Do NOT implement now.
+Cleaner ProcessingContext lifecycle
 
-Only prepare architecture.
+7.
 
-Future features
+Improved validation architecture
 
-Reusable Data Source Profiles
+8.
 
-Configuration Repository
+Updated architecture documentation
 
-Profile Versioning
-
-Cloud Data Sources
-
-Enterprise Authentication
-
-------------------------------------------------------------
-
-IMPORTANT
-
-Reuse existing modules.
-
-Move functionality only if necessary.
-
-Do not duplicate code.
-
-Do not rewrite working components.
-
-Integrate them into the new workflow.
-
-If existing modules already solve a problem
-
-reuse them.
-
-------------------------------------------------------------
-
-DELIVERABLES
-
-Updated Workflow
-
-Integrated Connection Manager
-
-Streaming Discovery Engine
-
-Progressive Configuration Builder
-
-Configuration Validator
-
-Streaming Processing
-
-Separated Aggregation Engine
-
-Separated Calculation Engine
-
-Updated UI
-
-Updated Playwright
-
-Updated Documentation
-
-Architecture Diagram
-
-Migration Notes
-
-Memory Report
-
-------------------------------------------------------------
+============================================================
 
 SUCCESS CRITERIA
 
-The application should evolve from
+The application should no longer feel like
 
-Data Validation Tool
+Parser
 
-into
+↓
 
-Streaming Configuration Driven Data Onboarding Platform
+Validation
 
-where
+Instead it should feel like
 
-Data Source
+Connection
 
 ↓
 
@@ -703,7 +482,7 @@ Configuration
 
 ↓
 
-Streaming Processing
+Processing
 
 ↓
 
@@ -713,10 +492,16 @@ Validation
 
 Reports
 
-is the complete user journey.
+Every module should have one responsibility.
 
-Every module should have a single responsibility.
+The workflow should orchestrate the platform.
 
-The parser should become just one component of the workflow rather than controlling the workflow itself.
-Do this by seperatng tasks into milestone and finish it one by one
+The parser should simply execute the processing contract defined by the configuration.
 
+Maintain backward compatibility wherever possible.
+
+Work incrementally.
+
+Run existing Playwright tests and regression tests after each significant change.
+
+Commit changes in logical, reviewable increments rather than one massive refactor.

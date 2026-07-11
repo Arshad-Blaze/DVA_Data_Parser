@@ -120,6 +120,51 @@ def aggregate(
     raise ValueError(f"Unknown aggregation level: {level}")
 
 
+def aggregate_with_options(
+    file_paths: Union[str, List[str]],
+    parse_opts,
+    mapping,
+    level: str,
+    source: Optional[IDataSource] = None,
+) -> pl.DataFrame:
+    """Aggregate using option objects — the new entry point.
+
+    This replaces the 20+ parameter functions with clean option objects.
+    The parser trusts the options and does not re-infer.
+
+    Args:
+        file_paths: Paths to data files.
+        parse_opts: ParseOptions with file parsing configuration.
+        mapping: ColumnMapping with column assignments.
+        level: Aggregation level ("store", "item", or "upc").
+        source: Optional IDataSource for remote files.
+    """
+    return aggregate(
+        file_paths, parse_opts.file_type, level,
+        store_col=mapping.store,
+        upc_col=mapping.upc,
+        desc_col=mapping.description,
+        units_col=mapping.units,
+        price_col=mapping.price,
+        delimiter=parse_opts.delimiter,
+        layout=parse_opts.layout,
+        price_type=mapping.price_type,
+        implied_dollars=mapping.implied_dollars,
+        implied_units=mapping.implied_units,
+        start_line=parse_opts.start_line,
+        record_type=parse_opts.record_type,
+        multiline_record_types=parse_opts.multiline_record_types,
+        multiline_delimiter=parse_opts.multiline_delimiter,
+        column_names=parse_opts.column_names,
+        header_prefix=parse_opts.header_prefix,
+        header_layout=parse_opts.header_layout,
+        detail_layout=parse_opts.detail_layout,
+        trailer_prefix=parse_opts.trailer_prefix,
+        trailer_layout=parse_opts.trailer_layout,
+        source=source,
+    )
+
+
 def aggregate_with_config(
     file_paths: Union[str, List[str]],
     file_type: str,

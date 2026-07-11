@@ -11,7 +11,6 @@ from dav_tool._parsers import (
     preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
     load_layout,
 )
-from dav_tool._aggregators import stream_store_aggregate, stream_item_aggregate
 from dav_tool._reports import generate_file_review
 from dav_tool._observability import (
     ProcessingTimer, log_phase, setup_logging,
@@ -421,37 +420,17 @@ def _phase4_processing(ctx):
             cleanup_dataframes(ctx)
             print_memory_snapshot("BEFORE AGGREGATION")
             try:
-                with st.spinner("Aggregating data (Store + Item in parallel)..."):
-                    def _onb_run(fn, *args, **kw):
-                        t0 = time.perf_counter()
-                        r = fn(*args, **kw)
-                        return r, time.perf_counter() - t0
+                from dav_tool.options import ParseOptions, ColumnMapping
+                from dav_tool.workflow.processing import run_store_aggregation, run_item_aggregation
 
+                parse_opts = ParseOptions.from_context(ctx)
+                mapping = ColumnMapping.from_context(ctx)
+
+                with st.spinner("Aggregating data (Store + Item in parallel)..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
                         futs = [
-                            ex.submit(_onb_run, stream_store_aggregate,
-                                fp, ft, ctx.store_col, ctx.units_col, ctx.price_col,
-                                delimiter=pd, layout=ll,
-                                start_line=sl, record_type=rt,
-                                multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                                column_names=ctx.schema,
-                                header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                                detail_layout=ctx.detail_layout,
-                                trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
-                                source=_onb_source,
-                            ),
-                            ex.submit(_onb_run, stream_item_aggregate,
-                                fp, ft,
-                                ctx.upc_col, ctx.desc_col, ctx.units_col, ctx.price_col,
-                                delimiter=pd, layout=ll,
-                                start_line=sl, record_type=rt,
-                                multiline_record_types=ctx.ml_record_types, multiline_delimiter=ctx.ml_delimiter,
-                                column_names=ctx.schema,
-                                header_prefix=ctx.header_prefix, header_layout=ctx.header_layout,
-                                detail_layout=ctx.detail_layout,
-                                trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
-                                source=_onb_source,
-                            ),
+                            ex.submit(run_store_aggregation, fp, parse_opts, mapping, source=_onb_source),
+                            ex.submit(run_item_aggregation, fp, parse_opts, mapping, source=_onb_source),
                         ]
                         names = ["stream_store_aggregate", "stream_item_aggregate"]
                         results = []
@@ -758,29 +737,52 @@ def _run_validation(
         )
         st.stop()
 
+    from dav_tool.options import ParseOptions, ColumnMapping, ValidationOptions
+    from dav_tool.workflow.validation import run_onboarding_validation
+
+    parse_opts = ParseOptions(
+        file_type=file_type,
+        delimiter=prod_delim,
+        start_line=start_line,
+        record_type=record_type,
+        layout=layout_list,
+        column_names=ctx.schema,
+        header_prefix=header_prefix,
+        header_layout=header_layout,
+        trailer_prefix=trailer_prefix,
+        trailer_layout=trailer_layout,
+        multiline_record_types=ctx.ml_record_types,
+        multiline_delimiter=ctx.ml_delimiter,
+    )
+    mapping = ColumnMapping(
+        store=prod_store_col,
+        upc=prod_upc_col,
+        description=prod_desc_col,
+        units=prod_units_col,
+        price=prod_price_col,
+    )
+    val_opts = ValidationOptions(
+        run_store_validation=False,
+        run_item_validation=False,
+        run_compare_store_list=run_onb_compare,
+        run_summary=False,
+        run_file_review=run_onb_file_review,
+        store_list_path=storelist_path,
+        store_list_delimiter=storelist_delim,
+        store_list_store_col=storelist_store_col,
+    )
+
+    val_result = run_onboarding_validation(
+        file_paths, parse_opts, mapping,
+        store_agg=ctx.store_agg,
+        item_agg=ctx.item_agg,
+        validation_opts=val_opts,
+        metrics=ctx.metrics,
+        source=source,
+    )
+
     if run_onb_compare:
-        if not storelist_path:
-            st.error(
-                "Store list file is required for 'Compare Store List' validation.\n\n"
-                "**How to fix:** Go back to Phase 2 (Column Mapping) and enter a "
-                "valid Store List File Path before running validation."
-            )
-            st.stop()
-
-        storelist_df = load_storelist(storelist_path, storelist_delim)
-
-        store_agg = ctx.store_agg
-        if store_agg is not None and not store_agg.is_empty():
-            prod_series = store_agg.select(["STORE_NUMBER"])
-            result = compare_files(
-                prod_series.to_series().to_frame("store"),
-                storelist_df.select([pl.col(storelist_store_col).alias("store")]),
-                "store", "store"
-            )
-        else:
-            result = {"missing_in_test": "", "missing_in_prod": ""}
-
-        ctx.compare_result = result
+        ctx.compare_result = val_result.store_list_result
 
     if run_upc_summary:
         upc_summary = ctx.item_agg
@@ -788,24 +790,7 @@ def _run_validation(
             ctx.upc_summary = upc_summary
 
     if run_onb_file_review:
-        with ProcessingTimer(ctx.metrics, "report", "generate_file_review"):
-            fr = generate_file_review(
-                file_paths, file_type, prod_store_col, prod_upc_col,
-                prod_units_col, prod_price_col,
-                delimiter=prod_delim, layout=layout_list,
-                start_line=start_line, record_type=record_type,
-                multiline_record_types=ctx.ml_record_types,
-                multiline_delimiter=ctx.ml_delimiter,
-                column_names=ctx.schema,
-                header_prefix=header_prefix,
-                header_layout=header_layout,
-                trailer_prefix=trailer_prefix,
-                trailer_layout=trailer_layout,
-                precomputed_store_agg=ctx.store_agg,
-                precomputed_upc_summary=ctx.item_agg,
-                source=source,
-            )
-        ctx.file_review = fr
+        ctx.file_review = val_result.file_review
         log_phase("Reports Generated")
 
     print_memory_snapshot("AFTER VALIDATION")

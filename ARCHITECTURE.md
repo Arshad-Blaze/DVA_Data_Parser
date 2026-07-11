@@ -22,6 +22,10 @@ UI
 
 ↓
 
+Workflow Layer
+
+↓
+
 Auto Detection
 
 ↓
@@ -59,6 +63,21 @@ Handles
 - Display
 
 No business logic.
+
+---
+
+### Workflow Layer
+
+Orchestrates the pipeline using service functions.
+
+Modules
+
+- `dav_tool/workflow/discovery.py` — File detection, preview, column extraction
+- `dav_tool/workflow/processing.py` — Aggregation orchestration, file review
+- `dav_tool/workflow/validation.py` — Validation orchestration
+- `dav_tool/options.py` — Option dataclasses (ParseOptions, ColumnMapping, AggregationOptions, ValidationOptions)
+
+No Streamlit imports. No rendering. Pure processing logic.
 
 ---
 
@@ -120,6 +139,20 @@ Exports
 - Excel
 - CSV
 - Validation Reports
+
+---
+
+## Option Dataclasses
+
+Option dataclasses replace parameter explosion with structured configuration.
+
+| Dataclass | Purpose |
+|-----------|---------|
+| `ParseOptions` | File type, delimiter, layout, multiline config |
+| `ColumnMapping` | Store, UPC, description, units, price columns |
+| `AggregationOptions` | Flags for what to compute |
+| `ValidationOptions` | Flags for what to validate |
+| `WorkflowState` | Current phase, progress, errors |
 
 ---
 

@@ -107,7 +107,7 @@ def build_config(
         fp_local = fp
         file_paths_local = file_paths
 
-    encoding = _detect_encoding(fp_local, source) if fp_local else DEFAULT_ENCODING
+    encoding = _detect_encoding(fp_local) if fp_local else DEFAULT_ENCODING
 
     try:
         if not file_type:
@@ -407,8 +407,8 @@ def _resolve_sample(fp: str, source: Optional[IDataSource]) -> str:
             tmp.write(text)
             tmp.close()
             return tmp.name
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to download sample from source for %s: %s", fp, e)
     return fp
 
 
@@ -417,8 +417,8 @@ def _cleanup_sample(original_fp: str, local_fp: str, source: Optional[IDataSourc
     if source is not None and local_fp != original_fp:
         try:
             os.unlink(local_fp)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to cleanup sample file %s: %s", local_fp, e)
 
 
 def _load_sample(

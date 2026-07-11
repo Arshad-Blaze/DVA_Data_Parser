@@ -1,7 +1,6 @@
 import gc
 import logging
 import os
-import time
 import concurrent.futures
 import streamlit as st
 import polars as pl
@@ -11,16 +10,11 @@ from dav_tool._parsers import (
     preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
     load_layout,
 )
-from dav_tool._aggregators import (
-    stream_store_aggregate, stream_item_aggregate,
-)
-from dav_tool._reports import generate_file_review
 from dav_tool._observability import (
     ProcessingTimer, log_phase, setup_logging,
     print_memory_snapshot, log_dataframe_summary,
 )
-from dav_tool.validation.store import compare_files, storelevelvalidation
-from dav_tool.validation.item import run_item_validation
+from dav_tool.validation.store import compare_files
 from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
     detect_hdr_prefix,
@@ -58,14 +52,6 @@ def _get_ex_validation_config(ctx):
             return cfg.validation_config
     from dav_tool.format_config import ValidationConfig
     return ValidationConfig()
-
-
-def _run_agg_task(agg_fn, file_paths, file_type, *args, **kwargs):
-    """Run a single aggregation, returning (result, elapsed_seconds)."""
-    t0 = time.perf_counter()
-    result = agg_fn(file_paths, file_type, *args, **kwargs)
-    elapsed = time.perf_counter() - t0
-    return result, elapsed
 
 
 def _reset_phase():
@@ -600,75 +586,42 @@ def _phase4_processing(ctx):
                 cleanup_dataframes(ctx)
                 print_memory_snapshot("BEFORE AGGREGATION (EXISTING)")
                 try:
+                    from dav_tool.options import ParseOptions, ColumnMapping
+                    from dav_tool.workflow.processing import run_store_aggregation, run_item_aggregation
+
                     _ex_source = get_active_source()
 
+                    prod_parse = ParseOptions(
+                        file_type=prod_type, delimiter=prod_delim,
+                        start_line=prod_start_line, record_type=prod_record_type,
+                        layout=prod_layout_list, column_names=ctx.prod.schema,
+                        header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+                        detail_layout=hdr_detail_prod,
+                        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+                        multiline_record_types=prod_ml_rtypes_prod if prod_type == "multiline" and not hdr_prefix_prod else None,
+                        multiline_delimiter=ml_delim_val,
+                    )
+                    prod_mapping = ColumnMapping.from_context(ctx.prod)
+
+                    test_parse = ParseOptions(
+                        file_type=test_type, delimiter=test_delim,
+                        start_line=test_start_line, record_type=test_record_type,
+                        layout=test_layout_list, column_names=ctx.test.schema,
+                        header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+                        detail_layout=hdr_detail_test,
+                        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+                        multiline_record_types=test_ml_rtypes if test_type == "multiline" and not hdr_prefix_test else None,
+                        multiline_delimiter=ml_delim_val,
+                    )
+                    test_mapping = ColumnMapping.from_context(ctx.test)
+
                     with st.spinner("Aggregating data (running BAU/Test, Store/Item in parallel)..."):
-                        prod_ml_rtypes_prod = ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None
-                        test_ml_rtypes = ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None
-
-                        def _submit(ex, fn, paths, ftype, *args, **kw):
-                            return ex.submit(_run_agg_task, fn, paths, ftype, *args, **kw)
-
                         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
                             futs = [
-                                _submit(ex, stream_store_aggregate,
-                                    prod_paths, prod_type,
-                                    ctx.prod.store_col, ctx.prod.units_col, ctx.prod.price_col,
-                                    delimiter=prod_delim, layout=prod_layout_list,
-                                    price_type=ctx.prod.price_type,
-                                    implied_dollars=ctx.prod.implied_dollars,
-                                    implied_units=ctx.prod.implied_units,
-                                    start_line=prod_start_line, record_type=prod_record_type,
-                                    multiline_record_types=prod_ml_rtypes_prod,
-                                    multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
-                                    header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-                                    detail_layout=hdr_detail_prod,
-                                    trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
-                                    source=_ex_source,
-                                ),
-                                _submit(ex, stream_store_aggregate,
-                                    test_paths, test_type,
-                                    ctx.test.store_col, ctx.test.units_col, ctx.test.price_col,
-                                    delimiter=test_delim, layout=test_layout_list,
-                                    price_type=ctx.test.price_type,
-                                    implied_dollars=ctx.test.implied_dollars,
-                                    implied_units=ctx.test.implied_units,
-                                    start_line=test_start_line, record_type=test_record_type,
-                                    multiline_record_types=test_ml_rtypes,
-                                    multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
-                                    header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-                                    detail_layout=hdr_detail_test,
-                                    trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
-                                    source=_ex_source,
-                                ),
-                                _submit(ex, stream_item_aggregate,
-                                    prod_paths, prod_type,
-                                    ctx.prod.upc_col, ctx.prod.desc_col, ctx.prod.units_col, ctx.prod.price_col,
-                                    delimiter=prod_delim, layout=prod_layout_list,
-                                    implied_units=ctx.prod.implied_units,
-                                    implied_dollars=ctx.prod.implied_dollars,
-                                    start_line=prod_start_line, record_type=prod_record_type,
-                                    multiline_record_types=prod_ml_rtypes_prod,
-                                    multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
-                                    header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-                                    detail_layout=hdr_detail_prod,
-                                    trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
-                                    source=_ex_source,
-                                ),
-                                _submit(ex, stream_item_aggregate,
-                                    test_paths, test_type,
-                                    ctx.test.upc_col, ctx.test.desc_col, ctx.test.units_col, ctx.test.price_col,
-                                    delimiter=test_delim, layout=test_layout_list,
-                                    implied_units=ctx.test.implied_units,
-                                    implied_dollars=ctx.test.implied_dollars,
-                                    start_line=test_start_line, record_type=test_record_type,
-                                    multiline_record_types=test_ml_rtypes,
-                                    multiline_delimiter=ml_delim_val, column_names=ctx.test.schema,
-                                    header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-                                    detail_layout=hdr_detail_test,
-                                    trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
-                                    source=_ex_source,
-                                ),
+                                ex.submit(run_store_aggregation, prod_paths, prod_parse, prod_mapping, source=_ex_source),
+                                ex.submit(run_store_aggregation, test_paths, test_parse, test_mapping, source=_ex_source),
+                                ex.submit(run_item_aggregation, prod_paths, prod_parse, prod_mapping, source=_ex_source),
+                                ex.submit(run_item_aggregation, test_paths, test_parse, test_mapping, source=_ex_source),
                             ]
                             names = ["BAU stream_store_aggregate", "Test stream_store_aggregate",
                                      "BAU stream_item_aggregate", "Test stream_item_aggregate"]
@@ -1166,92 +1119,78 @@ def _execute_validation(
         )
         st.stop()
 
+    from dav_tool.options import ParseOptions, ColumnMapping, ValidationOptions
+    from dav_tool.workflow.validation import run_existing_validation
+
     ctx.compare_result = None
     ctx.store_df = None
     ctx.comparison_df = None
     ctx.summary_df = None
 
-    ml_delim_val = ctx.ml_delimiter
+    prod_parse = ParseOptions(
+        file_type=prod_type, delimiter=prod_delim,
+        start_line=prod_start_line, record_type=prod_record_type,
+        layout=ctx.prod.eff_layout or prod_layout_list, column_names=ctx.prod.schema,
+        header_prefix=ctx.prod.header_prefix, header_layout=ctx.prod.header_layout,
+        detail_layout=ctx.prod.detail_layout,
+        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+        multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not ctx.prod.header_prefix else None,
+        multiline_delimiter=ctx.ml_delimiter,
+    )
+    test_parse = ParseOptions(
+        file_type=test_type, delimiter=test_delim,
+        start_line=test_start_line, record_type=test_record_type,
+        layout=ctx.test.eff_layout or test_layout_list, column_names=ctx.test.schema,
+        header_prefix=ctx.test.header_prefix, header_layout=ctx.test.header_layout,
+        detail_layout=ctx.test.detail_layout,
+        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+        multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not ctx.test.header_prefix else None,
+        multiline_delimiter=ctx.ml_delimiter,
+    )
+    prod_mapping = ColumnMapping(
+        store=prod_store_col, upc=prod_upc_col, description=prod_desc_col,
+        units=prod_units_col, price=prod_price_col,
+        price_type=price_type_bau,
+        implied_dollars=isimplied_dollars_prod, implied_units=isimplied_units_prod,
+    )
+    test_mapping = ColumnMapping(
+        store=test_store_col, upc=test_upc_col, description=test_desc_col,
+        units=test_units_col, price=test_price_col,
+        price_type=price_type_test,
+        implied_dollars=isimplied_dollars_test, implied_units=isimplied_units_test,
+    )
+    val_opts = ValidationOptions(
+        run_store_validation=run_store,
+        run_item_validation=run_item,
+        run_compare_store_list=run_compare_existing,
+        run_summary=run_summary,
+        run_file_review=run_file_review_existing,
+    )
 
-    hdr_prefix_prod, hdr_header_prod = _get_hdr_params(ctx.prod)
-    hdr_prefix_test, hdr_header_test = _get_hdr_params(ctx.test)
+    val_result = run_existing_validation(
+        prod_paths, test_paths,
+        prod_parse, test_parse,
+        prod_mapping, test_mapping,
+        prod_store_agg=ctx.prod.store_agg, test_store_agg=ctx.test.store_agg,
+        prod_item_agg=ctx.prod.item_agg, test_item_agg=ctx.test.item_agg,
+        validation_opts=val_opts,
+        metrics=ctx.metrics,
+        source=get_active_source(),
+    )
 
-    eff_layout_prod = ctx.prod.eff_layout or prod_layout_list
-    eff_layout_test = ctx.test.eff_layout or test_layout_list
+    if val_result.store_comparison is not None:
+        ctx.store_df = val_result.store_comparison
+    if val_result.item_comparison is not None:
+        ctx.comparison_df = val_result.item_comparison
+    if val_result.item_summary is not None:
+        ctx.summary_df = val_result.item_summary
+    if val_result.store_list_result is not None:
+        ctx.compare_result = val_result.store_list_result
+    if val_result.file_review is not None:
+        ctx.fr_prod = val_result.file_review
 
-    prod_store_agg = ctx.prod.store_agg
-    test_store_agg = ctx.test.store_agg
-    prod_item_agg = ctx.prod.item_agg
-    test_item_agg = ctx.test.item_agg
-
-    if run_store:
-        with ProcessingTimer(ctx.metrics, "validation", "storelevelvalidation"):
-            store_df = storelevelvalidation(
-                prod_paths, test_paths, prod_type, test_type,
-                prod_delim, test_delim, eff_layout_prod, eff_layout_test,
-                prod_store_col, prod_units_col, prod_price_col,
-                test_store_col, test_units_col, test_price_col,
-                price_type_bau, price_type_test,
-                isimplied_dollars_prod, isimplied_units_prod,
-                isimplied_dollars_test, isimplied_units_test,
-                start_line=prod_start_line, record_type=prod_record_type,
-                multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not ctx.prod.header_prefix else None,
-                multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
-                header_prefix=ctx.prod.header_prefix,
-                header_layout=ctx.prod.header_layout,
-                trailer_prefix=trailer_prefix_prod,
-                trailer_layout=trailer_layout_prod,
-                prod_summary=prod_store_agg, test_summary=test_store_agg,
-            )
-        ctx.store_df = store_df
-
-    if run_item:
-        with ProcessingTimer(ctx.metrics, "validation", "run_item_validation"):
-            comparison_df, summary_df = run_item_validation(
-                prod_paths, test_paths, prod_type, test_type,
-                prod_delim, test_delim, eff_layout_prod, eff_layout_test,
-                prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
-                implied_units_bau=isimplied_units_prod,
-                implied_dollars_bau=isimplied_dollars_prod,
-                implied_units_test=isimplied_units_test,
-                implied_dollars_test=isimplied_dollars_test,
-                start_line=prod_start_line, record_type=prod_record_type,
-                multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not ctx.prod.header_prefix else None,
-                multiline_delimiter=ml_delim_val, column_names=ctx.prod.schema,
-                header_prefix=ctx.prod.header_prefix,
-                header_layout=ctx.prod.header_layout,
-                trailer_prefix=trailer_prefix_prod,
-                trailer_layout=trailer_layout_prod,
-                bau_summary=prod_item_agg, test_summary=test_item_agg,
-            )
-        ctx.comparison_df = comparison_df
-        ctx.summary_df = summary_df
-
-    if run_compare_existing:
-        _compare_stores(
-            prod_store_col=prod_store_col, prod_units_col=prod_units_col, prod_price_col=prod_price_col,
-            test_store_col=test_store_col, test_units_col=test_units_col, test_price_col=test_price_col,
-            prod_store_agg=prod_store_agg, test_store_agg=test_store_agg,
-        )
-
-    if run_file_review_existing:
-        with ProcessingTimer(ctx.metrics, "report", "generate_file_reviews"):
-            _generate_file_reviews(
-                prod_paths, test_paths, prod_type, test_type,
-                prod_delim, test_delim, eff_layout_prod, eff_layout_test,
-                prod_start_line, test_start_line, prod_record_type, test_record_type,
-                prod_store_col, prod_upc_col, prod_units_col, prod_price_col,
-                test_store_col, test_upc_col, test_units_col, test_price_col,
-                price_type_bau, price_type_test,
-                isimplied_dollars_prod, isimplied_units_prod,
-                isimplied_dollars_test, isimplied_units_test,
-                hdr_prefix_prod, hdr_prefix_test,
-                hdr_header_prod, hdr_header_test,
-                trailer_prefix_prod, trailer_layout_prod,
-                trailer_prefix_test, trailer_layout_test,
-                source=get_active_source(),
-            )
-        log_phase("Reports Generated")
+    for err in val_result.errors:
+        ctx.metrics.errors.append(err)
 
     print_memory_snapshot("AFTER VALIDATION (EXISTING)")
     log_dataframe_summary()
@@ -1276,42 +1215,32 @@ def _compare_stores(
     if prod_store_agg is not None:
         prod_series = prod_store_agg.select(["STORE_NUMBER"])
     else:
-        with ProcessingTimer(ctx.metrics, "aggregation", "BAU stream_store_aggregate (compare)"):
-            prod_series = stream_store_aggregate(
-                ctx.prod.file_paths, ctx.prod.file_type,
-                prod_store_col, prod_units_col, prod_price_col,
-                delimiter=ctx.prod.delimiter, layout=ctx.prod.layout,
-                start_line=st.session_state.get("fw_start_prod", 0),
-                record_type=st.session_state.get("fw_rec_prod", ""),
-                multiline_record_types=ctx.prod.ml_record_types if ctx.prod.file_type == "multiline" and not ctx.prod.header_prefix else None,
-                multiline_delimiter=ctx.ml_delimiter, column_names=ctx.prod.schema,
-                header_prefix=ctx.prod.header_prefix,
-                header_layout=ctx.prod.header_layout,
-                detail_layout=ctx.prod.detail_layout,
-                trailer_prefix=ctx.prod.trailer_prefix,
-                trailer_layout=ctx.prod.trailer_layout,
-                source=_ex_source,
-            ).select(["STORE_NUMBER"])
+        from dav_tool.options import ParseOptions, ColumnMapping
+        from dav_tool.workflow.processing import run_store_aggregation
+
+        prod_parse = ParseOptions.from_context(ctx.prod)
+        prod_mapping = ColumnMapping(
+            store=prod_store_col, upc="", description="",
+            units=prod_units_col, price=prod_price_col,
+            price_type=ctx.prod.price_type,
+            implied_dollars=ctx.prod.implied_dollars, implied_units=ctx.prod.implied_units,
+        )
+        prod_series = run_store_aggregation(ctx.prod.file_paths, prod_parse, prod_mapping, source=_ex_source)[0].select(["STORE_NUMBER"])
 
     if test_store_agg is not None:
         test_series = test_store_agg.select(["STORE_NUMBER"])
     else:
-        with ProcessingTimer(ctx.metrics, "aggregation", "Test stream_store_aggregate (compare)"):
-            test_series = stream_store_aggregate(
-                ctx.test.file_paths, ctx.test.file_type,
-                test_store_col, test_units_col, test_price_col,
-                delimiter=ctx.test.delimiter, layout=ctx.test.layout,
-                start_line=st.session_state.get("fw_start_test", 0),
-                record_type=st.session_state.get("fw_rec_test", ""),
-                multiline_record_types=ctx.test.ml_record_types if ctx.test.file_type == "multiline" and not ctx.test.header_prefix else None,
-                multiline_delimiter=ctx.ml_delimiter, column_names=ctx.test.schema,
-                header_prefix=ctx.test.header_prefix,
-                header_layout=ctx.test.header_layout,
-                detail_layout=ctx.test.detail_layout,
-                trailer_prefix=ctx.test.trailer_prefix,
-                trailer_layout=ctx.test.trailer_layout,
-                source=_ex_source,
-            ).select(["STORE_NUMBER"])
+        from dav_tool.options import ParseOptions, ColumnMapping
+        from dav_tool.workflow.processing import run_store_aggregation
+
+        test_parse = ParseOptions.from_context(ctx.test)
+        test_mapping = ColumnMapping(
+            store=test_store_col, upc="", description="",
+            units=test_units_col, price=test_price_col,
+            price_type=ctx.test.price_type,
+            implied_dollars=ctx.test.implied_dollars, implied_units=ctx.test.implied_units,
+        )
+        test_series = run_store_aggregation(ctx.test.file_paths, test_parse, test_mapping, source=_ex_source)[0].select(["STORE_NUMBER"])
 
     if not prod_series.is_empty() and not test_series.is_empty():
         result = compare_files(
@@ -1340,44 +1269,48 @@ def _generate_file_reviews(
 ):
     ctx = st.session_state.ex_ctx
 
+    from dav_tool.options import ParseOptions, ColumnMapping
+    from dav_tool.workflow.processing import run_file_review
+
+    prod_parse = ParseOptions(
+        file_type=prod_type, delimiter=prod_delim,
+        start_line=prod_start_line, record_type=prod_record_type,
+        layout=prod_layout_list, column_names=ctx.prod.schema,
+        header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
+        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
+        multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
+        multiline_delimiter=ctx.ml_delimiter,
+    )
+    prod_mapping = ColumnMapping(
+        store=prod_store_col, upc=prod_upc_col, description="",
+        units=prod_units_col, price=prod_price_col,
+        price_type=price_type_bau,
+        implied_dollars=isimplied_dollars_prod, implied_units=isimplied_units_prod,
+    )
+    test_parse = ParseOptions(
+        file_type=test_type, delimiter=test_delim,
+        start_line=test_start_line, record_type=test_record_type,
+        layout=test_layout_list, column_names=ctx.test.schema,
+        header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
+        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
+        multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
+        multiline_delimiter=ctx.ml_delimiter,
+    )
+    test_mapping = ColumnMapping(
+        store=test_store_col, upc=test_upc_col, description="",
+        units=test_units_col, price=test_price_col,
+        price_type=price_type_test,
+        implied_dollars=isimplied_dollars_test, implied_units=isimplied_units_test,
+    )
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
         futs = [
-            ex.submit(_run_agg_task, generate_file_review,
-                prod_paths, prod_type, prod_store_col, prod_upc_col,
-                prod_units_col, prod_price_col,
-                delimiter=prod_delim, layout=prod_layout_list,
-                price_type=price_type_bau,
-                implied_dollars=isimplied_dollars_prod,
-                implied_units=isimplied_units_prod,
-                start_line=prod_start_line, record_type=prod_record_type,
-                multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
-                multiline_delimiter=ctx.ml_delimiter, column_names=ctx.prod.schema,
-                header_prefix=hdr_prefix_prod,
-                header_layout=hdr_header_prod,
-                trailer_prefix=trailer_prefix_prod,
-                trailer_layout=trailer_layout_prod,
-                precomputed_store_agg=ctx.prod.store_agg,
-                precomputed_upc_summary=ctx.prod.item_agg,
-                source=source,
-            ),
-            ex.submit(_run_agg_task, generate_file_review,
-                test_paths, test_type, test_store_col, test_upc_col,
-                test_units_col, test_price_col,
-                delimiter=test_delim, layout=test_layout_list,
-                price_type=price_type_test,
-                implied_dollars=isimplied_dollars_test,
-                implied_units=isimplied_units_test,
-                start_line=test_start_line, record_type=test_record_type,
-                multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
-                multiline_delimiter=ctx.ml_delimiter, column_names=ctx.test.schema,
-                header_prefix=hdr_prefix_test,
-                header_layout=hdr_header_test,
-                trailer_prefix=trailer_prefix_test,
-                trailer_layout=trailer_layout_test,
-                precomputed_store_agg=ctx.test.store_agg,
-                precomputed_upc_summary=ctx.test.item_agg,
-                source=source,
-            ),
+            ex.submit(run_file_review, prod_paths, prod_parse, prod_mapping,
+                     precomputed_store_agg=ctx.prod.store_agg,
+                     precomputed_upc_summary=ctx.prod.item_agg, source=source),
+            ex.submit(run_file_review, test_paths, test_parse, test_mapping,
+                     precomputed_store_agg=ctx.test.store_agg,
+                     precomputed_upc_summary=ctx.test.item_agg, source=source),
         ]
         names = ["BAU generate_file_review", "Test generate_file_review"]
         for i, future in enumerate(futs):

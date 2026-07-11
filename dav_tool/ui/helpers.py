@@ -203,7 +203,8 @@ def get_file_list(path: str, source: Optional[IDataSource] = None) -> list:
     if source is not None:
         try:
             return source.list_files(path)
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to list files via source for %s: %s", path, e)
             return []
     if os.path.isfile(path):
         return [path]
@@ -235,8 +236,8 @@ def load_storelist(path, delimiter, source=None):
     if source is not None:
         try:
             local_path = source.download_if_required(path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to download storelist via source for %s: %s", path, e)
     ext = os.path.splitext(local_path)[-1].lower()
     if ext in [".xlsx", ".xls"]:
         return pl.read_excel(local_path)
@@ -697,25 +698,7 @@ def progressive_config_wizard(cfg, detected_columns=None, key_prefix="", file_pa
 # ── Phase 8-9: UI Steps + Memory ──────────────────────────────────
 
 
-PHASE_LABELS = {
-    0: "1. Connection",
-    1: "2. Discovery",
-    2: "3. Configuration",
-    3: "4. Validate Config",
-    4: "5. Processing",
-    5: "6. Validation",
-    6: "7. Reports",
-}
-
-PHASE_ICONS = {
-    0: "🔌",
-    1: "🔍",
-    2: "⚙️",
-    3: "✅",
-    4: "⚡",
-    5: "📊",
-    6: "📄",
-}
+from dav_tool.workflow import PHASE_LABELS, PHASE_ICONS
 
 
 def render_phase_progress(current_phase: int, max_phase: int = 6):
@@ -797,11 +780,11 @@ def validate_config_before_processing(cfg, key_prefix=""):
 
 
 def cleanup_dataframes(ctx, keep_attrs=None):
-    """Delete large DataFrames from context and force garbage collection.
+    """Delete large DataFrames from context, unregister from registry, and force GC.
 
     Preserves attributes listed in *keep_attrs* (default: None = clear all).
     """
-    import gc
+    from dav_tool._observability import release_df
 
     df_attrs = [
         "store_agg", "item_agg", "upc_summary", "file_review",
@@ -816,9 +799,8 @@ def cleanup_dataframes(ctx, keep_attrs=None):
             continue
         df = getattr(ctx, attr, None)
         if df is not None:
-            del df
+            release_df(df, name=attr, owner="context")
             try:
                 setattr(ctx, attr, None)
             except Exception:
                 pass
-    gc.collect()
