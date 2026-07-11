@@ -1,132 +1,41 @@
-# DVA Platform v3 - Workflow Refactoring Sprint
+# DVA Platform v5
+# Data Operations Framework Sprint
 
-Read the ENTIRE repository before modifying any code.
+Read the ENTIRE repository before making ANY modifications.
 
-Read all architecture review documents generated during the audit.
+Read the latest architecture review.
 
-Do NOT ignore the existing implementation.
+Read CHANGELOG_STABILIZATION.md.
 
-This is NOT a rewrite.
-
-This is an evolution of the current architecture.
-
-The parser, aggregation engine, validation engine and reporting engine are considered stable and must be reused.
+Understand the current architecture completely before coding.
 
 ============================================================
 
 OBJECTIVE
 
-Transform the current parser-driven application into a workflow-driven platform.
+The platform is no longer only a validation tool.
 
-The workflow should orchestrate every component.
+It is becoming an Enterprise Data Onboarding Platform.
 
-The parser should become one service inside the workflow.
+This sprint introduces a reusable Data Operations Framework.
 
-============================================================
+Validation will become one consumer of this framework instead of owning aggregation logic.
 
-CORE PRINCIPLES
+DO NOT redesign the architecture.
 
-1.
+DO NOT rewrite existing parser logic.
 
-Do NOT rewrite working code.
+DO NOT rewrite workflow.
 
-2.
+DO NOT duplicate code.
 
-Reuse existing modules whenever possible.
-
-3.
-
-Reduce coupling.
-
-4.
-
-Reduce memory usage.
-
-5.
-
-Move business logic out of UI.
-
-6.
-
-Configuration should drive processing.
-
-7.
-
-Connection Manager becomes the primary entry point.
-
-8.
-
-Support streaming-first architecture.
+Build on top of the existing platform.
 
 ============================================================
 
-CURRENT PROBLEMS TO ADDRESS
-
-Based on the architecture review:
-
-• UI contains business logic.
-
-• onboarding.py and existing.py have become orchestration layers mixed with rendering.
-
-• Parameter explosion exists throughout aggregation.
-
-• ValidationConfig is only partially driving processing.
-
-• Large DataFrames remain alive too long.
-
-• Configuration is not yet the single source of truth.
-
-• Workflow still revolves around parser instead of configuration.
-
-Do NOT attempt to solve everything at once.
-
-============================================================
-
-GOAL OF THIS SPRINT
-
-The purpose of this sprint is NOT feature development.
-
-The purpose is architectural stabilization.
-
-============================================================
-
-STEP 1
-
-Review Current Workflow
-
-Understand both workflows completely.
-
-Onboarding
-
-Existing
+CURRENT ARCHITECTURE
 
 Connection Manager
-
-Configuration Builder
-
-Processing
-
-Validation
-
-Reports
-
-Document how data flows today.
-
-Identify duplicated orchestration.
-
-Do not modify parser logic.
-
-============================================================
-
-STEP 2
-
-Introduce Workflow Layer
-
-Create a dedicated workflow layer.
-
-The workflow layer owns
-
-Connection
 
 ↓
 
@@ -134,15 +43,19 @@ Discovery
 
 ↓
 
-Configuration
+Configuration Builder
 
 ↓
 
-Configuration Validation
+Configuration Validator
 
 ↓
 
-Processing
+Streaming Processing
+
+↓
+
+Canonical Dataset
 
 ↓
 
@@ -152,131 +65,347 @@ Validation
 
 Reports
 
-UI pages should only render workflow state.
+TARGET ARCHITECTURE
 
-UI must no longer orchestrate processing directly.
+Connection Manager
 
-============================================================
+↓
 
-STEP 3
+Discovery
 
-Separate Business Logic From UI
+↓
 
-Move
+Configuration Builder
 
-column normalization
+↓
 
-implied decimal logic
+Configuration Validator
 
-mapping validation
+↓
 
-configuration transformation
+Streaming Processing
 
-processing preparation
+↓
 
-into service modules.
+Canonical Dataset
 
-UI should only
+↓
 
-display
+Data Operations Framework
 
-collect user input
+        ├── Aggregate
 
-call workflow services
+        ├── Filter
 
-============================================================
+        ├── Sort
 
-STEP 4
+        ├── Sample
 
-Configuration Driven Processing
+        ├── Statistics
 
-Configuration becomes the processing contract.
+        ├── Export
 
-Everything required for processing must exist inside the configuration.
+        └── Preview
 
-Parser must not infer information again after configuration has been accepted.
+↓
 
-If configuration exists
+Validation
 
-parser trusts it.
-
-============================================================
-
-STEP 5
-
-Processing Context Cleanup
-
-Review ProcessingContext.
-
-Only retain objects required by the current phase.
-
-Release intermediate DataFrames immediately after use.
-
-Store only
-
-Aggregated Results
-
-Validation Results
-
-Execution Metrics
+↓
 
 Reports
 
-Never retain unnecessary intermediate objects.
+Validation must become a client of Data Operations.
 
 ============================================================
 
-STEP 6
+RULES
 
-Parameter Refactoring
+Do NOT duplicate aggregation code.
 
-Replace large parameter lists.
+Move reusable logic.
+
+Keep backward compatibility.
+
+Every new operation must work with the Canonical Dataset.
+
+Operations must NOT know retailer-specific columns.
+
+Everything comes from Configuration.
+
+============================================================
+
+PHASE 1
+
+Repository Review
+
+Review
+
+workflow
+
+validation
+
+calculations
+
+reports
+
+processing
+
+canonical layer
+
+configuration
+
+aggregation
+
+Understand every place aggregation currently exists.
+
+Generate an internal dependency map.
+
+============================================================
+
+PHASE 2
+
+Create Data Operations Framework
 
 Create
 
-ParserOptions
+operations/
 
-ConnectionOptions
+or
 
-ProcessingOptions
+core/operations/
 
-ValidationOptions
+depending on existing architecture.
 
-AggregationOptions
+Introduce
 
-These objects become immutable.
+IDataOperation
 
-Aggregation functions should receive option objects rather than 20+ parameters.
+AbstractOperation
+
+OperationResult
+
+OperationOptions
+
+OperationRegistry
+
+Do NOT over engineer.
+
+Keep interfaces clean.
 
 ============================================================
 
-STEP 7
+PHASE 3
 
-Validation Refactoring
+Aggregation Operation
 
-Separate validation into two engines.
-
-Aggregation Engine
+Extract aggregation into a reusable service.
 
 Input
 
-Group By
+Canonical Dataset
+
+Group By Columns
 
 Aggregation Columns
 
-Output
-
-Aggregated Data
-
-Calculation Engine
-
-Input
-
-Aggregated BAU
-
-Aggregated TEST
+Aggregation Functions
 
 Output
+
+Aggregated Dataset
+
+Support
+
+SUM
+
+COUNT
+
+AVG
+
+MIN
+
+MAX
+
+FIRST
+
+LAST
+
+Support multiple aggregation columns.
+
+Support multiple Group By columns.
+
+NO validation logic here.
+
+============================================================
+
+PHASE 4
+
+Filtering Operation
+
+Support
+
+Equals
+
+Contains
+
+StartsWith
+
+EndsWith
+
+GreaterThan
+
+LessThan
+
+In List
+
+Null
+
+Not Null
+
+Configuration driven.
+
+============================================================
+
+PHASE 5
+
+Sorting Operation
+
+Support
+
+Multiple columns.
+
+Ascending.
+
+Descending.
+
+Stable sorting.
+
+============================================================
+
+PHASE 6
+
+Sampling Operation
+
+Support
+
+First N
+
+Last N
+
+Random
+
+Percentage
+
+Useful for Discovery.
+
+============================================================
+
+PHASE 7
+
+Statistics Operation
+
+Generate
+
+Row Count
+
+Column Count
+
+Null Count
+
+Distinct Count
+
+Min
+
+Max
+
+Mean
+
+Median
+
+Std Dev
+
+Top Values
+
+Memory Usage
+
+Dataset Size
+
+This replaces ad-hoc statistics.
+
+============================================================
+
+PHASE 8
+
+Export Operation
+
+Support exporting any intermediate result.
+
+CSV
+
+Parquet
+
+Excel
+
+Future formats easily extendable.
+
+User should be able to download
+
+Canonical Dataset
+
+Aggregated Dataset
+
+Filtered Dataset
+
+Statistics
+
+Validation Results
+
+============================================================
+
+PHASE 9
+
+Preview Operation
+
+Current Preview
+
+↓
+
+Operation
+
+↓
+
+UI
+
+Preview should become reusable.
+
+Support
+
+Raw Preview
+
+Canonical Preview
+
+Aggregated Preview
+
+Filtered Preview
+
+Statistics Preview
+
+============================================================
+
+PHASE 10
+
+Validation Refactoring
+
+Validation must consume
+
+Aggregate Operation
+
+instead of implementing aggregation itself.
+
+Validation should only perform
+
+Comparison
 
 Difference
 
@@ -288,220 +417,306 @@ Ranking
 
 Sorting
 
-Validation Results
-
-Validation configuration should define
-
-Group By Columns
-
-Aggregation Columns
-
-Enabled
-
-Required Columns
-
-The engine should consume configuration rather than hardcoded logic.
+Everything else belongs to Operations.
 
 ============================================================
 
-STEP 8
+PHASE 11
 
-Streaming Architecture
+Configuration Integration
 
-The MFT server is the source of truth.
+Configuration should define
 
-Avoid copying files locally whenever practical.
+Operations
 
-Use streaming readers.
+Group By
 
-Process sequentially.
+Aggregation
 
-Release memory continuously.
+Filters
 
-Parser should support IDataSource streams directly.
+Sorting
 
-============================================================
+Sampling
 
-STEP 9
+Validation Rules
 
-Connection Manager
+Output
 
-Connection Manager becomes the first step of every workflow.
+If user chooses Aggregate Only
 
-Local mode remains supported for development.
+Validation is skipped.
 
-Remote mode becomes the preferred production workflow.
+Reports are skipped.
 
-Parser must remain completely independent of the connection implementation.
-
-============================================================
-
-STEP 10
-
-Memory Optimization
-
-Review every DataFrame lifecycle.
-
-Remove duplicate DataFrames.
-
-Avoid repeated parsing.
-
-Avoid repeated previews.
-
-Avoid repeated canonical conversion.
-
-Release objects aggressively.
-
-Keep developer diagnostics.
-
-Improve the DataFrame registry instead of removing it.
+Export becomes available.
 
 ============================================================
 
-STEP 11
+PHASE 12
 
-Workflow Navigation
+UI
 
-The workflow becomes
+Add
 
-Connection
+Data Operations
 
-↓
+section.
 
-Discovery
+Operations available
 
-↓
+Aggregate Only
 
-Progressive Configuration
+Aggregate + Export
 
-↓
+Statistics
 
-Configuration Validation
-
-↓
-
-Processing
-
-↓
+Preview
 
 Validation
 
-↓
+Keep UI simple.
 
-Reports
-
-Each phase has a single responsibility.
-
-Avoid hidden transitions.
-
-Avoid duplicated processing paths.
+Do NOT overwhelm user.
 
 ============================================================
 
-STEP 12
+PHASE 13
 
-Do NOT Implement Future Features
+Memory
 
-Do NOT implement
+Operations must stream wherever possible.
 
-Retailer Profiles
+Avoid DataFrame duplication.
 
-Cloud Storage
+Release temporary objects.
 
-Authentication
+Reuse canonical dataset.
 
-CI/CD
-
-Deployment
-
-RBAC
-
-Monitoring
-
-Those belong to later milestones.
+Support future large datasets.
 
 ============================================================
 
-EXPECTED DELIVERABLES
+PHASE 14
 
-1.
+Testing
 
-Workflow Layer
+Every operation
 
-2.
+Unit Tests.
 
-Cleaner UI
+Regression Tests.
 
-3.
+Playwright.
 
-Configuration-driven processing
+Large Dataset Tests.
 
-4.
+Memory Tests.
 
-Reduced memory footprint
+Verify operations independently.
 
-5.
+============================================================
 
-Option objects replacing parameter explosion
+PHASE 15
 
-6.
+Documentation
 
-Cleaner ProcessingContext lifecycle
+Update
 
-7.
+Architecture
 
-Improved validation architecture
+User Guide
 
-8.
+Engineering Docs
 
-Updated architecture documentation
+Workflow
+
+Explain
+
+Operations Framework
+
+Configuration
+
+Aggregate Only
+
+Validation Flow
+
+============================================================
+
+DELIVERABLES
+
+Reusable Data Operations Framework.
+
+Aggregate Operation.
+
+Filter Operation.
+
+Sort Operation.
+
+Sample Operation.
+
+Statistics Operation.
+
+Export Operation.
+
+Preview Operation.
+
+Validation consuming Operations.
+
+Aggregate Only workflow.
+
+Documentation.
+
+Regression Tests.
+
+Playwright.
 
 ============================================================
 
 SUCCESS CRITERIA
 
-The application should no longer feel like
+The platform should now support
 
-Parser
+Connect
 
 ↓
+
+Discover
+
+↓
+
+Configure
+
+↓
+
+Process
+
+↓
+
+Choose Operation
+
+↓
+
+Aggregate
+
+OR
+
+Statistics
+
+OR
+
+Export
+
+OR
 
 Validation
 
-Instead it should feel like
-
-Connection
-
-↓
-
-Discovery
-
-↓
-
-Configuration
-
-↓
-
-Processing
-
-↓
-
-Validation
-
-↓
+OR
 
 Reports
 
-Every module should have one responsibility.
+Validation becomes only one possible operation.
 
-The workflow should orchestrate the platform.
+Every operation is reusable.
 
-The parser should simply execute the processing contract defined by the configuration.
+Every operation is configuration driven.
 
-Maintain backward compatibility wherever possible.
+Every operation works on Canonical Data.
 
-Work incrementally.
+No retailer-specific logic exists inside Data Operations.
 
-Run existing Playwright tests and regression tests after each significant change.
+============================================================
 
-Commit changes in logical, reviewable increments rather than one massive refactor.
+MANDATORY QUALITY GATES
+
+Before modifying any module
+
+perform impact analysis.
+
+For every file modified
+
+identify
+
+Imports
+
+Dependencies
+
+Affected tests
+
+Affected workflows
+
+Potential regressions
+
+Run
+
+Unit Tests
+
+Regression Tests
+
+Playwright
+
+Memory Benchmarks
+
+Performance Benchmarks
+
+No regression is acceptable.
+
+============================================================
+
+COMMIT STRATEGY
+
+Never implement everything in one commit.
+
+Commit 1
+
+Core Operations Framework
+
+Commit 2
+
+Aggregation Operation
+
+Commit 3
+
+Filter + Sort
+
+Commit 4
+
+Statistics + Export
+
+Commit 5
+
+Validation Integration
+
+Commit 6
+
+UI
+
+Commit 7
+
+Testing
+
+Commit 8
+
+Documentation
+
+Each commit must pass all tests before continuing.
+
+Generate CHANGELOG_DATA_OPERATIONS.md documenting
+
+Problem
+
+Root Cause
+
+Implementation
+
+Files Modified
+
+Impact Analysis
+
+Tests Executed
+
+Performance Comparison
+
+Regression Status
+
+Final Verification
