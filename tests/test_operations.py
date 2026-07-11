@@ -430,3 +430,213 @@ def test_result_error():
     result = OperationResult.error("test", "something went wrong")
     assert result.errors == ["something went wrong"]
     assert result.row_count == 0
+
+
+# ── Edge Cases ──────────────────────────────────────────────────────
+
+def test_aggregate_empty_df():
+    df = pl.DataFrame({"A": [], "B": []}).cast({"A": pl.Utf8, "B": pl.Float64})
+    op = AggregateOperation()
+    opts = AggregateOptions(group_by=["A"], aggregations={"B": "sum"})
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 0
+
+
+def test_filter_empty_df():
+    df = pl.DataFrame({"A": [], "B": []}).cast({"A": pl.Utf8, "B": pl.Float64})
+    op = FilterOperation()
+    opts = FilterOptions(conditions=[FilterCondition(column="A", operator="eq", value="x")])
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 0
+
+
+def test_sort_empty_df():
+    df = pl.DataFrame({"A": [], "B": []}).cast({"A": pl.Utf8, "B": pl.Float64})
+    op = SortOperation()
+    opts = SortOptions(columns=[SortColumn(column="A")])
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 0
+
+
+def test_sample_head_larger_than_df(sample_df):
+    op = SampleOperation()
+    opts = SampleOptions(mode="head", n=100)
+    result = op.execute(sample_df, opts)
+    assert not result.errors
+    assert result.row_count == 5
+
+
+def test_statistics_empty_df():
+    df = pl.DataFrame({"A": [], "B": []}).cast({"A": pl.Utf8, "B": pl.Float64})
+    op = StatisticsOperation()
+    opts = StatisticsOptions()
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 2
+
+
+def test_preview_empty_df():
+    df = pl.DataFrame({"A": [], "B": []}).cast({"A": pl.Utf8, "B": pl.Float64})
+    op = PreviewOperation()
+    opts = PreviewOptions(n_rows=5)
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 0
+
+
+def test_aggregate_single_row():
+    df = pl.DataFrame({"STORE_NUMBER": ["S001"], "Units": [10], "Totalprice": [100.0]})
+    op = AggregateOperation()
+    opts = AggregateOptions(group_by=["STORE_NUMBER"], aggregations={"Units": "sum"})
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 1
+    assert result.df["Units"][0] == 10
+
+
+def test_filter_all_rows_match(sample_df):
+    op = FilterOperation()
+    opts = FilterOptions(conditions=[FilterCondition(column="Units", operator="gt", value=0)])
+    result = op.execute(sample_df, opts)
+    assert not result.errors
+    assert result.row_count == 5
+
+
+def test_filter_no_rows_match(sample_df):
+    op = FilterOperation()
+    opts = FilterOptions(conditions=[FilterCondition(column="Units", operator="gt", value=1000)])
+    result = op.execute(sample_df, opts)
+    assert not result.errors
+    assert result.row_count == 0
+
+
+def test_aggregate_with_nulls():
+    df = pl.DataFrame({
+        "GROUP": ["A", "A", "B"],
+        "VALUE": [1.0, None, 3.0],
+    })
+    op = AggregateOperation()
+    opts = AggregateOptions(group_by=["GROUP"], aggregations={"VALUE": "sum"})
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 2
+    a_val = result.df.filter(pl.col("GROUP") == "A")["VALUE"][0]
+    assert a_val == 1.0  # null treated as 0 in sum
+
+
+def test_export_returns_empty_df(sample_df, tmp_path):
+    op = ExportOperation()
+    path = str(tmp_path / "test.csv")
+    opts = ExportOptions(path=path, format="csv")
+    result = op.execute(sample_df, opts)
+    assert not result.errors
+    assert result.row_count == 0
+    assert os.path.exists(path)
+
+
+# ── Integration: Operation Chaining ─────────────────────────────────
+
+def test_filter_then_sort(sample_df):
+    fop = FilterOperation()
+    fopts = FilterOptions(conditions=[FilterCondition(column="STORE_NUMBER", operator="eq", value="S001")])
+    filtered = fop.execute(sample_df, fopts)
+    assert filtered.row_count == 2
+
+    sop = SortOperation()
+    sopts = SortOptions(columns=[SortColumn(column="Units", ascending=False)])
+    sorted_result = sop.execute(filtered.df, sopts)
+    assert not sorted_result.errors
+    assert sorted_result.df["Units"][0] == 20
+    assert sorted_result.df["Units"][1] == 10
+
+
+def test_aggregate_then_filter():
+    df = pl.DataFrame({
+        "STORE": ["A", "A", "B", "B", "C"],
+        "Units": [10, 20, 30, 40, 50],
+    })
+    agg = AggregateOperation()
+    agg_result = agg.execute(df, AggregateOptions(
+        group_by=["STORE"], aggregations={"Units": "sum"}
+    ))
+    assert agg_result.row_count == 3
+
+    filt = FilterOperation()
+    filt_result = filt.execute(agg_result.df, FilterOptions(
+        conditions=[FilterCondition(column="Units", operator="gt", value=30)]
+    ))
+    assert not filt_result.errors
+    assert filt_result.row_count == 2  # B=70, C=50
+
+
+# ── Integration: Validation Consuming Operations ───────────────────
+
+def test_validation_uses_aggregate_operation():
+    from dav_tool.validation.store import storelevelvalidation_from_df
+    prod = pl.DataFrame({
+        "STORE_NUMBER": ["S001", "S001", "S002"],
+        "Units": [10.0, 20.0, 15.0],
+        "Totalprice": [100.0, 200.0, 150.0],
+    })
+    test = pl.DataFrame({
+        "STORE_NUMBER": ["S001", "S002", "S002"],
+        "Units": [12.0, 18.0, 5.0],
+        "Totalprice": [120.0, 180.0, 50.0],
+    })
+    result = storelevelvalidation_from_df(prod, test)
+    assert not result.is_empty()
+    assert "STORE_NUMBER" in result.columns
+    assert "Units_Diff" in result.columns
+
+
+def test_item_summary_uses_aggregate_operation():
+    from dav_tool.calculations.core import item_comparison, item_summary
+    bau = pl.DataFrame({
+        "UPC_CODE": ["A1", "A2"],
+        "PRODUCT_DESCRIPTION": ["Widget", "Gadget"],
+        "UNITS_SOLD": [100.0, 200.0],
+        "TOTAL_DOLLARS": [1000.0, 2000.0],
+    })
+    test = pl.DataFrame({
+        "UPC_CODE": ["A1", "A3"],
+        "PRODUCT_DESCRIPTION": ["Widget", "Thingamajig"],
+        "UNITS_SOLD": [110.0, 50.0],
+        "TOTAL_DOLLARS": [1100.0, 500.0],
+    })
+    comparison = item_comparison(bau, test)
+    summary = item_summary(comparison)
+    assert "Present In" in summary.columns
+    assert "Units Difference" in summary.columns
+    assert summary.height == 3  # Both, BAU only, Test only
+
+
+# ── Large Dataset ───────────────────────────────────────────────────
+
+def test_aggregate_large_dataset():
+    n = 100_000
+    df = pl.DataFrame({
+        "STORE": [f"S{i % 100:03d}" for i in range(n)],
+        "Units": [float(i) for i in range(n)],
+        "Price": [float(i * 10) for i in range(n)],
+    })
+    op = AggregateOperation()
+    opts = AggregateOptions(group_by=["STORE"], aggregations={"Units": "sum", "Price": "sum"})
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 100
+
+
+def test_filter_large_dataset():
+    n = 100_000
+    df = pl.DataFrame({
+        "ID": list(range(n)),
+        "VALUE": [float(i) for i in range(n)],
+    })
+    op = FilterOperation()
+    opts = FilterOptions(conditions=[FilterCondition(column="VALUE", operator="gt", value=50_000)])
+    result = op.execute(df, opts)
+    assert not result.errors
+    assert result.row_count == 49_999
