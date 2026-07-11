@@ -81,6 +81,32 @@ class ProcessingContext:
     fr_prod: Optional[pl.DataFrame] = None
     fr_test: Optional[pl.DataFrame] = None
 
+    def validate_for_processing(self) -> List[str]:
+        """Check that required fields are set before processing.
+
+        Returns a list of error messages (empty = ready).
+        Call this before aggregation to fail early on incomplete context.
+        """
+        errors: List[str] = []
+        if not self.file_paths:
+            errors.append("file_paths is required for processing.")
+        if not self.file_type:
+            errors.append("file_type is required for processing.")
+        if not self.store_col:
+            errors.append("store_col (column mapping) is required for processing.")
+        if not self.units_col:
+            errors.append("units_col (column mapping) is required for processing.")
+        if not self.price_col:
+            errors.append("price_col (column mapping) is required for processing.")
+        if self.file_type == "fixed" and not self.layout:
+            errors.append("layout is required for fixed-width files.")
+        if self.file_type == "multiline":
+            if not self.header_prefix and not self.ml_record_types:
+                errors.append("multiline files need header_prefix or ml_record_types.")
+        if self.price_type not in ("Total Price", "Unit Price"):
+            errors.append(f"Invalid price_type '{self.price_type}'.")
+        return errors
+
 
 @dataclass
 class ExistingContext:

@@ -1,11 +1,14 @@
 import csv
 import io
+import logging
 import os
 import polars as pl
 from typing import Iterator, List, Dict, Any, Optional, Union, BinaryIO
 
 from dav_tool.config import DEFAULT_ENCODING, FALLBACK_ENCODING, DEFAULT_CHUNK_SIZE, DEFAULT_PREVIEW_ROWS
 from dav_tool.datasource.base import IDataSource
+
+logger = logging.getLogger(__name__)
 
 
 def safe_numeric(column: str) -> pl.Expr:

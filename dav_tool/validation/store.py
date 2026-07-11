@@ -6,10 +6,13 @@ Calculation Engine (``calculations``) handles diff, pct-diff, and comparison.
 This module only wires them together and accepts pre-computed summaries.
 """
 
+import logging
 import time
 import polars as pl
 from dav_tool._aggregators import stream_store_aggregate
 from dav_tool.calculations import store_diffs
+
+logger = logging.getLogger(__name__)
 
 
 def compare_files(prod_file, test_file, col1, col2):
@@ -109,16 +112,24 @@ def storelevelvalidation(
         )
 
     result = _compare_store_summaries(prod_summary, test_summary)
-    print(f"Time taken for store level validation {time.time() - start_time}")
+    logger.info("Store level validation completed in %.3fs", time.time() - start_time)
     return result
 
 
-def storelevelvalidation_from_df(prod_df, test_df):
+def storelevelvalidation_from_df(
+    prod_df, test_df,
+    store_col: str = "STORE_NUMBER",
+    units_col: str = "Units",
+    price_col: str = "Totalprice",
+):
     """Validate store-level data from canonical DataFrames.
 
     Aggregation is done here (simple group-by), comparison is delegated
     to the Calculation Engine.
+
+    Column names default to the canonical names produced by the normalizer
+    but can be overridden for non-standard DataFrames.
     """
-    prod_summary = prod_df.group_by("STORE_NUMBER").agg([pl.sum("Units"), pl.sum("Totalprice")])
-    test_summary = test_df.group_by("STORE_NUMBER").agg([pl.sum("Units"), pl.sum("Totalprice")])
+    prod_summary = prod_df.group_by(store_col).agg([pl.sum(units_col), pl.sum(price_col)])
+    test_summary = test_df.group_by(store_col).agg([pl.sum(units_col), pl.sum(price_col)])
     return _compare_store_summaries(prod_summary, test_summary)

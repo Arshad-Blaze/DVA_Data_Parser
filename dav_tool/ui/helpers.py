@@ -13,6 +13,11 @@ from dav_tool._parsers import (
     preview_flattened_multiline_fixed,
 )
 from dav_tool._observability import ProcessingRecord, MAX_HISTORY
+from dav_tool._column_utils import (
+    COLUMN_SYNONYMS,
+    find_best_column_index as _find_best_column_index,
+    smart_column_indices as _smart_column_indices,
+)
 from dav_tool.config import FALLBACK_ENCODING
 from dav_tool.io import safe_read_csv
 from dav_tool.datasource.base import IDataSource
@@ -98,73 +103,15 @@ def display_dev_diagnostics(ctx):
     st.sidebar.markdown(f"**Validation Done:** {bool(done)}")
 
 
-COLUMN_SYNONYMS = {
-    "Store": [
-        "store", "store number", "store_id", "store id",
-        "store code", "store_code", "store_number", "store num",
-        "location", "location code",
-    ],
-    "UPC": [
-        "upc", "upc_code", "upc code", "item upc", "item_upc",
-        "upc number", "upc_number", "barcode", "upc12", "gtin",
-        "ean", "product code",
-    ],
-    "Description": [
-        "description", "desc", "item description", "item_description",
-        "product description", "product_description", "product name",
-        "item name", "name", "description of goods",
-    ],
-    "Units": [
-        "units", "qty", "quantity", "sold", "units sold",
-        "units_sold", "quantity sold", "sales quantity", "qty sold",
-        "unit sold", "sale quantity",
-    ],
-    "Price": [
-        "price", "total price", "total_price", "sales", "amount",
-        "dollars", "total dollars", "total_dollars", "revenue",
-        "total revenue", "selling price", "sales amount",
-        "sale price", "price sold",
-    ],
-}
+COLUMN_SYNONYMS = COLUMN_SYNONYMS  # re-export from _column_utils for backward compat
 
 
 def find_best_column_index(cols, target, synonyms):
-    if not cols:
-        return 0
-    col_lower = [c.lower().strip() for c in cols]
-    target_lower = target.lower()
-
-    if target_lower in col_lower:
-        return col_lower.index(target_lower)
-
-    for syn in synonyms:
-        syn_lower = syn.lower()
-        if syn_lower in col_lower:
-            return col_lower.index(syn_lower)
-
-    for i, col in enumerate(col_lower):
-        for syn in synonyms:
-            syn_lower = syn.lower()
-            if syn_lower in col or col in syn_lower:
-                return i
-
-    for i, col in enumerate(col_lower):
-        if target_lower in col or col in target_lower:
-            return i
-
-    return 0
+    return _find_best_column_index(cols, target, synonyms)
 
 
 def smart_column_indices(cols):
-    indices = {}
-    for target, synonyms in COLUMN_SYNONYMS.items():
-        idx = find_best_column_index(cols, target, synonyms)
-        key = target.lower()
-        if idx < len(cols):
-            indices[key] = (idx, cols[idx])
-        else:
-            indices[key] = (0, cols[0] if cols else None)
-    return indices
+    return _smart_column_indices(cols)
 
 
 def validate_column_mapping(store_col, upc_col, desc_col, units_col, price_col):

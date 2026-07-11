@@ -79,6 +79,8 @@ def validate_config(cfg: FormatConfig) -> List[str]:
     # GENERAL
     if not cfg.file_type:
         errors.append("File type is not set (required: delimited, fixed, or multiline).")
+    elif cfg.file_type not in ("delimited", "fixed", "multiline"):
+        errors.append(f"Invalid file type '{cfg.file_type}'. Must be: delimited, fixed, or multiline.")
 
     # FILE
     if cfg.file_type == "fixed" and not cfg.layout_file:
@@ -91,6 +93,8 @@ def validate_config(cfg: FormatConfig) -> List[str]:
                 errors.append("HDR files require a detail layout CSV.")
         elif not cfg.ml_record_types:
             errors.append("Multiline files require record type prefixes (e.g. H,D).")
+    if cfg.file_type == "delimited" and not cfg.delimiter:
+        errors.append("Delimited files require a delimiter.")
 
     # SCHEMA
     if not cfg.schema and not cfg.detected_columns:
@@ -105,6 +109,10 @@ def validate_config(cfg: FormatConfig) -> List[str]:
         errors.append("Units column mapping is required.")
     if not cfg.price_col:
         errors.append("Price column mapping is required.")
+
+    # Price type
+    if cfg.price_type and cfg.price_type not in ("Total Price", "Unit Price"):
+        errors.append(f"Invalid price type '{cfg.price_type}'. Must be: Total Price or Unit Price.")
 
     # Check columns exist in schema
     all_cols = (cfg.schema or []) + (cfg.detected_columns or [])
@@ -133,16 +141,23 @@ def validate_section(cfg: FormatConfig, section: ConfigSection) -> List[str]:
     Returns a list of section-specific errors.
     """
     errors: List[str] = []
-    fields = stage_fields(cfg, section)
 
-    if section == ConfigSection.FILE:
+    if section == ConfigSection.GENERAL:
         if not cfg.file_type:
             errors.append("File type is required.")
-        if cfg.file_type == "fixed" and not cfg.layout_file and not cfg.layout_file:
+        elif cfg.file_type not in ("delimited", "fixed", "multiline"):
+            errors.append(f"Invalid file type '{cfg.file_type}'.")
+
+    elif section == ConfigSection.FILE:
+        if not cfg.file_type:
+            errors.append("File type is required.")
+        if cfg.file_type == "fixed" and not cfg.layout_file:
             errors.append("Fixed-width files need a layout CSV path (set in Stage B).")
         if cfg.file_type == "multiline":
             if not cfg.header_prefix and not cfg.ml_record_types:
                 errors.append("Multiline files need record types or HDR prefix.")
+        if cfg.file_type == "delimited" and not cfg.delimiter:
+            errors.append("Delimited files require a delimiter.")
 
     elif section == ConfigSection.SCHEMA:
         if not cfg.schema and not cfg.detected_columns:
@@ -157,5 +172,7 @@ def validate_section(cfg: FormatConfig, section: ConfigSection) -> List[str]:
             errors.append("Units column is required.")
         if not cfg.price_col:
             errors.append("Price column is required.")
+        if cfg.price_type and cfg.price_type not in ("Total Price", "Unit Price"):
+            errors.append(f"Invalid price type '{cfg.price_type}'.")
 
     return errors

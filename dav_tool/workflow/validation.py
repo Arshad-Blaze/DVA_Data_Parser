@@ -140,12 +140,24 @@ def _run_store_list_compare(store_agg, validation_opts, source=None):
     if store_agg is None or store_agg.is_empty():
         return {"missing_in_test": "", "missing_in_prod": ""}
 
-    from dav_tool.ui.helpers import load_storelist
-    storelist_df = load_storelist(
-        validation_opts.store_list_path,
-        validation_opts.store_list_delimiter,
-        source=source,
-    )
+    from dav_tool.io import safe_read_csv
+    from dav_tool.datasource.manager import get_active_source
+    _source = source or get_active_source()
+    local_path = validation_opts.store_list_path
+    if _source is not None:
+        try:
+            local_path = _source.download_if_required(validation_opts.store_list_path)
+        except Exception as e:
+            logger.warning("Failed to download storelist via source for %s: %s",
+                           validation_opts.store_list_path, e)
+    import os as _os
+    ext = _os.path.splitext(local_path)[-1].lower()
+    if ext in [".xlsx", ".xls"]:
+        storelist_df = pl.read_excel(local_path)
+    else:
+        storelist_df = safe_read_csv(
+            local_path, separator=validation_opts.store_list_delimiter,
+        )
     prod_series = store_agg.select(["STORE_NUMBER"])
     return compare_files(
         prod_series.to_series().to_frame("store"),
@@ -154,13 +166,17 @@ def _run_store_list_compare(store_agg, validation_opts, source=None):
     )
 
 
-def _run_store_list_compare_both(prod_store_agg, test_store_agg):
-    """Compare store lists between BAU and Test."""
+def _run_store_list_compare_both(prod_store_agg, test_store_agg, store_col: str = "STORE_NUMBER"):
+    """Compare store lists between BAU and Test.
+
+    *store_col* is the canonical column name in aggregated DataFrames
+    (default matches the normalizer output).
+    """
     if prod_store_agg is None or test_store_agg is None:
         return {"missing_in_test": "", "missing_in_prod": ""}
 
-    prod_series = prod_store_agg.select(["STORE_NUMBER"])
-    test_series = test_store_agg.select(["STORE_NUMBER"])
+    prod_series = prod_store_agg.select([store_col])
+    test_series = test_store_agg.select([store_col])
 
     if not prod_series.is_empty() and not test_series.is_empty():
         return compare_files(

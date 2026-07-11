@@ -178,7 +178,7 @@ def build_config(
             cfg.detected_columns = list(sample.columns)
             cfg.detected_data_types = _infer_data_types(sample)
 
-            from dav_tool.ui.helpers import smart_column_indices
+            from dav_tool._column_utils import smart_column_indices
             indices = smart_column_indices(sample.columns)
             mapping = {}
             for role, (idx, col) in indices.items():
@@ -349,7 +349,7 @@ def build_schema_section(
         cfg.detected_data_types = _infer_data_types(sample)
         cfg.schema = list(sample.columns)
 
-        from dav_tool.ui.helpers import smart_column_indices
+        from dav_tool._column_utils import smart_column_indices
         indices = smart_column_indices(sample.columns)
         mapping = {}
         for role, (idx, col) in indices.items():

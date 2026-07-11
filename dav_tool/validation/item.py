@@ -6,10 +6,13 @@ Calculation Engine (``calculations``) handles diff, pct-diff, and comparison.
 This module only wires them together and accepts pre-computed summaries.
 """
 
+import logging
 import time
 import polars as pl
 from dav_tool._aggregators import stream_item_aggregate
 from dav_tool.calculations import item_comparison, item_summary
+
+logger = logging.getLogger(__name__)
 
 
 def run_item_validation(
@@ -76,7 +79,7 @@ def run_item_validation(
     comparison = create_comparison(bau_summary, test_summary)
     summary = item_summary(comparison)
 
-    print(f"Time taken for item validation {time.time() - start_time}")
+    logger.info("Item validation completed in %.3fs", time.time() - start_time)
     return comparison, summary
 
 
