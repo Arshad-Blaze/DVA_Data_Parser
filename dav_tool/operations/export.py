@@ -61,4 +61,4 @@ class ExportOperation(IDataOperation):
             "format": options.format,
             "file_size_bytes": os.path.getsize(options.path) if os.path.exists(options.path) else 0,
         }
-        return OperationResult.from_df(df, self.name, elapsed, metadata=metadata)
+        return OperationResult.from_df(pl.DataFrame(), self.name, elapsed, metadata=metadata)

@@ -131,8 +131,10 @@ def item_comparison(
         classify_presence("BAU Units", "TEST Units")
     )
 
-    for col in ["BAU Units", "TEST Units", "BAU Dollars", "TEST Dollars"]:
-        df = df.with_columns(pl.col(col).cast(pl.Float64).fill_null(0.0))
+    df = df.with_columns([
+        pl.col(c).cast(pl.Float64).fill_null(0.0)
+        for c in ["BAU Units", "TEST Units", "BAU Dollars", "TEST Dollars"]
+    ])
 
     df = df.with_columns([
         (pl.col("BAU Units") - pl.col("TEST Units")).alias("Units Difference"),

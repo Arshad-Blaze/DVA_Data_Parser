@@ -62,8 +62,9 @@ class StatisticsOperation(IDataOperation):
                     if stat_name in ("min", "max", "mean", "median", "std"):
                         col_stats[stat_name] = float(stat_val) if stat_val is not None else None
 
-            # Top values
-            top_vals = series.value_counts().sort("count", descending=True).head(options.top_n)
+            # Top values — use top_k to avoid materializing all unique values
+            vc = series.value_counts()
+            top_vals = vc.top_k(options.top_n, by="count", reverse=True)
             top_vals = top_vals.rename({top_vals.columns[0]: "value"})
             col_stats["top_values"] = [
                 {"value": row["value"], "count": row["count"]}
