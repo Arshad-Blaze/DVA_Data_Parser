@@ -1,11 +1,15 @@
 """Pure calculation primitives for the Calculation Engine.
 
 Every function here is a pure function on Polars DataFrames/expressions.
-No file I/O, no aggregation, no parsing.
+No file I/O, no parsing.
+
+Aggregation on comparison results delegates to the Data Operations Framework
+(``AggregateOperation``) to avoid duplicating aggregation logic.
 """
 
 from typing import List, Optional
 import polars as pl
+from dav_tool.operations.aggregate import AggregateOperation, AggregateOptions
 
 
 def pct_diff(base_col: str, comp_col: str) -> pl.Expr:
@@ -143,12 +147,18 @@ def item_comparison(
 def item_summary(comparison_df: pl.DataFrame) -> pl.DataFrame:
     """Group an item comparison DataFrame by presence and sum the differences.
 
+    Delegates aggregation to the Data Operations Framework.
     Returns a DataFrame with columns: Present In, Units Difference, Dollar Difference.
     """
-    return comparison_df.group_by("Present In").agg([
-        pl.sum("Units Difference"),
-        pl.sum("Dollar Difference"),
-    ]).sort("Present In")
+    agg_op = AggregateOperation()
+    agg_opts = AggregateOptions(
+        group_by=["Present In"],
+        aggregations={"Units Difference": "sum", "Dollar Difference": "sum"},
+    )
+    result = agg_op.execute(comparison_df, agg_opts)
+    if result.errors:
+        raise ValueError(f"item_summary aggregation failed: {'; '.join(result.errors)}")
+    return result.df.sort("Present In")
 
 
 def sort_by_diff(

@@ -3,7 +3,9 @@
 Aggregation Engine (``_aggregators``) handles parsing → normalization → group-by → sum.
 Calculation Engine (``calculations``) handles diff, pct-diff, and comparison.
 
-This module only wires them together and accepts pre-computed summaries.
+This module wires them together, accepts pre-computed summaries,
+and delegates aggregation to the Data Operations Framework when
+working from canonical DataFrames.
 """
 
 import logging
@@ -11,6 +13,7 @@ import time
 import polars as pl
 from dav_tool._aggregators import stream_store_aggregate
 from dav_tool.calculations import store_diffs
+from dav_tool.operations.aggregate import AggregateOperation, AggregateOptions
 
 logger = logging.getLogger(__name__)
 
@@ -124,12 +127,24 @@ def storelevelvalidation_from_df(
 ):
     """Validate store-level data from canonical DataFrames.
 
-    Aggregation is done here (simple group-by), comparison is delegated
-    to the Calculation Engine.
+    Delegates aggregation to the Data Operations Framework,
+    then passes summaries to the Calculation Engine for comparison.
 
     Column names default to the canonical names produced by the normalizer
     but can be overridden for non-standard DataFrames.
     """
-    prod_summary = prod_df.group_by(store_col).agg([pl.sum(units_col), pl.sum(price_col)])
-    test_summary = test_df.group_by(store_col).agg([pl.sum(units_col), pl.sum(price_col)])
-    return _compare_store_summaries(prod_summary, test_summary)
+    agg_op = AggregateOperation()
+    agg_opts = AggregateOptions(
+        group_by=[store_col],
+        aggregations={units_col: "sum", price_col: "sum"},
+    )
+
+    prod_result = agg_op.execute(prod_df, agg_opts)
+    if prod_result.errors:
+        raise ValueError(f"Prod aggregation failed: {'; '.join(prod_result.errors)}")
+
+    test_result = agg_op.execute(test_df, agg_opts)
+    if test_result.errors:
+        raise ValueError(f"Test aggregation failed: {'; '.join(test_result.errors)}")
+
+    return _compare_store_summaries(prod_result.df, test_result.df)
