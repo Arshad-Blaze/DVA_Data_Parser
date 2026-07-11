@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import polars as pl
 from dav_tool._observability import ProcessingMetrics
+from dav_tool.options import OutputMode
 
 
 @dataclass
@@ -67,6 +68,9 @@ class ProcessingContext:
     store_agg: Optional[pl.DataFrame] = None
     item_agg: Optional[pl.DataFrame] = None
 
+    # === Output Mode ===
+    output_mode: OutputMode = OutputMode.VALIDATE
+
     # === Results ===
     compare_result: Optional[Dict[str, str]] = None
     upc_summary: Optional[pl.DataFrame] = None
@@ -131,3 +135,6 @@ class ExistingContext:
     validation_done: bool = False
     fr_prod: Optional[pl.DataFrame] = None
     fr_test: Optional[pl.DataFrame] = None
+
+    # === Output Mode ===
+    output_mode: OutputMode = OutputMode.VALIDATE

@@ -28,6 +28,7 @@ from dav_tool.ui.helpers import (
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
 from dav_tool.format_config import apply_format_config, load_format_config, save_format_config, config_from_ctx
+from dav_tool.options import OutputMode
 from dav_tool.config_builder import build_config
 from dav_tool.ui.helpers import (
     display_config_review, edit_and_accept_config,
@@ -415,8 +416,32 @@ def _phase4_processing(ctx):
                 cfg = config_from_ctx(ctx)
                 save_format_config(cfg, sp)
                 st.success(f"Config saved to {sp}")
-        if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
+
+        st.subheader("Data Operations")
+        output_mode_label = st.radio(
+            "What would you like to do?",
+            [OutputMode.VALIDATE.value, OutputMode.AGGREGATE_ONLY.value,
+             OutputMode.STATISTICS.value, OutputMode.EXPORT.value],
+            format_func=lambda x: {
+                "validate": "Validate & Generate Reports",
+                "aggregate_only": "Aggregate Only (skip validation)",
+                "statistics": "Aggregate & View Statistics",
+                "export": "Aggregate & Export",
+            }[x],
+            key="onb_output_mode",
+            horizontal=True,
+        )
+
+        proceed_label = {
+            "validate": "Proceed to Validation →",
+            "aggregate_only": "Run Aggregation",
+            "statistics": "Run Aggregation",
+            "export": "Run Aggregation",
+        }[output_mode_label]
+
+        if st.button(proceed_label, use_container_width=True):
             log_phase("Processing Started")
+            ctx.output_mode = OutputMode(output_mode_label)
             cleanup_dataframes(ctx)
             print_memory_snapshot("BEFORE AGGREGATION")
             try:
@@ -446,7 +471,10 @@ def _phase4_processing(ctx):
                 print_memory_snapshot("AFTER AGGREGATION")
                 log_dataframe_summary()
                 cleanup_dataframes(ctx, keep_attrs=["store_agg", "item_agg"])
-                ctx.phase = PHASE_VALIDATION
+                if ctx.output_mode == OutputMode.VALIDATE:
+                    ctx.phase = PHASE_VALIDATION
+                else:
+                    ctx.phase = PHASE_REPORTS
                 st.rerun()
             except Exception as e:
                 st.error(
