@@ -349,22 +349,24 @@ def _phase2_configuration(ctx):
 
     if not ctx.prod.config_locked:
         st.subheader("BAU Configuration")
-        prod_cfg = build_config(
-            ctx.prod.file_paths,
-            file_type=ctx.prod.file_type,
-            delimiter=ctx.prod.delimiter,
-            layout=ctx.prod.layout,
-            header_prefix=ctx.prod.header_prefix,
-            header_layout=ctx.prod.header_layout,
-            detail_layout=ctx.prod.detail_layout,
-            trailer_prefix=ctx.prod.trailer_prefix,
-            trailer_layout=ctx.prod.trailer_layout,
-            ml_record_types=ctx.prod.ml_record_types,
-            ml_delimiter=ctx.ml_delimiter,
-            source=_ex_source,
-            discovery=ctx.prod.discovery,
-        )
-        ctx._prod_cfg = prod_cfg
+        prod_cfg = getattr(ctx, '_prod_cfg', None)
+        if prod_cfg is None:
+            prod_cfg = build_config(
+                ctx.prod.file_paths,
+                file_type=ctx.prod.file_type,
+                delimiter=ctx.prod.delimiter,
+                layout=ctx.prod.layout,
+                header_prefix=ctx.prod.header_prefix,
+                header_layout=ctx.prod.header_layout,
+                detail_layout=ctx.prod.detail_layout,
+                trailer_prefix=ctx.prod.trailer_prefix,
+                trailer_layout=ctx.prod.trailer_layout,
+                ml_record_types=ctx.prod.ml_record_types,
+                ml_delimiter=ctx.ml_delimiter,
+                source=_ex_source,
+                discovery=ctx.prod.discovery,
+            )
+            ctx._prod_cfg = prod_cfg
         prod_cols = cached_get_column_names(
             ctx.prod.file_paths, ctx.prod.file_type,
             ctx.prod.delimiter or ",", ctx.prod.layout,
@@ -390,22 +392,24 @@ def _phase2_configuration(ctx):
 
     elif not ctx.test.config_locked:
         st.subheader("Test Configuration")
-        test_cfg = build_config(
-            ctx.test.file_paths,
-            file_type=ctx.test.file_type,
-            delimiter=ctx.test.delimiter,
-            layout=ctx.test.layout,
-            header_prefix=ctx.test.header_prefix,
-            header_layout=ctx.test.header_layout,
-            detail_layout=ctx.test.detail_layout,
-            trailer_prefix=ctx.test.trailer_prefix,
-            trailer_layout=ctx.test.trailer_layout,
-            ml_record_types=ctx.test.ml_record_types,
-            ml_delimiter=ctx.ml_delimiter,
-            source=_ex_source,
-            discovery=ctx.test.discovery,
-        )
-        ctx._test_cfg = test_cfg
+        test_cfg = getattr(ctx, '_test_cfg', None)
+        if test_cfg is None:
+            test_cfg = build_config(
+                ctx.test.file_paths,
+                file_type=ctx.test.file_type,
+                delimiter=ctx.test.delimiter,
+                layout=ctx.test.layout,
+                header_prefix=ctx.test.header_prefix,
+                header_layout=ctx.test.header_layout,
+                detail_layout=ctx.test.detail_layout,
+                trailer_prefix=ctx.test.trailer_prefix,
+                trailer_layout=ctx.test.trailer_layout,
+                ml_record_types=ctx.test.ml_record_types,
+                ml_delimiter=ctx.ml_delimiter,
+                source=_ex_source,
+                discovery=ctx.test.discovery,
+            )
+            ctx._test_cfg = test_cfg
         test_cols = cached_get_column_names(
             ctx.test.file_paths, ctx.test.file_type,
             ctx.test.delimiter or ",", ctx.test.layout,

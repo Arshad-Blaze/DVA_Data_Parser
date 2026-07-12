@@ -1,118 +1,65 @@
-A workflow integration bug still exists after the Workflow Refactoring Sprint.
+The workflow now reaches the Configuration phase successfully.
 
-The architecture is correct, but the implementation is not behaving correctly.
+However the workflow cannot progress beyond Step 3.
 
 Observed behaviour:
 
-1. Connection Manager successfully connects to the remote datasource.
-2. Remote directory is browsed.
-3. Files are listed.
-4. A file is selected.
-5. Raw preview is displayed successfully.
-6. DiscoveryResult should now exist.
+1. Discovery completes successfully.
+2. Configuration page loads.
+3. Configuration values are populated.
+4. Clicking "Confirm General Information" does not advance.
+5. No exception is displayed.
+6. No validation errors are displayed.
+7. Workflow remains on Configuration.
 
-However, after entering the Discovery phase the UI displays:
+Do NOT guess.
 
-"No files found at remote path..."
+Trace the entire execution path of the Confirm General Information button.
 
-This should never happen because Discovery must consume the DiscoveryResult already produced by Connection Manager.
+Verify:
 
-=================================================
+• Button callback executes.
+• Configuration object updates.
+• ProcessingContext updates.
+• Session state updates.
+• Configuration validator executes.
+• Validation result is returned.
+• Workflow phase changes.
+• Streamlit reruns.
+• Updated ProcessingContext survives rerun.
 
-TASK
+For every step print:
 
-Perform a full trace of the workflow.
+PASS
 
-Connection Manager
+or
 
-↓
+FAIL
 
-Discovery
+with the exact reason.
 
-↓
+Also verify:
 
-Configuration Builder
+• Which condition controls transition from Configuration → Validate Config?
 
-Verify every transition.
+• Which variable is checked?
 
-=================================================
+• Which variable is set?
 
-Specifically verify
+Ensure they are the same object.
 
-• Is DiscoveryResult actually stored in session state?
+If validation fails, display every validation error to the user.
 
-• Is it copied into ProcessingContext?
+Silent failures are not acceptable.
 
-• Is ProcessingContext passed into Discovery?
+If validation succeeds, automatically advance to Validate Config.
 
-• Is Discovery reading ctx.discovery?
+Fix the issue.
 
-• Is Discovery unnecessarily calling get_file_list()?
+Run Playwright and regression tests afterwards.
 
-• Is Discovery unnecessarily calling datasource.list()?
+Also silence the Polars warning by explicitly specifying:
 
-• Is Discovery rebuilding file paths?
+orient="row"
 
-• Is the remote datasource being replaced with a local datasource?
-
-• Is session_state cleared between pages?
-
-• Is the DiscoveryResult path matching logic failing?
-
-=================================================
-
-For every phase produce a trace such as:
-
-Connection Manager
-Created DiscoveryResult ✓
-
-Stored in session_state ✓
-
-Copied into ProcessingContext ✓
-
-Discovery
-Received ProcessingContext ✓
-
-Received DiscoveryResult ✓
-
-Skipped Detection ✓
-
-Skipped File Enumeration ✓
-
-Skipped Preview Generation ✓
-
-Configuration
-Received DiscoveryResult ✓
-
-Used existing metadata ✓
-
-Skipped re-detection ✓
-
-=================================================
-
-If any phase performs duplicate work, remove it.
-
-Discovery should become a confirmation page.
-
-It should NEVER
-
-• enumerate files again
-• rediscover file type
-• regenerate preview
-• rediscover delimiter
-• rediscover multiline
-• rediscover layouts
-
-unless the user explicitly changes the selected dataset.
-
-=================================================
-
-Also review the UI.
-
-Once a dataset has been selected in Connection Manager, Discovery should not expose controls that imply another file selection unless the user intentionally requests to change the source.
-
-=================================================
-
-Run the complete Playwright suite and regression tests afterwards.
-
-Produce a root-cause report explaining why the duplicate workflow still occurred even after the Workflow Refactoring Sprint.
+This warning is not the root cause but should be cleaned up.

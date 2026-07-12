@@ -341,9 +341,9 @@ def preview_raw(
             if not rows:
                 return pl.DataFrame()
             return (
-                pl.DataFrame(rows[1:], schema=rows[0])
+                pl.DataFrame(rows[1:], schema=rows[0], orient="row")
                 if len(rows) > 1
-                else pl.DataFrame(rows)
+                else pl.DataFrame(rows, orient="row")
             )
 
         elif file_type == "fixed":

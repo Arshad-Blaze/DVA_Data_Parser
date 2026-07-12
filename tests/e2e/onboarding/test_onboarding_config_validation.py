@@ -25,6 +25,9 @@ class TestOnboardingConfigValidation:
         page.wait_for_timeout(1500)
         self._complete_config_wizard(page)
         page.wait_for_timeout(1000)
+        expect(page.get_by_text("Configuration complete")).to_be_visible()
+        page.get_by_role("button", name="Validate Configuration").click()
+        page.wait_for_timeout(1500)
 
     def test_config_validation_heading(self, onb_page: Page, test_data: dict):
         page = onb_page

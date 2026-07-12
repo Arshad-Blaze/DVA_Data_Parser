@@ -327,22 +327,24 @@ def _phase2_configuration(ctx):
     _onb_source = get_active_source()
 
     if getattr(ctx, '_show_config', False) and not ctx.config_locked:
-        cfg = build_config(
-            ctx.file_paths,
-            file_type=ctx.file_type,
-            delimiter=ctx.delimiter,
-            layout=ctx.layout,
-            header_prefix=ctx.header_prefix,
-            header_layout=ctx.header_layout,
-            detail_layout=ctx.detail_layout,
-            trailer_prefix=ctx.trailer_prefix,
-            trailer_layout=ctx.trailer_layout,
-            ml_record_types=ctx.ml_record_types,
-            ml_delimiter=ctx.ml_delimiter or "|",
-            source=_onb_source,
-            discovery=ctx.discovery,
-        )
-        ctx._generated_config = cfg
+        cfg = getattr(ctx, '_generated_config', None)
+        if cfg is None:
+            cfg = build_config(
+                ctx.file_paths,
+                file_type=ctx.file_type,
+                delimiter=ctx.delimiter,
+                layout=ctx.layout,
+                header_prefix=ctx.header_prefix,
+                header_layout=ctx.header_layout,
+                detail_layout=ctx.detail_layout,
+                trailer_prefix=ctx.trailer_prefix,
+                trailer_layout=ctx.trailer_layout,
+                ml_record_types=ctx.ml_record_types,
+                ml_delimiter=ctx.ml_delimiter or "|",
+                source=_onb_source,
+                discovery=ctx.discovery,
+            )
+            ctx._generated_config = cfg
         all_done = progressive_config_wizard(
             cfg, detected_columns=ctx.columns,
             key_prefix="onb", file_paths=ctx.file_paths,
@@ -359,7 +361,6 @@ def _phase2_configuration(ctx):
             ctx.price_type = cfg.price_type
             ctx.implied_dollars = cfg.implied_dollars
             ctx.implied_units = cfg.implied_units
-            ctx.phase = PHASE_CONFIG_VALIDATED
             st.rerun()
 
     if ctx.config_locked:

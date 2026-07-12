@@ -20,7 +20,7 @@ class TestOnboardingConfigBuilder:
         self._fill_folder(page, test_data["onboarding_dir"])
         page.get_by_role("button", name="Progressive Configuration").click()
         page.wait_for_timeout(1500)
-        expect(page.get_by_text("General Information")).to_be_visible()
+        expect(page.get_by_text("General Information", exact=True)).to_be_visible()
 
     def test_config_shows_detected_columns(self, onb_page: Page, test_data: dict):
         page = onb_page
@@ -67,6 +67,9 @@ class TestOnboardingConfigBuilder:
             page.get_by_role("button", name=f"Confirm {label}").click()
             page.wait_for_timeout(500)
         page.wait_for_timeout(1000)
+        expect(page.get_by_text("Configuration complete")).to_be_visible()
+        page.get_by_role("button", name="Validate Configuration").click()
+        page.wait_for_timeout(1500)
         page.get_by_role("button", name="Proceed to Processing").click()
         page.wait_for_timeout(1500)
         expect(page.get_by_text("Retailer Store Column")).to_be_visible()
