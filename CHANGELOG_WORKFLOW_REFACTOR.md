@@ -61,6 +61,68 @@ which returned "fixed" for empty input.
 
 **Fix:** Early return with empty `FormatConfig()` when no file path provided.
 
+### 5. Connection Manager → Discovery "No files found" Bug
+**File:** `dav_tool/ui/onboarding.py`
+**Severity:** Critical
+
+`_phase1_discovery()` called `get_file_list()` which required explicit file paths,
+but the CM stored a folder path. When the CM was active, the fallback `get_file_list()`
+returned no files, showing "No files found" even though CM had already discovered them.
+
+**Fix:** Reordered `_phase1_discovery()` to check `_cm_discovery` FIRST. If CM has a
+valid result (file_paths + file_type), consume it directly. Fallback to `get_file_list()`
++ `detect_file()` only when no CM result.
+
+### 6. Config Wizard Stuck (Config → Validate Config)
+**File:** `dav_tool/ui/onboarding.py`, `dav_tool/ui/existing.py`
+**Severity:** Critical
+
+`build_config()` was called on every Streamlit rerun, creating fresh `FormatConfig`
+with empty `_completed_sections`. The wizard could never complete because sections
+were reset on each rerun.
+
+**Fix:** Reuse existing `ctx._generated_config` via `getattr(ctx, '_generated_config', None)`.
+Only call `build_config()` when no config exists yet.
+
+### 7. "Configuration complete" Never Shown
+**File:** `dav_tool/ui/onboarding.py`
+**Severity:** High
+
+The `all_done` block in `_phase2_configuration()` set `ctx.phase = PHASE_CONFIG_VALIDATED`
++ `st.rerun()`, so the `if ctx.config_locked:` block (which renders "Configuration complete.
+Proceed to validation.") was never reached.
+
+**Fix:** Removed premature phase advance from `all_done` block. The button now appears
+correctly after config is locked.
+
+### 8. Connection Manager Per-Side Discovery Keys
+**File:** `dav_tool/ui/connection_manager.py`
+**Severity:** High
+
+`_show_path_preview()` stored all discoveries under `_cm_discovery`, so selecting BAU
+overwrote Test's discovery (or vice versa).
+
+**Fix:** Added `discovery_key` parameter to `_show_path_preview()`. Existing workflow
+stores BAU/Test under `_cm_bau_discovery` / `_cm_test_discovery`.
+
+### 9. Explicit file_paths Assignment
+**File:** `dav_tool/ui/connection_manager.py`
+**Severity:** Medium
+
+The Connection Manager's `_show_path_preview()` detected file type and columns but
+did not set `discovery.file_paths = file_paths` before storing the result. Downstream
+consumption found `file_paths` empty.
+
+**Fix:** Added explicit `discovery.file_paths = file_paths` before session storage.
+
+### 10. Polars DataFrame Constructor Warning
+**File:** `dav_tool/_parsers.py`
+**Severity:** Low
+
+`pl.DataFrame(rows)` produced a warning about `orient` parameter.
+
+**Fix:** Added `orient="row"` to `pl.DataFrame(rows)` construction.
+
 ---
 
 ## Architecture Changes
@@ -133,6 +195,26 @@ This is the bridge between the Discovery phase and all downstream phases.
 ALWAYS uses the source — never falls back to local filesystem. Falls back to
 local only when source is None (local mode).
 
+### 12. FormatConfig Reuse (Config Wizard Fix)
+**Files:** `dav_tool/ui/onboarding.py`, `dav_tool/ui/existing.py`
+
+`build_config()` is no longer called on every Streamlit rerun. The existing
+`ctx._generated_config` is reused via `getattr()`. This prevents the config
+wizard from being stuck with empty `_completed_sections`.
+
+### 13. Per-Side Discovery Keys (Existing Page)
+**File:** `dav_tool/ui/connection_manager.py`
+
+`_show_path_preview()` now accepts a `discovery_key` parameter. The Existing
+workflow stores BAU and Test discoveries separately under `_cm_bau_discovery`
+and `_cm_test_discovery` to prevent overwrite.
+
+### 14. Explicit file_paths Assignment
+**File:** `dav_tool/ui/connection_manager.py`
+
+Added `discovery.file_paths = file_paths` before session storage to ensure
+downstream consumption has valid paths.
+
 ---
 
 ## Files Modified
@@ -140,13 +222,16 @@ local only when source is None (local mode).
 | File | Change |
 |------|--------|
 | `dav_tool/detection.py` | Fixed false positive in `is_multiline_record()` |
+| `dav_tool/_parsers.py` | Added `orient="row"` to `pl.DataFrame(rows)` |
 | `dav_tool/workflow/discovery.py` | Enhanced `DiscoveryResult` with full metadata, `from_context()`, `apply_to_context()`, `needs_flattening` |
 | `dav_tool/processing_context.py` | Added `discovery` field to `ProcessingContext` |
 | `dav_tool/config_builder.py` | Added `discovery` parameter to `build_config()`, early return on empty paths |
-| `dav_tool/ui/connection_manager.py` | `_show_path_preview()` uses Discovery service, stores result |
-| `dav_tool/ui/onboarding.py` | `_phase1_discovery()` consumes existing DiscoveryResult, fixed misleading message |
-| `dav_tool/ui/existing.py` | `_detect_and_set()` uses Discovery service |
+| `dav_tool/ui/connection_manager.py` | `_show_path_preview()` uses Discovery service, stores result, per-side discovery keys, explicit file_paths |
+| `dav_tool/ui/onboarding.py` | `_phase1_discovery()` consumes existing DiscoveryResult, fixed misleading message, config wizard reuse |
+| `dav_tool/ui/existing.py` | `_detect_and_set()` uses Discovery service, config wizard reuse |
 | `dav_tool/ui/helpers.py` | Fixed cache key, documented remote fallback behavior |
+| `tests/e2e/onboarding/test_onboarding_config_builder.py` | Fixed strict mode, updated flow test |
+| `tests/e2e/onboarding/test_onboarding_config_validation.py` | Updated `_navigate_to_config_validation` helper |
 
 ---
 
@@ -185,3 +270,6 @@ No duplicated backend work occurs between phases.
 No misleading messages displayed.
 No local filesystem logic invoked during remote streaming workflows.
 Flattening only executes for multiline/hierarchical/header-detail formats.
+Config wizard is not stuck on reruns (FormatConfig reuse).
+"Configuration complete" message now visible (no premature phase advance).
+Per-side discoveries prevent overwrite (Existing page).

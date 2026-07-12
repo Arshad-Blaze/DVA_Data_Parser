@@ -75,6 +75,10 @@ The UI only renders workflow state.
 
 No intermediate files are written. The pipeline streams from raw files to results.
 
+**Discovery consumption:** The Discovery phase reuses the Connection Manager's `DetectionResult` without re-detection. For the Existing page, BAU and Test discoveries are stored separately under `_cm_bau_discovery` and `_cm_test_discovery`.
+
+**Progressive config wizard:** Configuration is presented in 6 sections (General, File, Schema, Business Rules, Validation, Output), one at a time. Each section must be confirmed before proceeding. The wizard uses `FormatConfig.mark_section_complete()` and `FormatConfig.is_config_complete()` to track progress.
+
 ---
 
 ## Workflow Layer
@@ -233,13 +237,25 @@ release_df(df, name="store_agg")  # unregisters + GC
 
 Serializable file format description. Sections: General, File, Schema, Business Rules, Validation, Output.
 
+**Progressive wizard:** The config wizard presents sections one at a time. Each section is confirmed via `mark_section_complete()`. The wizard checks `is_config_complete()` to determine when all sections are done.
+
+**Config Name:** A cosmetic label used for download filenames and toasts. Not a file path.
+
 ### ValidationConfig
 
 Per-validation settings: `store_validation`, `item_validation`, `compare_store_list`, `file_review`. Each has `required_columns`, `group_by_columns`, `aggregation_columns`.
 
 ### ConfigValidator
 
-Progressive validation of config completeness.
+Progressive validation of config completeness. Used by the wizard to validate each section before allowing confirmation.
+
+### Config Builder
+
+`build_config()` accepts an optional `discovery: DiscoveryResult` parameter. When provided, it reuses detected file_type, delimiter, header_prefix, ml_record_types, and layout metadata — no re-detection.
+
+### ProcessingContext
+
+Carries `discovery: Optional[DiscoveryResult]` as the bridge between Discovery and all downstream phases.
 
 ---
 

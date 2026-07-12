@@ -31,6 +31,8 @@ DAV Tool needs to know the structure of your files before it can process them. A
 
 Get these details first so you can set up the tool quickly when you launch it.
 
+> **Tip:** If you have a saved config JSON, you can skip most manual setup — the wizard will pre-fill settings from it.
+
 ### Launching the app
 
 Open a terminal and run:
@@ -55,10 +57,16 @@ Your web browser will open automatically showing the DAV Tool interface.
 
 ### The two pages
 
-At the top of the screen you'll see two buttons:
+At the top of the screen you'll see the **Connection Manager** (for connecting to local or SSH data sources) and two page buttons:
 
 - **Onboarding** — Use when you have **one** data file and want to validate it against a store list or generate a UPC summary.
 - **Existing** — Use when you have **two** data files (BAU = current/approved, Test = new/changed) and want to compare them.
+
+Both pages follow the same 7-step workflow:
+
+```
+1. Connection (CM) → 2. Discovery → 3. Configuration → 4. Validate Config → 5. Processing → 6. Validation → 7. Reports
+```
 
 ---
 
@@ -66,75 +74,90 @@ At the top of the screen you'll see two buttons:
 
 For when you have a single data file.
 
-### Step 1: Point to your file
+### Step 1: Connection Manager
 
-Enter the folder path or file path. DAV Tool will automatically detect whether it's:
-- **Delimited** (CSV, pipe, tab) — shown in green
-- **Fixed-width** — shown with a warning, you'll need a layout CSV
-- **Multi-line HDR (delimited)** — shown with a warning, you'll see record-type prefixes like `H|` and `D|`
-- **Multi-line HDR (fixed-width)** — shown with a warning; the HDR prefix (e.g. `HDR`) is auto-detected
+Before entering the Onboarding page, the **Connection Manager** appears at the top of the screen. You can:
 
-#### Quick start: load a saved config
+- **Use Local File System** — browse and select files from your local machine
+- **Connect to SSH Server** — enter credentials to browse remote files via SFTP
 
-If you've configured DAV Tool before, you can skip the manual setup entirely:
+Once connected, select a file or folder. The Connection Manager automatically detects the file type and stores a **DiscoveryResult** for downstream use.
 
-1. Enter your folder path
-2. In the **"Optional: Load Config (JSON)"** field, enter the path to a saved config JSON file
-3. DAV Tool loads all settings automatically — layouts, prefixes, column mapping
-4. The flattened preview appears immediately
-5. Click **"Proceed to Column Mapping"** to go straight to validation
+### Step 2: Discovery — File Detection & Preview
 
-Config files save all parsing settings: file type, delimiter, layout file paths, header/detail/trailer prefixes, and column mapping. They make repeatable processing fast and consistent.
+When you navigate to the Onboarding page, DAV Tool **consumes the Connection Manager's DiscoveryResult** — no re-detection occurs. The file type, delimiter, columns, and layout are all reused.
 
-### Step 2 (Multi-line only): Flatten the data
+If no Connection Manager result is available, you can:
+1. Enter a folder path or file path manually
+2. DAV Tool runs detection and shows the result
 
-**For delimited multiline files** (prefixes like `H|`, `D|`):
+Once detection completes, you'll see:
+- **Column count detected** (e.g. "Parsing complete — 5 column(s) detected")
+- Click **"Progressive Configuration →"** to proceed
 
-1. Look at the **Raw Preview** to see the prefixes
-2. DAV Tool auto-detects the prefixes — adjust if needed
-3. Click **Flatten Records**
-4. Review the **Flattened Preview**
-5. Rename the generic column names (Column_0, Column_1, etc.) to meaningful names
-6. Click **Apply Schema**
+### Step 3: Configuration — Progressive Config Wizard
 
-**For HDR fixed-width files** (prefixes like `HDR`):
+The configuration wizard walks you through **6 sections** in order:
 
-1. Look at the **Raw Preview** to see the raw lines
-2. DAV Tool shows `HDR prefix detected: HDR`
-3. Enter the **Header Layout CSV** path (describes header fields like Store, Date)
-4. Enter the **Detail Layout CSV** path (describes detail fields like UPC, Description, Units, Price)
-5. (Optional) If your files have **trailer/TRL lines**, enter:
-   - **Trailer Prefix** — usually `TRL`
-   - **Trailer Layout CSV** — describes trailer fields (e.g. TotalUnits, TotalPrice)
-6. Click **Flatten Records**
-7. Review the **Flattened Preview** — header and trailer fields are carried into each detail row
-8. Rename columns and click **Apply Schema**
+| Section | What you configure |
+|---|---|
+| **General** | Configuration name (label), file type, encoding, has header |
+| **File Format** | Delimiter, layout CSV, start line, record type, multiline settings |
+| **Schema & Columns** | Review detected columns, edit schema if needed |
+| **Business Rules** | Column mapping (Store, UPC, Description, Units, Price), price type, implied decimals |
+| **Validation** | Enable/disable validations (store, item, compare store list, file review) |
+| **Output** | Output format and report options |
 
-### Step 3: Preview and set options
+Each section must be confirmed before moving to the next. Completed sections are marked with a checkmark.
 
-For fixed-width files, enter:
-- **Layout CSV** — a file describing column positions (see Layout CSV Format below)
-- **Start Line** — skip header rows if needed
-- **Record Type** — filter to lines starting with a specific letter (e.g. `U` for UPC records)
+**Config Name** is a cosmetic label for the configuration being built. It is used as:
+- The default download filename (`{name}.json`)
+- A label shown in success toasts
+- A field serialized into the saved JSON
 
-### Step 4: Map columns
+It is **not** the name of an existing file to load. Leave it blank if you don't need a name.
 
-Select which column in your data corresponds to:
+After completing all sections, the configuration is **locked** and you see:
+> "Configuration complete. Proceed to validation."
+
+Click **"Validate Configuration →"** to proceed.
+
+### Step 4: Validate Configuration
+
+Review the full configuration summary. You can:
+
+- **Edit Configuration** — go back to modify settings
+- **Download Config as JSON** — save the config for future use
+- **Accept Configuration** — lock the config and proceed to processing
+
+Click **"Accept Configuration →"** to proceed.
+
+### Step 5: Processing
+
+Select which column corresponds to:
 - **Retailer Store Column** — store identifier
 - **UPC Column** — product code
 - **Description Column** — product name
 - **Units Column** — quantity sold
 - **Price Column** — dollar amount
 
-### Step 5: Choose validations
+Click **"Confirm Mapping"** then **"Proceed to Processing & Validation →"**.
 
-- **Compare Store List** — upload a store list file; DAV Tool shows which stores are missing from either side
+DAV Tool aggregates the data (Store + Item summaries in parallel) and moves to the Validation phase.
+
+### Step 6: Validation
+
+Choose which validations to run:
+
+- **Compare Store List** — upload a store list file; DAV Tool shows which stores are missing
 - **Generate Unique UPC Summary** — lists every UPC with total units and dollars
 - **File Review Report** — per-file metadata summary
 
-### Step 6: Review results
+Click **"Run Validation"** to execute.
 
-Results appear in an expandable section:
+### Step 7: Review Results
+
+Results appear in expandable sections:
 - Missing stores are listed as text
 - UPC summary is shown as a table (downloadable as CSV)
 - File review report shows per-file counts
@@ -145,30 +168,70 @@ Results appear in an expandable section:
 
 For comparing two data files (BAU vs Test).
 
-### Step 1: Point to both files
+### Step 1: Connection Manager
 
-Enter the folder/file path for:
-- **BAU** (left column) — your current/approved data
-- **Test** (right column) — the new data to compare
+The Connection Manager allows you to connect via local filesystem or SSH. For the Existing page, you can select **two paths** (BAU and Test) using the same Connection Manager interface.
 
-Each side also has an **"Optional: BAU Config (JSON)"** / **"Optional: Test Config (JSON)"** field. Load a saved config to skip manual setup for that side.
+### Step 2: Discovery — File Detection & Preview
 
-### Step 2: Configure each file
+DAV Tool **consumes the Connection Manager's DiscoveryResult for each side** — no re-detection occurs. The file type, delimiter, columns, and layout are all reused from the BAU and Test selections.
 
-Follow the same steps as Onboarding for each file:
-- Multi-line files need flattening and schema naming
-- Fixed-width files need a layout CSV
-- Delimited files are auto-detected
-- **Load a saved config** to bypass all manual setup for a side
+If no Connection Manager result is available, you can:
+1. Enter BAU and Test folder/file paths manually
+2. DAV Tool runs detection for each side independently
 
-### Step 3: Map columns for both files
+Each side has its own **DiscoveryResult** stored under `_cm_bau_discovery` and `_cm_test_discovery`.
 
-You'll see two columns of dropdown menus. Map the same concepts (Store, UPC, Description, Units, Price) for both BAU and Test. Additional options:
+Once detection completes, click **"Progressive Configuration →"** to proceed.
 
+### Step 3: Configuration — Progressive Config Wizard (per side)
+
+Each side (BAU and Test) has its own configuration wizard with the same 6 sections:
+
+| Section | What you configure |
+|---|---|
+| **General** | Configuration name (label), file type, encoding, has header |
+| **File Format** | Delimiter, layout CSV, start line, record type, multiline settings |
+| **Schema & Columns** | Review detected columns, edit schema if needed |
+| **Business Rules** | Column mapping (Store, UPC, Description, Units, Price), price type, implied decimals |
+| **Validation** | Enable/disable validations (store, item, compare store list, file_review) |
+| **Output** | Output format and report options |
+
+Complete the wizard for BAU first, then for Test.
+
+### Step 4: Validate Configuration
+
+Review the configuration summary for both sides. You can:
+
+- **Edit Configuration** — go back to modify settings
+- **Download Config as JSON** — save the config for future use
+- **Accept Configuration** — lock the config and proceed to processing
+
+Click **"Accept Configuration →"** to proceed.
+
+### Step 5: Processing
+
+Map columns for both files:
+
+| Column | Description |
+|---|---|
+| **Retailer Store Column** | Store identifier |
+| **UPC Column** | Product code |
+| **Description Column** | Product name |
+| **Units Column** | Quantity sold |
+| **Price Column** | Dollar amount |
+
+Additional options:
 - **Price Type** — choose **Total Price** (already a total) or **Unit Price** (multiplied by units)
 - **Implied Decimal** — check this if your file stores `9999` to mean `99.99`
 
-### Step 4: Choose validations
+Click **"Confirm Mapping"** then **"Proceed to Processing & Validation →"**.
+
+DAV Tool aggregates the data (Store + Item summaries in parallel) and moves to the Validation phase.
+
+### Step 6: Validation
+
+Choose which validations to run:
 
 | Validation | What it shows |
 |---|---|
@@ -178,7 +241,9 @@ You'll see two columns of dropdown menus. Map the same concepts (Store, UPC, Des
 | **Summary** | Aggregate totals of how many items match vs differ |
 | **File Review Report** | Per-file metadata (store count, UPC count, totals) |
 
-### Step 5: Review results
+Click **"Run Validation"** to execute.
+
+### Step 7: Review Results
 
 All results appear in a single expandable section:
 
@@ -460,7 +525,7 @@ Layout file paths can be absolute or relative to the config file's directory.
 | Field | Description |
 |---|---|
 | `version` | Config format version (currently 2) |
-| `name` | Optional friendly name for this configuration |
+| `name` | **Cosmetic label** for the configuration (used as default download filename, shown in toasts). Not a file path. |
 | `file_type` | `delimited`, `fixed`, or `multiline` |
 | `encoding` | File encoding detected (`cp1252`, `utf-8`, etc.) |
 | `has_header` | Whether the file has a header row |
@@ -487,19 +552,20 @@ Layout file paths can be absolute or relative to the config file's directory.
 
 ### How to save a config
 
-1. Go through the normal setup flow (folder, layouts, flatten, schema)
-2. In the **Column Mapping** phase, after clicking "Confirm Mapping"
-3. Enter a file path in the **"Save config to"** field
-4. Click **"Save Config"** — a JSON file is written to disk
+1. Complete the progressive configuration wizard (all 6 sections)
+2. The configuration is automatically locked
+3. In the **Validate Configuration** phase, click **"Download Config as JSON"**
+4. Enter a filename (default: `{config_name}.json` or `config.json`)
 
 ### How to load a config
 
 1. Launch DAV Tool and navigate to **Onboarding** or **Existing**
-2. Enter your folder path as usual
-3. In the **"Optional: Load Config (JSON)"** field, enter the path to your saved config JSON
-4. DAV Tool loads all settings automatically — layouts, prefixes, column mapping
-5. For multiline files, the flattened preview appears immediately
-6. Click **"Proceed to Column Mapping"** to go straight to validation
+2. Connect to your data source (local or SSH) via the Connection Manager
+3. Select your files — DAV Tool detects the file type automatically
+4. In the Configuration phase, the wizard starts with detected settings
+5. To load a previously saved config, click **"Load Config"** and enter the path to your saved JSON
+6. The wizard pre-fills all settings from the config
+7. Click **"Accept Configuration"** to lock and proceed
 
 Config files let you onboard the same retailer repeatedly without re-entering settings.
 
@@ -538,7 +604,7 @@ Useful for quickly checking that your files contain the expected data volume.
 
 Both pages have a **Developer Mode** checkbox in the sidebar. When enabled, it shows live diagnostics:
 
-- Current pipeline phase
+- Current pipeline phase (Connection → Discovery → Configuration → Validate Config → Processing → Validation → Reports)
 - File type detection status
 - Memory and CPU usage
 - Aggregation row counts
@@ -554,3 +620,6 @@ This is useful for debugging and understanding what the pipeline is doing at eac
 - **Encoding** — UTF-8 and Windows cp1252 are both supported automatically
 - **Multi-line with different record types** — you can process H and D records separately by entering `H` or `D` as the record type filter
 - **Layout CSV errors** — make sure column headers are exactly `From,Length,Field,Type` (case-insensitive)
+- **Config Name** — The name field in the config wizard is a cosmetic label, not a file path. Use it to identify the config in toasts and download filenames.
+- **Progressive Wizard** — Each section must be confirmed before moving to the next. You can go back and edit completed sections.
+- **Connection Manager** — Use the CM to connect to local or SSH sources before entering a page. Discovery reuses CM's result without re-detection.

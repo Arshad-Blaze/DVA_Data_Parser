@@ -50,6 +50,24 @@ Reports
 
 ---
 
+## Workflow Phases
+
+The pipeline follows 7 phases:
+
+```
+1. Connection (CM) → 2. Discovery → 3. Configuration → 4. Validate Config → 5. Processing → 6. Validation → 7. Reports
+```
+
+- **Connection:** User connects via local filesystem or SSH (Connection Manager)
+- **Discovery:** File detection, preview, column extraction (reuses CM's DetectionResult)
+- **Configuration:** Progressive config wizard (6 sections: General, File, Schema, Business Rules, Validation, Output)
+- **Validate Config:** Review and accept configuration
+- **Processing:** Full dataset read, aggregation (Store + Item in parallel)
+- **Validation:** Run selected validations
+- **Reports:** Review results and download CSVs
+
+---
+
 ## Module Responsibilities
 
 ### UI
@@ -58,7 +76,7 @@ Handles
 
 - User workflow
 - Upload
-- Configuration
+- Configuration (progressive config wizard)
 - Progress
 - Display
 
@@ -72,12 +90,14 @@ Orchestrates the pipeline using service functions.
 
 Modules
 
-- `dav_tool/workflow/discovery.py` — File detection, preview, column extraction
+- `dav_tool/workflow/discovery.py` — File detection, preview, column extraction, DetectionResult
 - `dav_tool/workflow/processing.py` — Aggregation orchestration, file review
 - `dav_tool/workflow/validation.py` — Validation orchestration
 - `dav_tool/options.py` — Option dataclasses (ParseOptions, ColumnMapping, AggregationOptions, ValidationOptions)
 
 No Streamlit imports. No rendering. Pure processing logic.
+
+**Discovery consumption:** The Discovery phase reuses the Connection Manager's DetectionResult without re-detection. For the Existing page, BAU and Test discoveries are stored separately.
 
 ---
 
@@ -153,6 +173,7 @@ Option dataclasses replace parameter explosion with structured configuration.
 | `AggregationOptions` | Flags for what to compute |
 | `ValidationOptions` | Flags for what to validate |
 | `WorkflowState` | Current phase, progress, errors |
+| `ProcessingContext` | Carries `discovery: DetectionResult` as bridge between Discovery and downstream phases |
 
 ---
 
@@ -191,5 +212,5 @@ Memory usage should remain predictable.
 - Better logging
 - Configurable detection pipeline
 - Plugin parsers
-- Configurable validations
+- Configurable validations (partially implemented via ValidationConfig)
 - Background processing

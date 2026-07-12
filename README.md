@@ -93,13 +93,27 @@ dav_tool/
 ├── io.py                Safe CSV reader with encoding fallback
 ├── config.py            Shared constants
 ├── format_config.py     Config-driven parsing (load/save JSON configs)
+├── config_builder.py    Build FormatConfig from detected files
+├── config_validator.py  Progressive validation of config completeness
 ├── processing_context.py Dataclass definitions
+├── options.py           ParseOptions, ColumnMapping, AggregationOptions, ValidationOptions
+├── datasource/          Data source abstraction (local, SSH/SFTP)
+│   ├── base.py          IDataSource interface
+│   ├── local.py         LocalDataSource
+│   ├── ssh.py           SSHDataSource
+│   └── manager.py       ConnectionManager singleton
+├── workflow/            Workflow layer (phases, state, discovery, processing, validation)
+│   ├── __init__.py      WorkflowPhase enum, WorkflowState, Workflow protocol
+│   ├── discovery.py     File detection, preview, DiscoveryResult
+│   ├── processing.py    Aggregation orchestration
+│   └── validation.py    Validation orchestration
 ├── validation/
 │   ├── store.py         Store-level validation logic
 │   └── item.py          Item-level validation logic
 └── ui/
     ├── app.py           Streamlit entry point (page dispatch)
-    ├── helpers.py       Shared UI helpers
+    ├── connection_manager.py  Connection Manager UI
+    ├── helpers.py       Shared UI helpers (progressive wizard, phase progress)
     ├── onboarding.py    Onboarding page logic
     └── existing.py      Existing/BAU page logic
 ```
@@ -113,6 +127,9 @@ dav_tool/
 - **Parallel aggregation** — independent aggregation calls (BAU/Test, Store/Item) run concurrently via `ThreadPoolExecutor`, cutting wall-clock time by up to 75%
 - **Memory observability** — DataFrame registry tracks live references; peak-memory snapshots and per-phase release logging via `ProcessingMetrics`
 - **Config builder** — reads only 100 sample rows to detect encoding, delimiter, schema, data types, and column mapping; config is locked after acceptance, then full dataset is read exactly once
+- **Progressive config wizard** — 6 sections (General, File, Schema, Business Rules, Validation, Output) presented one at a time; each must be confirmed before proceeding
+- **CM discovery consumption** — Discovery phase reuses Connection Manager's DetectionResult without re-detection
+- **Per-side discovery keys** — Existing page stores BAU and Test discoveries separately (`_cm_bau_discovery`, `_cm_test_discovery`)
 - **Golden dataset** — 12 parametrized regression tests in `tests/test_golden.py` compare current pipeline output against saved golden CSVs for all formats; regenerate with `python -m tests.golden.generate_golden`
 
 ### Running tests
@@ -131,36 +148,30 @@ E2E test benchmark results: [BENCHMARK.md](tests/e2e/BENCHMARK.md)
 ## Workflow Overview
 
 ```
-=== Configuration Builder (new workflow) ===
-1. Select page: Onboarding or Existing
-2. Point to file(s) — format is auto-detected
-3. Click "Generate Configuration" — reads only a sample (100 rows)
-4. Review detected settings: encoding, delimiter, schema, data types, column mapping
-5. Edit settings directly in the UI: column mapping, price type, implied decimals, validations
-6. Click "Accept Configuration" — config is locked, no further inference
-7. Proceed to processing — full dataset read exactly once
-8. Review results and download CSVs
+=== Current Workflow (7-step) ===
+1. Connection — Connect via local filesystem or SSH (Connection Manager)
+2. Discovery — File detection, preview, column extraction (reuses CM's result)
+3. Configuration — Progressive config wizard (6 sections: General, File, Schema, Business Rules, Validation, Output)
+4. Validate Config — Review and accept configuration
+5. Processing — Full dataset read, aggregation (Store + Item in parallel)
+6. Validation — Run selected validations
+7. Reports — Review results and download CSVs
 
 === Quick start (with pre-saved config file) ===
-1. Save your parsing settings as a JSON config (once)
-2. Select page: Onboarding or Existing
-3. Point to file(s)
-4. Enter config file path → settings auto-load, data flattens
-5. Map columns (pre-populated from config)
-6. Choose validations and run
+1. Connect via Connection Manager
+2. Select files — DAV Tool detects file type
+3. Load saved config JSON — wizard pre-fills all settings
+4. Accept configuration
+5. Confirm column mapping
+6. Run validation
 7. Review results
 
-=== Manual setup (legacy) ===
-1. Get input specs from data team (layout CSVs, column mapping, delimiter, etc.)
-2. Select page: Onboarding (single file) or Existing (BAU vs Test)
-3. Point to file(s) — format is auto-detected
-4. For multiline files: flatten, preview, name columns
-   - Delimited: set record-type flags and delimiter → flatten → rename schema
-   - HDR fixed-width: provide header + detail layout CSVs → flatten → rename schema
-   - Optional: provide trailer layout CSV for TRL lines
-5. For fixed-width: provide layout CSV, set start line / record type
-6. Map columns (Store, UPC, Description, Units, Price)
-7. Choose validations and run
-8. Review results and download CSVs
-9. Save config for next time (optional)
+=== Config Builder (sample-based) ===
+1. Connect via Connection Manager
+2. Select files — DAV Tool detects file type
+3. Click "Progressive Configuration" — reads only 100 sample rows
+4. Walk through 6 config sections (General, File, Schema, Business Rules, Validation, Output)
+5. Accept configuration — config is locked
+6. Confirm column mapping and run processing
+7. Review results and download CSVs
 ```

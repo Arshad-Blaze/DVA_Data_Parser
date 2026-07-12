@@ -75,6 +75,21 @@ Parser receives temp local paths  →  unchanged processing
 Temporary files exist only for the duration of processing
 ```
 
+#### Discovery consumption
+
+When the Connection Manager detects a file, it stores a `DetectionResult` in `st.session_state["_cm_discovery"]` (or `_cm_bau_discovery` / `_cm_test_discovery` for the Existing page).
+
+The Discovery phase (Onboarding/Existing) **consumes this result directly** — no re-detection occurs. This eliminates duplicate work between Connection Manager and Discovery.
+
+```python
+# Onboarding: consume CM's result
+cm_discovery = st.session_state.get("_cm_discovery")
+if cm_discovery and cm_discovery.file_type and cm_discovery.file_paths:
+    discovery = cm_discovery  # reuse directly
+    file_paths = discovery.file_paths
+    file_type = discovery.file_type
+```
+
 ---
 
 ## Data Source Interface
@@ -146,6 +161,8 @@ The file browser provides:
 - Selected remote paths are stored in the UI's folder input field
 - `get_file_list()` returns remote file paths
 - `resolve_source_paths()` downloads files to local temp before parser consumption
+- **Per-side discovery keys:** For the Existing page, BAU and Test discoveries are stored separately under `_cm_bau_discovery` and `_cm_test_discovery` to prevent overwrite
+- **Explicit file_paths assignment:** The Connection Manager explicitly sets `discovery.file_paths = file_paths` before storing the result, ensuring downstream consumption has valid paths
 
 ### Performance
 
