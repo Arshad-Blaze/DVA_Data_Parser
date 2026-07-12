@@ -141,7 +141,28 @@ def _phase1_discovery(ctx):
         st.header("BAU")
         if not auto_bau or not auto_test or _ex_source is None:
             prod_txt = clean_path(st.text_input("BAU Folder Path", key="ex_bau_folder_path"))
-        prod_file_paths = get_file_list(prod_txt, source=_ex_source)
+
+        # Try to consume CM's DiscoveryResult FIRST (no file enumeration)
+        cm_bau_discovery = st.session_state.get("_cm_bau_discovery")
+        cm_bau_has_result = (
+            cm_bau_discovery is not None
+            and not getattr(cm_bau_discovery, "error", None)
+            and cm_bau_discovery.file_type
+            and cm_bau_discovery.file_paths
+        )
+
+        if prod_txt and cm_bau_has_result:
+            discovery = cm_bau_discovery
+            prod_file_paths = discovery.file_paths
+            if not getattr(ctx.prod, '_config_applied', False):
+                ctx.prod.discovery = discovery
+                ctx.prod.file_type = discovery.file_type
+                ctx.prod.delimiter = discovery.delimiter
+                ctx.prod.layout = discovery.layout
+                ctx.prod.header_prefix = getattr(discovery, 'header_prefix', None)
+            log_phase("BAU Discovery consumed from Connection Manager — no re-detection")
+        elif prod_txt:
+            prod_file_paths = get_file_list(prod_txt, source=_ex_source)
 
         # Config load for BAU
         bau_config_file = clean_path(st.text_input("Optional: BAU Config (JSON)", key="ex_bau_config_file"))
@@ -185,7 +206,28 @@ def _phase1_discovery(ctx):
         st.header("Test")
         if not auto_bau or not auto_test or _ex_source is None:
             test_txt = clean_path(st.text_input("Test Folder Path", key="ex_test_folder_path"))
-        test_file_paths = get_file_list(test_txt, source=_ex_source)
+
+        # Try to consume CM's DiscoveryResult FIRST (no file enumeration)
+        cm_test_discovery = st.session_state.get("_cm_test_discovery")
+        cm_test_has_result = (
+            cm_test_discovery is not None
+            and not getattr(cm_test_discovery, "error", None)
+            and cm_test_discovery.file_type
+            and cm_test_discovery.file_paths
+        )
+
+        if test_txt and cm_test_has_result:
+            discovery = cm_test_discovery
+            test_file_paths = discovery.file_paths
+            if not getattr(ctx.test, '_config_applied', False):
+                ctx.test.discovery = discovery
+                ctx.test.file_type = discovery.file_type
+                ctx.test.delimiter = discovery.delimiter
+                ctx.test.layout = discovery.layout
+                ctx.test.header_prefix = getattr(discovery, 'header_prefix', None)
+            log_phase("Test Discovery consumed from Connection Manager — no re-detection")
+        elif test_txt:
+            test_file_paths = get_file_list(test_txt, source=_ex_source)
 
         # Config load for Test
         test_config_file = clean_path(st.text_input("Optional: Test Config (JSON)", key="ex_test_config_file"))

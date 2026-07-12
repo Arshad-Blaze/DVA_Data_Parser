@@ -351,13 +351,15 @@ def _render_selected_preview():
             c1, c2 = st.columns(2)
             with c1:
                 if bau_path:
-                    _show_path_preview(bau_path, source, label="BAU Preview")
+                    _show_path_preview(bau_path, source, label="BAU Preview",
+                                       discovery_key="_cm_bau_discovery")
             with c2:
                 if test_path:
-                    _show_path_preview(test_path, source, label="Test Preview")
+                    _show_path_preview(test_path, source, label="Test Preview",
+                                       discovery_key="_cm_test_discovery")
 
 
-def _show_path_preview(path, source, label="Data Preview"):
+def _show_path_preview(path, source, label="Data Preview", discovery_key="_cm_discovery"):
     """Detect file type via Discovery service and show a preview for a selected path."""
     with st.expander(label, expanded=False):
         file_paths = get_file_list(path, source=source)
@@ -379,8 +381,10 @@ def _show_path_preview(path, source, label="Data Preview"):
             st.caption("Could not detect file type")
             return
 
-        # Store discovery result in session state for downstream consumption
-        st.session_state["_cm_discovery"] = discovery
+        # Ensure file_paths are always carried in the discovery result
+        discovery.file_paths = file_paths
+        st.session_state[discovery_key] = discovery
+        st.session_state["_cm_selected_path"] = path
 
         try:
             from dav_tool.workflow.discovery import get_preview
