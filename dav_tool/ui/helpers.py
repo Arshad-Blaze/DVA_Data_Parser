@@ -412,17 +412,14 @@ def edit_and_accept_config(cfg, key_prefix=""):
 # ── Progressive Stage Helpers ──────────────────────────────────────
 
 
-def render_progressive_stage(
+def _render_section_fields(
     cfg,
     section,
     key_prefix="",
     detected_columns=None,
     file_paths=None,
 ):
-    """Render editable fields for one config section (stage).
-
-    Returns True when the user confirms this stage.
-    """
+    """Render editable fields for one config section. Returns section errors."""
     from dav_tool.format_config import (
         ConfigSection, get_section_fields, OutputConfig,
     )
@@ -610,8 +607,26 @@ def render_progressive_stage(
         if new_dl != oc.download_results:
             oc.download_results = new_dl; changed = True
 
-    # Section validation
-    section_errors = validate_section(cfg, section)
+    return validate_section(cfg, section)
+
+
+def render_progressive_stage(
+    cfg,
+    section,
+    key_prefix="",
+    detected_columns=None,
+    file_paths=None,
+):
+    """Render editable fields for one config section (stage).
+
+    Returns True when the user confirms this stage.
+    """
+    section_errors = _render_section_fields(
+        cfg, section,
+        key_prefix=key_prefix,
+        detected_columns=detected_columns,
+        file_paths=file_paths,
+    )
     for err in section_errors:
         st.warning(f"⚠ {err}")
 
@@ -648,6 +663,48 @@ def progressive_config_wizard(cfg, detected_columns=None, key_prefix="", file_pa
         break  # only show one incomplete section
 
     if cfg.is_config_complete():
+        return True
+    return False
+
+
+def render_all_config_sections(cfg, detected_columns=None, key_prefix="", file_paths=None):
+    """Render all config sections in a single page.
+
+    Returns True when the user accepts the configuration.
+    """
+    from dav_tool.format_config import iter_sections
+
+    all_errors = {}
+
+    for section in iter_sections():
+        st.markdown(f"### {cfg.section_label(section)}")
+        section_errors = _render_section_fields(
+            cfg, section,
+            key_prefix=key_prefix,
+            detected_columns=detected_columns,
+            file_paths=file_paths,
+        )
+        if section_errors:
+            all_errors[section] = section_errors
+            for err in section_errors:
+                st.warning(f"⚠ {err}")
+        st.divider()
+
+    total_errors = sum(len(errs) for errs in all_errors.values())
+    disabled = total_errors > 0
+    if disabled:
+        st.error(f"Resolve {total_errors} issue(s) before accepting.")
+
+    accepted = st.button(
+        "Accept Configuration",
+        use_container_width=True, type="primary",
+        disabled=disabled,
+        key=f"{key_prefix}_accept_all",
+    )
+
+    if accepted:
+        for section in iter_sections():
+            cfg.mark_section_complete(section)
         return True
     return False
 

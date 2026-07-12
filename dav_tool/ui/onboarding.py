@@ -32,7 +32,7 @@ from dav_tool.config_builder import build_config
 from dav_tool.workflow.discovery import detect_file, DiscoveryResult
 from dav_tool.ui.helpers import (
     display_config_review, edit_and_accept_config,
-    progressive_config_wizard,
+    render_all_config_sections,
 )
 
 # Phase constants matching the 7-step workflow
@@ -109,214 +109,214 @@ def run():
 def _phase1_discovery(ctx):
     st.markdown("### Step 2: Discovery — File Detection & Preview")
 
-    if ctx.phase >= PHASE_CONFIG and ctx.file_paths and ctx.columns:
-        return
+    discovery_done = ctx.phase >= PHASE_CONFIG and bool(ctx.file_paths) and bool(ctx.columns)
+    expander_label = "🗂️ File Discovery Complete ✓" if discovery_done else "🗂️ File Discovery"
 
-    _onb_source = get_active_source()
+    with st.expander(expander_label, expanded=not discovery_done):
+        if discovery_done:
+            return
 
-    auto_path = st.session_state.get("_cm_selected_path")
-    if auto_path and _onb_source is not None:
-        st.info(f"**Folder:** `{auto_path}` *(from Connection Manager)*")
-        if st.button("Change"):
-            st.session_state.pop("_cm_selected_path", None)
-            st.rerun()
-        prod_txt = clean_path(auto_path)
-    else:
-        prod_txt = clean_path(st.text_input("Folder Path", key="onb_folder_path"))
+        _onb_source = get_active_source()
 
-    # ── Try to consume CM's DiscoveryResult FIRST (no file enumeration) ──
-    cm_discovery = st.session_state.get("_cm_discovery")
-    cm_has_result = (
-        cm_discovery is not None
-        and not getattr(cm_discovery, "error", None)
-        and cm_discovery.file_type
-        and cm_discovery.file_paths
-    )
-
-    file_type = None
-    prod_delim = None
-    layout_list = None
-    start_line = 0
-    record_type = None
-    cols = []
-    file_paths = []
-
-    if prod_txt and cm_has_result:
-        # ── CM already discovered — consume directly, no re-enumeration ──
-        discovery = cm_discovery
-        file_paths = discovery.file_paths
-        file_type = discovery.file_type
-        prod_delim = discovery.delimiter
-        layout_list = discovery.layout
-        start_line = discovery.start_line
-        record_type = discovery.record_type
-        cols = discovery.columns or []
-        ctx.discovery = discovery
-        log_phase("Discovery consumed from Connection Manager — no re-detection")
-    elif prod_txt:
-        # ── No CM result — enumerate and detect once ──
-        file_paths = get_file_list(prod_txt, source=_onb_source)
-
-        if not file_paths:
-            if auto_path and _onb_source is not None:
-                st.error(f"No files found at remote path: `{prod_txt}`")
-            else:
-                st.error(f"No files found at `{prod_txt}`")
-
-        if file_paths:
-            log_phase(f"Folder Selected — {prod_txt} ({len(file_paths)} files)")
-
-            # === Config Load ===
-            config_file = clean_path(st.text_input("Optional: Load Config (JSON)", key="onb_config_file"))
-            if config_file and os.path.exists(config_file):
-                if not getattr(ctx, '_config_applied', False):
-                    config = load_format_config(config_file)
-                    apply_format_config(config, ctx, os.path.dirname(config_file), file_paths)
-                    ctx._config_applied = True
-                    ctx._config_name = config.name or ''
-                    st.rerun()
-                if getattr(ctx, '_config_applied', False):
-                    st.success(f"Config '{ctx._config_name or 'unnamed'}' loaded")
-
-            # Use ctx fields when config was applied
-            if getattr(ctx, '_config_applied', False):
-                if ctx.file_type == "multiline":
-                    file_type = "multiline"
-                    if ctx.schema:
-                        cols = ctx.schema
-                    if ctx.header_prefix and ctx.header_layout and ctx.detail_layout:
-                        st.subheader("Flattened Preview (from config)")
-                        flat = preview_flattened_multiline_fixed(
-                            file_paths, ctx.header_prefix, ctx.header_layout,
-                            ctx.detail_layout, n_rows=10,
-                            trailer_prefix=ctx.trailer_prefix,
-                            trailer_layout=ctx.trailer_layout,
-                            source=_onb_source,
-                        )
-                        if not flat.is_empty():
-                            st.dataframe(flat.to_pandas().head(10))
-                    elif ctx.ml_record_types:
-                        st.subheader("Flattened Preview (from config)")
-                        flat = preview_flattened_multiline(
-                            file_paths, ctx.ml_record_types, ctx.ml_delimiter, n_rows=10,
-                            source=_onb_source,
-                        )
-                        if not flat.is_empty():
-                            st.dataframe(flat.to_pandas().head(10))
-                else:
-                    file_type = ctx.file_type
-                    prod_delim = ctx.delimiter
-                    layout_list = ctx.layout
-                    start_line = ctx.start_line
-                    record_type = ctx.record_type or ""
-                    if file_paths:
-                        cols = get_column_names(
-                            file_paths, file_type, prod_delim or ",",
-                            layout_list, start_line, record_type,
-                            header_prefix=ctx.header_prefix,
-                            header_layout=ctx.header_layout,
-                            trailer_prefix=ctx.trailer_prefix,
-                            trailer_layout=ctx.trailer_layout,
-                            source=_onb_source,
-                        )
-                        st.subheader("Data Preview")
-                        df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
-                                                  n_rows=10, start_line=start_line, record_type=record_type,
-                                                  source=_onb_source)
-                        if not df_preview.is_empty():
-                            st.dataframe(df_preview.to_pandas().head(10))
-            else:
-                # Run detection once via the Discovery service
-                log_phase("Detection Started")
-                discovery = detect_file(file_paths, source=_onb_source)
-                if discovery.error:
-                    st.error(f"Detection failed: {discovery.error}")
-                    st.stop()
-
-                # Store discovery in session for downstream
-                ctx.discovery = discovery
-                file_type = discovery.file_type
-                prod_delim = discovery.delimiter
-                layout_list = discovery.layout
-                start_line = discovery.start_line
-                record_type = discovery.record_type
-
-                if file_type == "multiline":
-                    st.warning("Multi-line structured file detected")
-                    _multiline_flow(file_paths, source=_onb_source)
-                else:
-                    if file_type == "delimited":
-                        st.success(f"Delimited ({prod_delim})")
-                    elif file_type == "fixed":
-                        st.warning("Fixed-width file")
-                        layout_file = st.text_input("Layout CSV")
-                        if layout_file:
-                            layout_file = clean_path(layout_file)
-                            if os.path.exists(layout_file):
-                                layout_list = load_layout(layout_file)
-                                st.success("Layout loaded")
-                                discovery.layout = layout_list
-
-            if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0], source=_onb_source):
-                st.subheader("Fixed Width Settings")
-                colA, colB = st.columns(2)
-                with colA:
-                    start_line = st.number_input("Start Line", min_value=0, value=start_line)
-                with colB:
-                    record_type = st.text_input("Record Type (e.g., U)", value=record_type or "")
-
-            if file_type and file_type != "multiline" and file_paths and not getattr(ctx, '_config_applied', False):
-                st.subheader("Data Preview")
-                df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
-                                          n_rows=10, start_line=start_line, record_type=record_type,
-                                          source=_onb_source)
-                if not df_preview.is_empty():
-                    st.dataframe(df_preview.to_pandas().head(10))
-
-            if file_type and not getattr(ctx, '_config_applied', False):
-                log_phase(f"Detection Completed — {file_type}")
-
-            # Get columns — no re-detection for standard delimited/fixed
-            if not getattr(ctx, '_config_applied', False):
-                if file_type and file_type == "multiline":
-                    if ctx.ml_flattened and ctx.schema:
-                        cols = ctx.schema
-                    else:
-                        cols = []
-                elif file_type and file_paths:
-                    cols = get_column_names(file_paths, file_type, prod_delim or ",", layout_list,
-                                             start_line, record_type, source=_onb_source)
-
-    if cols:
-        log_phase(f"Schema Generated — {len(cols)} columns")
-
-    parsing_ready = bool(cols)
-    if not parsing_ready:
-        if file_type is None and not cm_has_result:
-            st.info("File detection did not complete. Ensure a valid file path is selected.")
-            st.stop()
-        elif file_type == "multiline" and not ctx.ml_flattened:
-            st.info("Multiline file detected. Complete flattening above to proceed.")
-            st.stop()
-        elif not cm_has_result:
-            st.info("Column detection did not complete. Check file format and try again.")
-            st.stop()
-
-    if parsing_ready and ctx.phase == 0:
-        ctx.file_paths = file_paths
-        ctx.file_type = file_type
-        ctx.delimiter = prod_delim
-        ctx.layout = layout_list
-        ctx.start_line = start_line
-        ctx.record_type = record_type
-        ctx.columns = cols
-
-        if not ctx.config_locked:
-            st.success(f"Parsing complete — {len(cols)} column(s) detected")
-            if st.button("Progressive Configuration \u2192", use_container_width=True):
-                ctx._show_config = True
-                ctx.phase = PHASE_CONFIG
+        auto_path = st.session_state.get("_cm_selected_path")
+        if auto_path and _onb_source is not None:
+            st.info(f"**Folder:** `{auto_path}` *(from Connection Manager)*")
+            if st.button("Change"):
+                st.session_state.pop("_cm_selected_path", None)
                 st.rerun()
+            prod_txt = clean_path(auto_path)
+        else:
+            prod_txt = clean_path(st.text_input("Folder Path", key="onb_folder_path"))
+
+        # ── Try to consume CM's DiscoveryResult FIRST (no file enumeration) ──
+        cm_discovery = st.session_state.get("_cm_discovery")
+        cm_has_result = (
+            cm_discovery is not None
+            and not getattr(cm_discovery, "error", None)
+            and cm_discovery.file_type
+            and cm_discovery.file_paths
+        )
+
+        file_type = None
+        prod_delim = None
+        layout_list = None
+        start_line = 0
+        record_type = None
+        cols = []
+        file_paths = []
+
+        if prod_txt and cm_has_result:
+            # ── CM already discovered — consume directly, no re-enumeration ──
+            discovery = cm_discovery
+            file_paths = discovery.file_paths
+            file_type = discovery.file_type
+            prod_delim = discovery.delimiter
+            layout_list = discovery.layout
+            start_line = discovery.start_line
+            record_type = discovery.record_type
+            cols = discovery.columns or []
+            ctx.discovery = discovery
+            log_phase("Discovery consumed from Connection Manager — no re-detection")
+        elif prod_txt:
+            # ── No CM result — enumerate and detect once ──
+            file_paths = get_file_list(prod_txt, source=_onb_source)
+
+            if not file_paths:
+                if auto_path and _onb_source is not None:
+                    st.error(f"No files found at remote path: `{prod_txt}`")
+                else:
+                    st.error(f"No files found at `{prod_txt}`")
+
+            if file_paths:
+                log_phase(f"Folder Selected — {prod_txt} ({len(file_paths)} files)")
+
+                # === Config Load ===
+                config_file = clean_path(st.text_input("Optional: Load Config (JSON)", key="onb_config_file"))
+                if config_file and os.path.exists(config_file):
+                    if not getattr(ctx, '_config_applied', False):
+                        config = load_format_config(config_file)
+                        apply_format_config(config, ctx, os.path.dirname(config_file), file_paths)
+                        ctx._config_applied = True
+                        ctx._config_name = config.name or ''
+                        st.rerun()
+                    if getattr(ctx, '_config_applied', False):
+                        st.success(f"Config '{ctx._config_name or 'unnamed'}' loaded")
+
+                # Use ctx fields when config was applied
+                if getattr(ctx, '_config_applied', False):
+                    if ctx.file_type == "multiline":
+                        file_type = "multiline"
+                        if ctx.schema:
+                            cols = ctx.schema
+                        if ctx.header_prefix and ctx.header_layout and ctx.detail_layout:
+                            st.subheader("Flattened Preview (from config)")
+                            flat = preview_flattened_multiline_fixed(
+                                file_paths, ctx.header_prefix, ctx.header_layout,
+                                ctx.detail_layout, n_rows=10,
+                                trailer_prefix=ctx.trailer_prefix,
+                                trailer_layout=ctx.trailer_layout,
+                                source=_onb_source,
+                            )
+                            if not flat.is_empty():
+                                st.dataframe(flat.to_pandas().head(10))
+                        elif ctx.ml_record_types:
+                            st.subheader("Flattened Preview (from config)")
+                            flat = preview_flattened_multiline(
+                                file_paths, ctx.ml_record_types, ctx.ml_delimiter, n_rows=10,
+                                source=_onb_source,
+                            )
+                            if not flat.is_empty():
+                                st.dataframe(flat.to_pandas().head(10))
+                    else:
+                        file_type = ctx.file_type
+                        prod_delim = ctx.delimiter
+                        layout_list = ctx.layout
+                        start_line = ctx.start_line
+                        record_type = ctx.record_type or ""
+                        if file_paths:
+                            cols = get_column_names(
+                                file_paths, file_type, prod_delim or ",",
+                                layout_list, start_line, record_type,
+                                header_prefix=ctx.header_prefix,
+                                header_layout=ctx.header_layout,
+                                trailer_prefix=ctx.trailer_prefix,
+                                trailer_layout=ctx.trailer_layout,
+                                source=_onb_source,
+                            )
+                            st.subheader("Data Preview")
+                            df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
+                                                      n_rows=10, start_line=start_line, record_type=record_type,
+                                                      source=_onb_source)
+                            if not df_preview.is_empty():
+                                st.dataframe(df_preview.to_pandas().head(10))
+                else:
+                    # Run detection once via the Discovery service
+                    log_phase("Detection Started")
+                    discovery = detect_file(file_paths, source=_onb_source)
+                    if discovery.error:
+                        st.error(f"Detection failed: {discovery.error}")
+                        st.stop()
+
+                    # Store discovery in session for downstream
+                    ctx.discovery = discovery
+                    file_type = discovery.file_type
+                    prod_delim = discovery.delimiter
+                    layout_list = discovery.layout
+                    start_line = discovery.start_line
+                    record_type = discovery.record_type
+
+                    if file_type == "multiline":
+                        st.warning("Multi-line structured file detected")
+                        _multiline_flow(file_paths, source=_onb_source)
+                    else:
+                        if file_type == "delimited":
+                            st.success(f"Delimited ({prod_delim})")
+                        elif file_type == "fixed":
+                            st.warning("Fixed-width file")
+                            layout_file = st.text_input("Layout CSV")
+                            if layout_file:
+                                layout_file = clean_path(layout_file)
+                                if os.path.exists(layout_file):
+                                    layout_list = load_layout(layout_file)
+                                    st.success("Layout loaded")
+                                    discovery.layout = layout_list
+
+                if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0], source=_onb_source):
+                    st.subheader("Fixed Width Settings")
+                    colA, colB = st.columns(2)
+                    with colA:
+                        start_line = st.number_input("Start Line", min_value=0, value=start_line)
+                    with colB:
+                        record_type = st.text_input("Record Type (e.g., U)", value=record_type or "")
+
+                if file_type and file_type != "multiline" and file_paths and not getattr(ctx, '_config_applied', False):
+                    st.subheader("Data Preview")
+                    df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
+                                              n_rows=10, start_line=start_line, record_type=record_type,
+                                              source=_onb_source)
+                    if not df_preview.is_empty():
+                        st.dataframe(df_preview.to_pandas().head(10))
+
+                if file_type and not getattr(ctx, '_config_applied', False):
+                    log_phase(f"Detection Completed — {file_type}")
+
+                # Get columns — no re-detection for standard delimited/fixed
+                if not getattr(ctx, '_config_applied', False):
+                    if file_type and file_type == "multiline":
+                        if ctx.ml_flattened and ctx.schema:
+                            cols = ctx.schema
+                        else:
+                            cols = []
+                    elif file_type and file_paths:
+                        cols = get_column_names(file_paths, file_type, prod_delim or ",", layout_list,
+                                                 start_line, record_type, source=_onb_source)
+
+        if cols:
+            log_phase(f"Schema Generated — {len(cols)} columns")
+
+        parsing_ready = bool(cols)
+        if not parsing_ready:
+            if file_type is None and not cm_has_result:
+                st.info("File detection did not complete. Ensure a valid file path is selected.")
+                st.stop()
+            elif file_type == "multiline" and not ctx.ml_flattened:
+                st.info("Multiline file detected. Complete flattening above to proceed.")
+                st.stop()
+            elif not cm_has_result:
+                st.info("Column detection did not complete. Check file format and try again.")
+                st.stop()
+
+        if parsing_ready and ctx.phase == 0:
+            ctx.file_paths = file_paths
+            ctx.file_type = file_type
+            ctx.delimiter = prod_delim
+            ctx.layout = layout_list
+            ctx.start_line = start_line
+            ctx.record_type = record_type
+            ctx.columns = cols
+            ctx._show_config = True
+            ctx.phase = PHASE_CONFIG
+            st.rerun()
 
 
 def _phase2_configuration(ctx):
@@ -350,7 +350,7 @@ def _phase2_configuration(ctx):
             )
             ctx._generated_config = cfg
         st.session_state["onb_cfg_saved"] = cfg
-        all_done = progressive_config_wizard(
+        all_done = render_all_config_sections(
             cfg, detected_columns=ctx.columns,
             key_prefix="onb", file_paths=ctx.file_paths,
         )
