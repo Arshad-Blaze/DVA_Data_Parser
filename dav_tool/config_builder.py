@@ -177,6 +177,8 @@ def build_config(
                     file_paths_local, rtypes, ml_delimiter, n_rows=SAMPLE_SIZE,
                 )
         else:
+            if file_type == "delimited":
+                cfg.delimiter = delimiter
             cfg.has_header = has_header(fp_local, delimiter or ",") if fp_local else True
 
             if file_type == "fixed" and layout:

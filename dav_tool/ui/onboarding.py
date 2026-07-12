@@ -329,6 +329,10 @@ def _phase2_configuration(ctx):
     if getattr(ctx, '_show_config', False) and not ctx.config_locked:
         cfg = getattr(ctx, '_generated_config', None)
         if cfg is None:
+            cfg = st.session_state.get("onb_cfg_saved")
+            if cfg is not None:
+                ctx._generated_config = cfg
+        if cfg is None:
             cfg = build_config(
                 ctx.file_paths,
                 file_type=ctx.file_type,
@@ -345,6 +349,7 @@ def _phase2_configuration(ctx):
                 discovery=ctx.discovery,
             )
             ctx._generated_config = cfg
+        st.session_state["onb_cfg_saved"] = cfg
         all_done = progressive_config_wizard(
             cfg, detected_columns=ctx.columns,
             key_prefix="onb", file_paths=ctx.file_paths,
