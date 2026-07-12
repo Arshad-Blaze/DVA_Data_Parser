@@ -28,6 +28,7 @@ from dav_tool.ui.helpers import (
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext, ExistingContext
 from dav_tool.format_config import load_format_config, apply_format_config
+from dav_tool.workflow.discovery import detect_file, DiscoveryResult
 from dav_tool.config_builder import build_config
 from dav_tool.ui.helpers import (
     display_config_review, edit_and_accept_config,
@@ -319,6 +320,7 @@ def _phase2_configuration(ctx):
             ml_record_types=ctx.prod.ml_record_types,
             ml_delimiter=ctx.ml_delimiter,
             source=_ex_source,
+            discovery=ctx.prod.discovery,
         )
         ctx._prod_cfg = prod_cfg
         prod_cols = cached_get_column_names(
@@ -359,6 +361,7 @@ def _phase2_configuration(ctx):
             ml_record_types=ctx.test.ml_record_types,
             ml_delimiter=ctx.ml_delimiter,
             source=_ex_source,
+            discovery=ctx.test.discovery,
         )
         ctx._test_cfg = test_cfg
         test_cols = cached_get_column_names(
@@ -839,47 +842,56 @@ def _phase6_reports(ctx):
 
 
 def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = "", source=None):
+    """Detect file type via Discovery service and set results on side_ctx.
+
+    Stores a DiscoveryResult on the side context so downstream phases
+    never need to re-detect.
+    """
     log_phase(f"Detection Started — {side_label}")
 
     try:
-        if is_multiline_record(file_paths[0], source=source):
+        discovery = detect_file(file_paths, source=source)
+        if discovery.error:
+            st.error(f"Detection failed for {side_label}: {discovery.error}")
+            return False
+
+        # Store discovery result on the side context
+        side_ctx.discovery = discovery
+
+        if discovery.file_type == "multiline":
             st.warning(f"Multi-line structured file detected ({side_label})")
             side_ctx.file_type = "multiline"
-            hdr_prefixes = detect_hdr_prefix(file_paths[0], source=source)
-            side_ctx.header_prefix = hdr_prefixes[0] if hdr_prefixes else None
+            side_ctx.header_prefix = discovery.header_prefix
             log_phase(f"Detection Completed — {side_label}: multiline")
             return True
+        elif discovery.file_type == "delimited":
+            st.success(f"Delimited ({discovery.delimiter})")
+            side_ctx.file_type = "delimited"
+            side_ctx.delimiter = discovery.delimiter
+            log_phase(f"Detection Completed — {side_label}: delimited")
+            return True
+        elif discovery.file_type == "fixed":
+            st.warning("Fixed-width file")
+            side_ctx.file_type = "fixed"
+            layout_file = st.text_input(f"{side_label} Layout CSV", key=f"{key_prefix}_layout")
+            if layout_file:
+                layout_file = clean_path(layout_file)
+                if os.path.exists(layout_file):
+                    side_ctx.layout = load_layout(layout_file)
+                    discovery.layout = side_ctx.layout
+                    st.success("Layout loaded")
+                    log_phase(f"Detection Completed — {side_label}: fixed-width with layout")
+                    return True
+                else:
+                    st.error(f"Layout file not found: {layout_file}")
+        elif discovery.file_type == "excel":
+            st.success(f"Excel file detected ({side_label})")
+            side_ctx.file_type = "delimited"
+            side_ctx.delimiter = ","
+            log_phase(f"Detection Completed — {side_label}: excel")
+            return True
         else:
-            ftype, delim = detect_file_type(file_paths[0], source=source)
-            if ftype is None:
-                st.error(f"Could not detect file type for {side_label}")
-            elif ftype == "delimited":
-                st.success(f"Delimited ({delim})")
-                side_ctx.file_type = "delimited"
-                side_ctx.delimiter = delim
-                log_phase(f"Detection Completed — {side_label}: delimited")
-                return True
-            elif ftype == "fixed":
-                st.warning("Fixed-width file")
-                side_ctx.file_type = "fixed"
-                layout_file = st.text_input(f"{side_label} Layout CSV", key=f"{key_prefix}_layout")
-                if layout_file:
-                    layout_file = clean_path(layout_file)
-                    if os.path.exists(layout_file):
-                        side_ctx.layout = load_layout(layout_file)
-                        st.success("Layout loaded")
-                        log_phase(f"Detection Completed — {side_label}: fixed-width with layout")
-                        return True
-                    else:
-                        st.error(f"Layout file not found: {layout_file}")
-            elif ftype == "excel":
-                st.success(f"Excel file detected ({side_label})")
-                side_ctx.file_type = "delimited"
-                side_ctx.delimiter = ","
-                log_phase(f"Detection Completed — {side_label}: excel")
-                return True
-            else:
-                st.error(f"Unrecognized file type '{ftype}' for {side_label}")
+            st.error(f"Unrecognized file type '{discovery.file_type}' for {side_label}")
     except Exception as e:
         st.error(f"Detection failed for {side_label}: {str(e)}")
 

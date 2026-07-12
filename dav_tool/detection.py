@@ -100,21 +100,29 @@ def is_multiline_record(file_path, source: Optional[IDataSource] = None):
         if backslash >= 5:
             return True
 
-        # Check fixed-width HDR multiline: some lines start with alphabetic
-        # prefix (2+ letters) followed by digits — the rest are plain data lines
-        text_prefixes = set()
+        # Check fixed-width HDR multiline: lines start with alphabetic
+        # prefix (2+ letters) followed by digits — plain data lines don't.
+        # Require the prefix to repeat on multiple lines (not a one-off)
+        # and data lines must NOT contain common delimiters (ruling out CSVs
+        # with alphanumerics like "Store123,Product456,75").
+        prefix_line_count = {}
         data_count = 0
+        has_delimiter_data = False
         for line in lines:
             found = False
             for i in range(2, min(6, len(line))):
                 if line[:i].isalpha() and i < len(line) and line[i].isdigit():
-                    text_prefixes.add(line[:i])
+                    prefix_line_count[line[:i]] = prefix_line_count.get(line[:i], 0) + 1
                     found = True
                     break
             if not found and line and line[0].isdigit():
                 data_count += 1
+                if any(d in line for d in ",|\t;"):
+                    has_delimiter_data = True
 
-        if len(text_prefixes) >= 1 and data_count >= 2:
+        # Require prefix to repeat on 2+ lines AND no delimiter in data lines
+        repeated = sum(1 for cnt in prefix_line_count.values() if cnt >= 2)
+        if repeated >= 1 and data_count >= 2 and not has_delimiter_data:
             return True
 
         return False

@@ -18,6 +18,11 @@ class ProcessingContext:
     # === Phase ===
     phase: int = 0
 
+    # === Discovery Result (single source of truth) ===
+    # Populated once during Connection → Discovery, consumed by all downstream phases.
+    # Downstream phases MUST NOT re-detect file type, columns, or structure.
+    discovery: Optional[Any] = None  # DiscoveryResult from workflow.discovery
+
     # === File Detection / Parsing Configuration ===
     file_paths: Optional[List[str]] = None
     file_type: Optional[str] = None

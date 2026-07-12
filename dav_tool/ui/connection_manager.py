@@ -12,8 +12,7 @@ from dav_tool.datasource.manager import (
     get_active_source, is_connected, get_active_config,
 )
 from dav_tool._observability import log_phase
-from dav_tool._parsers import preview_raw
-from dav_tool.detection import is_multiline_record, detect_file_type
+from dav_tool.workflow.discovery import detect_file, DiscoveryResult
 from dav_tool.ui.helpers import get_file_list
 
 logger = logging.getLogger(__name__)
@@ -359,39 +358,46 @@ def _render_selected_preview():
 
 
 def _show_path_preview(path, source, label="Data Preview"):
-    """Detect file type and show a raw preview for a selected path."""
+    """Detect file type via Discovery service and show a preview for a selected path."""
     with st.expander(label, expanded=False):
         file_paths = get_file_list(path, source=source)
         if not file_paths:
             st.caption(f"No files found at `{path}`")
             return
 
-        fp = file_paths[0]
         try:
-            if is_multiline_record(fp, source=source):
-                file_type = "multiline"
-                delim = "|"
-            else:
-                file_type, delim = detect_file_type(fp, source=source)
+            discovery = detect_file(file_paths, source=source)
         except Exception:
             st.caption("Could not detect file type")
             return
 
-        if file_type is None:
+        if discovery.error:
+            st.caption(f"Detection error: {discovery.error}")
+            return
+
+        if not discovery.file_type:
             st.caption("Could not detect file type")
             return
 
+        # Store discovery result in session state for downstream consumption
+        st.session_state["_cm_discovery"] = discovery
+
         try:
-            df = preview_raw(file_paths, file_type, delim or ",", n_rows=5, source=source)
+            from dav_tool.workflow.discovery import get_preview
+            df = get_preview(
+                file_paths, discovery.file_type,
+                delimiter=discovery.delimiter,
+                n_rows=5, source=source,
+            )
         except Exception:
             st.caption("Could not generate preview")
             return
 
         if df is not None and not df.is_empty():
             st.dataframe(df.to_pandas(), height=150)
-            st.caption(f"{file_type} — {len(file_paths)} file(s)")
+            st.caption(f"{discovery.file_type} — {len(file_paths)} file(s)")
         else:
-            st.caption(f"{file_type} detected — preview empty")
+            st.caption(f"{discovery.file_type} detected — preview empty")
 
 
 def _navigate_to_path(browse_key, input_key):

@@ -23,10 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 class DiscoveryResult:
-    """Result of file discovery — what was detected."""
+    """Result of file discovery — the single source of truth for detection metadata.
+
+    Produced once during the Connection → Discovery phase and consumed
+    by all downstream phases (Configuration, Config Validation, Processing).
+    Downstream phases MUST NOT re-detect file type, delimiter, columns, or
+    structure that this result already provides.
+    """
 
     def __init__(
         self,
+        file_paths: Optional[List[str]] = None,
         file_type: Optional[str] = None,
         delimiter: Optional[str] = None,
         columns: Optional[List[str]] = None,
@@ -39,8 +46,12 @@ class DiscoveryResult:
         ml_record_types: Optional[List[str]] = None,
         ml_delimiter: str = "|",
         ml_flattened: bool = False,
+        start_line: int = 0,
+        record_type: Optional[str] = None,
+        layout: Optional[List[Dict]] = None,
         error: Optional[str] = None,
     ):
+        self.file_paths = file_paths
         self.file_type = file_type
         self.delimiter = delimiter
         self.columns = columns
@@ -53,12 +64,72 @@ class DiscoveryResult:
         self.ml_record_types = ml_record_types
         self.ml_delimiter = ml_delimiter
         self.ml_flattened = ml_flattened
+        self.start_line = start_line
+        self.record_type = record_type
+        self.layout = layout
         self.error = error
 
     @property
     def is_ready(self) -> bool:
         """True if discovery produced a valid file type and columns."""
         return bool(self.file_type and self.columns)
+
+    @property
+    def needs_flattening(self) -> bool:
+        """True if the file structure requires flattening before column extraction.
+
+        Only multiline (delimited multiline or HDR fixed-width) files need
+        flattening. Standard delimited and simple fixed-width files do NOT.
+        """
+        return self.file_type == "multiline" and not self.ml_flattened
+
+    @classmethod
+    def from_context(cls, ctx) -> "DiscoveryResult":
+        """Build a DiscoveryResult from an existing ProcessingContext.
+
+        Used when consuming detection results already stored in context.
+        """
+        return cls(
+            file_paths=getattr(ctx, "file_paths", None),
+            file_type=getattr(ctx, "file_type", None),
+            delimiter=getattr(ctx, "delimiter", None),
+            columns=getattr(ctx, "columns", None),
+            schema=getattr(ctx, "schema", None),
+            header_prefix=getattr(ctx, "header_prefix", None),
+            header_layout=getattr(ctx, "header_layout", None),
+            detail_layout=getattr(ctx, "detail_layout", None),
+            trailer_prefix=getattr(ctx, "trailer_prefix", None),
+            trailer_layout=getattr(ctx, "trailer_layout", None),
+            ml_record_types=getattr(ctx, "ml_record_types", None),
+            ml_delimiter=getattr(ctx, "ml_delimiter", "|"),
+            ml_flattened=getattr(ctx, "ml_flattened", False),
+            start_line=getattr(ctx, "start_line", 0),
+            record_type=getattr(ctx, "record_type", None),
+            layout=getattr(ctx, "layout", None),
+        )
+
+    def apply_to_context(self, ctx) -> None:
+        """Apply discovery results to a ProcessingContext.
+
+        Populates all detection-derived fields so downstream phases
+        never need to re-detect.
+        """
+        ctx.file_paths = self.file_paths
+        ctx.file_type = self.file_type
+        ctx.delimiter = self.delimiter
+        ctx.columns = self.columns
+        ctx.schema = self.schema or self.columns
+        ctx.header_prefix = self.header_prefix
+        ctx.header_layout = self.header_layout
+        ctx.detail_layout = self.detail_layout
+        ctx.trailer_prefix = self.trailer_prefix
+        ctx.trailer_layout = self.trailer_layout
+        ctx.ml_record_types = self.ml_record_types
+        ctx.ml_delimiter = self.ml_delimiter
+        ctx.ml_flattened = self.ml_flattened
+        ctx.start_line = self.start_line
+        ctx.record_type = self.record_type
+        ctx.layout = self.layout
 
 
 def detect_file(
@@ -68,6 +139,8 @@ def detect_file(
     """Detect file type and structure from the first file.
 
     Returns a DiscoveryResult with detected metadata.
+    This is the SINGLE detection entry point. Downstream phases
+    must consume this result instead of re-detecting.
     No UI rendering. Pure detection logic.
     """
     if not file_paths:
@@ -82,8 +155,9 @@ def detect_file(
             result = _detect_simple(file_paths, source=source)
     except Exception as e:
         logger.error("Detection failed: %s", str(e), exc_info=True)
-        return DiscoveryResult(error=str(e))
+        return DiscoveryResult(file_paths=file_paths, error=str(e))
 
+    result.file_paths = file_paths
     return result
 
 

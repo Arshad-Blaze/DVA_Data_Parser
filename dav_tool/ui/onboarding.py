@@ -29,6 +29,7 @@ from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
 from dav_tool.format_config import apply_format_config, load_format_config, save_format_config, config_from_ctx
 from dav_tool.config_builder import build_config
+from dav_tool.workflow.discovery import detect_file, DiscoveryResult
 from dav_tool.ui.helpers import (
     display_config_review, edit_and_accept_config,
     progressive_config_wizard,
@@ -201,25 +202,45 @@ def _phase1_discovery(ctx):
                     if not df_preview.is_empty():
                         st.dataframe(df_preview.to_pandas().head(10))
         else:
-            # Normal detection flow
-            log_phase("Detection Started")
-            if is_multiline_record(file_paths[0], source=_onb_source):
+            # === Discovery flow: consume CM's DiscoveryResult or run detection once ===
+            cm_discovery = st.session_state.get("_cm_discovery")
+            if cm_discovery is not None and cm_discovery.file_paths == file_paths:
+                # Reuse detection results from Connection Manager — no re-detection
+                discovery = cm_discovery
+                log_phase("Discovery consumed from Connection Manager")
+            else:
+                # Run detection once via the Discovery service
+                log_phase("Detection Started")
+                discovery = detect_file(file_paths, source=_onb_source)
+                if discovery.error:
+                    st.error(f"Detection failed: {discovery.error}")
+                    st.stop()
+
+            # Store discovery in session for downstream
+            ctx.discovery = discovery
+            file_type = discovery.file_type
+            prod_delim = discovery.delimiter
+            layout_list = discovery.layout
+            start_line = discovery.start_line
+            record_type = discovery.record_type
+
+            if file_type == "multiline":
                 st.warning("Multi-line structured file detected")
-                file_type = "multiline"
+                # Show raw preview, then handle flattening
                 _multiline_flow(file_paths, source=_onb_source)
             else:
-                file_type, prod_delim = detect_file_type(file_paths[0], source=_onb_source)
+                # Delimited or fixed — no flattening needed
                 if file_type == "delimited":
                     st.success(f"Delimited ({prod_delim})")
-                else:
+                elif file_type == "fixed":
                     st.warning("Fixed-width file")
-                    file_type = "fixed"
                     layout_file = st.text_input("Layout CSV")
                     if layout_file:
                         layout_file = clean_path(layout_file)
                         if os.path.exists(layout_file):
                             layout_list = load_layout(layout_file)
                             st.success("Layout loaded")
+                            discovery.layout = layout_list
 
         if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0], source=_onb_source):
             st.subheader("Fixed Width Settings")
@@ -240,6 +261,7 @@ def _phase1_discovery(ctx):
         if file_type and not getattr(ctx, '_config_applied', False):
             log_phase(f"Detection Completed — {file_type}")
 
+        # Get columns — no re-detection for standard delimited/fixed
         if not getattr(ctx, '_config_applied', False):
             if file_type and file_type == "multiline":
                 if ctx.ml_flattened and ctx.schema:
@@ -255,10 +277,14 @@ def _phase1_discovery(ctx):
 
     parsing_ready = bool(cols)
     if not parsing_ready:
-        if file_type is None or (file_type == "multiline" and not ctx.ml_flattened):
-            st.info("Complete file detection and flattening above to proceed.")
+        if file_type is None:
+            st.info("File detection did not complete. Ensure a valid file path is selected.")
+            st.stop()
+        elif file_type == "multiline" and not ctx.ml_flattened:
+            st.info("Multiline file detected. Complete flattening above to proceed.")
             st.stop()
         else:
+            st.info("Column detection did not complete. Check file format and try again.")
             st.stop()
 
     if parsing_ready and ctx.phase == 0:
@@ -299,6 +325,7 @@ def _phase2_configuration(ctx):
             ml_record_types=ctx.ml_record_types,
             ml_delimiter=ctx.ml_delimiter or "|",
             source=_onb_source,
+            discovery=ctx.discovery,
         )
         ctx._generated_config = cfg
         all_done = progressive_config_wizard(

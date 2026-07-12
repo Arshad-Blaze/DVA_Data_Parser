@@ -28,9 +28,11 @@ logger = logging.getLogger(__name__)
 _COLUMN_CACHE_KEY = "_column_name_cache"
 
 
-def _cache_key(paths, file_type, delimiter, record_type) -> str:
+def _cache_key(paths, file_type, delimiter, record_type, layout=None,
+               start_line=0, header_prefix=None) -> str:
     """Deterministic cache key from input parameters."""
-    raw = f"{paths}|{file_type}|{delimiter}|{record_type}"
+    layout_str = str(layout) if layout else ""
+    raw = f"{paths}|{file_type}|{delimiter}|{record_type}|{layout_str}|{start_line}|{header_prefix}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -42,7 +44,9 @@ def cached_get_column_names(paths, file_type, delimiter=",", layout=None, start_
     if _COLUMN_CACHE_KEY not in st.session_state:
         st.session_state[_COLUMN_CACHE_KEY] = {}
     cache = st.session_state[_COLUMN_CACHE_KEY]
-    key = _cache_key(str(paths), file_type, delimiter, record_type)
+    key = _cache_key(str(paths), file_type, delimiter, record_type,
+                      layout=layout, start_line=start_line,
+                      header_prefix=header_prefix)
     if key in cache:
         return cache[key]
     cols = get_column_names(paths, file_type, delimiter, layout, start_line,
@@ -145,6 +149,12 @@ def clean_path(path):
 
 
 def get_file_list(path: str, source: Optional[IDataSource] = None) -> list:
+    """List files at the given path via the active source.
+
+    When a remote source (SSH) is active, ALWAYS uses the source.
+    Never falls back to local filesystem for remote sources.
+    Falls back to local filesystem only when source is None (local mode).
+    """
     if source is None:
         source = get_active_source()
     if source is not None:

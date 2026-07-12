@@ -25,6 +25,7 @@ from dav_tool.format_config import (
 )
 from dav_tool.datasource.base import IDataSource
 from dav_tool.datasource.manager import get_active_source
+from dav_tool.workflow.discovery import DiscoveryResult
 
 logger = logging.getLogger(__name__)
 
@@ -82,17 +83,43 @@ def build_config(
     ml_record_types: Optional[List[str]] = None,
     ml_delimiter: str = "|",
     source: Optional[IDataSource] = None,
+    discovery: Optional[DiscoveryResult] = None,
 ) -> FormatConfig:
     """Build a FormatConfig by inspecting a sample of the data.
 
     Only ever reads *SAMPLE_SIZE* rows. Returns a configuration with
     detected metadata, schema, suggested column mapping, and default
     validation settings.
+
+    If *discovery* is provided, reuses its detected file_type, delimiter,
+    and structure — no re-detection is performed for those fields.
     """
     fp = file_paths[0] if file_paths else ""
 
+    if not fp:
+        return FormatConfig()
+
     if source is None:
         source = get_active_source()
+
+    # Use discovery results when available — skip re-detection
+    if discovery is not None:
+        if not file_type:
+            file_type = discovery.file_type
+        if not delimiter:
+            delimiter = discovery.delimiter
+        if not header_prefix:
+            header_prefix = discovery.header_prefix
+        if not ml_record_types:
+            ml_record_types = discovery.ml_record_types
+        if not header_layout:
+            header_layout = discovery.header_layout
+        if not detail_layout:
+            detail_layout = discovery.detail_layout
+        if not trailer_prefix:
+            trailer_prefix = discovery.trailer_prefix
+        if not trailer_layout:
+            trailer_layout = discovery.trailer_layout
 
     if source is not None:
         sample_text = source.read_sample(fp, n=SAMPLE_SIZE) if fp else ""
