@@ -513,39 +513,47 @@ def _render_section_fields(
                 if new_rts != ",".join(cfg.ml_record_types or []):
                     cfg.ml_record_types = [r.strip() for r in new_rts.split(",") if r.strip()]; changed = True
 
-    elif section == ConfigSection.SCHEMA:
-        st.markdown("**Schema & Columns**")
-        cols_to_show = detected_columns or cfg.detected_columns or cfg.schema or []
-        if cols_to_show:
-            st.markdown(f"**Detected Columns ({len(cols_to_show)}):**")
-            st.markdown(", ".join(cols_to_show))
+    elif section == ConfigSection.PHYSICAL_SCHEMA:
+        st.markdown("**Physical Schema (from Discovery — read-only)**")
+        st.caption("This schema represents exactly what was found during file discovery. It never changes.")
+        phys_cols = cfg.physical_schema or []
+        if phys_cols:
+            st.markdown(f"**{len(phys_cols)} columns detected:**")
+            st.markdown(", ".join(phys_cols))
         else:
-            st.info("No columns detected yet. Load a sample file first.")
+            st.info("Physical schema not yet populated. Complete discovery first.")
 
         if cfg.detected_data_types:
             st.markdown("**Data Types:**")
             for k, v in cfg.detected_data_types.items():
                 st.markdown(f"- {k}: `{v}`")
 
-        if cols_to_show:
-            new_schema = st.text_area(
-                "Edit schema (one column per line, or comma-separated)",
-                value="\n".join(cols_to_show),
-                key=f"{key_prefix}_s_schema",
+    elif section == ConfigSection.CANONICAL_SCHEMA:
+        st.markdown("**Canonical Schema (editable)**")
+        st.caption("Business-friendly column names. Changes propagate to Business Mapping, Operations, Validation, and Reports.")
+        phys = cfg.physical_schema or []
+        canon = cfg.canonical_schema or phys[:]
+        if phys:
+            st.markdown(f"**Physical columns ({len(phys)}):** {', '.join(phys)}")
+            new_canon = st.text_area(
+                "Edit canonical names (one per line, order matches physical schema)",
+                value="\n".join(canon),
+                key=f"{key_prefix}_c_canon",
             )
-            parsed = [c.strip() for c in new_schema.replace("\n", ",").split(",") if c.strip()]
-            if parsed and parsed != (cfg.detected_columns or cfg.schema):
-                cfg.schema = parsed
-                cfg.detected_columns = parsed
+            parsed = [c.strip() for c in new_canon.replace("\n", ",").split(",") if c.strip()]
+            if parsed and parsed != cfg.canonical_schema:
+                cfg.canonical_schema = parsed
                 changed = True
+        else:
+            st.info("No physical schema available. Complete discovery first.")
 
-    elif section == ConfigSection.BUSINESS_RULES:
-        st.markdown("**Business Rules (Column Mapping)**")
-        cols_list = detected_columns or cfg.detected_columns or cfg.schema or []
+    elif section == ConfigSection.BUSINESS_MAPPING:
+        st.markdown("**Business Mapping**")
+        cols_list = cfg.canonical_schema or cfg.physical_schema or []
         if cols_list:
             suggested = cfg.suggested_mapping or {}
             idx_map = {}
-            for role in ["store", "upc", "description", "units", "price"]:
+            for role in ["store", "upc", "description", "quantity", "price"]:
                 col = suggested.get(role)
                 if col in cols_list:
                     idx_map[role] = cols_list.index(col)
@@ -556,7 +564,7 @@ def _render_section_fields(
                 new_upc = st.selectbox("UPC Column", cols_list, index=idx_map.get("upc", 0), key=f"{key_prefix}_b_upc")
                 new_desc = st.selectbox("Description Column", cols_list, index=idx_map.get("description", 0), key=f"{key_prefix}_b_desc")
             with c2:
-                new_units = st.selectbox("Units Column", cols_list, index=idx_map.get("units", 0), key=f"{key_prefix}_b_units")
+                new_quantity = st.selectbox("Quantity Column", cols_list, index=idx_map.get("quantity", idx_map.get("units", 0)), key=f"{key_prefix}_b_quantity")
                 new_price = st.selectbox("Price Column", cols_list, index=idx_map.get("price", 0), key=f"{key_prefix}_b_price")
 
             if new_store != cfg.store_col:
@@ -565,8 +573,8 @@ def _render_section_fields(
                 cfg.upc_col = new_upc; changed = True
             if new_desc != cfg.desc_col:
                 cfg.desc_col = new_desc; changed = True
-            if new_units != cfg.units_col:
-                cfg.units_col = new_units; changed = True
+            if new_quantity != cfg.quantity_col:
+                cfg.quantity_col = new_quantity; changed = True
             if new_price != cfg.price_col:
                 cfg.price_col = new_price; changed = True
 
@@ -583,6 +591,47 @@ def _render_section_fields(
                 new_imp_unt = st.checkbox("Implied Units", value=cfg.implied_units, key=f"{key_prefix}_b_imp_unt")
                 if new_imp_unt != cfg.implied_units:
                     cfg.implied_units = new_imp_unt; changed = True
+
+    elif section == ConfigSection.QUANTITY:
+        st.markdown("**Quantity Configuration**")
+        st.caption("Configure how quantities are handled — units, weight, or mixed datasets.")
+        new_qt = st.selectbox(
+            "Quantity Type",
+            ["units", "weight", "mixed"],
+            index=["units", "weight", "mixed"].index(cfg.quantity_type) if cfg.quantity_type in ["units", "weight", "mixed"] else 0,
+            key=f"{key_prefix}_q_type",
+        )
+        if new_qt != cfg.quantity_type:
+            cfg.quantity_type = new_qt; changed = True
+
+        cols_list = cfg.canonical_schema or cfg.physical_schema or []
+        if cfg.quantity_type in ("weight", "mixed") and cols_list:
+            wt_idx = 0
+            if cfg.weight_col and cfg.weight_col in cols_list:
+                wt_idx = cols_list.index(cfg.weight_col)
+            new_wt = st.selectbox("Weight Column", cols_list, index=wt_idx, key=f"{key_prefix}_q_wt")
+            if new_wt != cfg.weight_col:
+                cfg.weight_col = new_wt; changed = True
+
+            new_uom = st.selectbox(
+                "Weight Unit of Measure",
+                ["lb", "oz", "kg", "g"],
+                index=["lb", "oz", "kg", "g"].index(cfg.weight_uom) if cfg.weight_uom in ["lb", "oz", "kg", "g"] else 0,
+                key=f"{key_prefix}_q_uom",
+            )
+            if new_uom != cfg.weight_uom:
+                cfg.weight_uom = new_uom; changed = True
+
+        if cfg.quantity_type == "mixed":
+            new_rule = st.selectbox(
+                "Resolution Rule",
+                ["units_preferred", "weight_preferred", "average"],
+                index=["units_preferred", "weight_preferred", "average"].index(cfg.resolution_rule) if cfg.resolution_rule in ["units_preferred", "weight_preferred", "average"] else 0,
+                key=f"{key_prefix}_q_rule",
+                help="How to resolve rows that have both units and weight values",
+            )
+            if new_rule != cfg.resolution_rule:
+                cfg.resolution_rule = new_rule; changed = True
 
     elif section == ConfigSection.VALIDATION:
         st.markdown("**Validation Settings**")

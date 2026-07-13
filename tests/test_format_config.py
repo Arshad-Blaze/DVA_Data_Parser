@@ -23,7 +23,7 @@ class TestFormatConfigRoundtrip:
             start_line=1,
             store_col="Store",
             upc_col="UPC",
-            units_col="Qty",
+            quantity_col="Qty",
             price_col="Sales",
             price_type="Total Price",
             implied_dollars=False,

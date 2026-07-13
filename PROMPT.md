@@ -1,232 +1,178 @@
 # DVA Platform 1.0 RC1
-# Sprint A - RC1 Integration
-
-Read BOTH branches completely.
-
-Branch A
-Phase 4 - Stable Streaming Workflow
-
-Branch B
-Phase 5 - Data Operations
-
-DO NOT begin coding immediately.
-
-First compare both branches and generate an internal implementation matrix.
-
-============================================================
+# Sprint B - Configuration & Canonical Model
 
 MISSION
 
-DVA is a Retail Data Integration & Certification Platform.
+Complete the Configuration System.
 
-It supports
-
-1. New Retailer Integration
-
-2. Existing Retailer Format Certification
-
-The architecture is frozen.
-
-Do NOT redesign the architecture.
-
-Do NOT add experimental features.
-
-Merge the best implementation from both branches.
+The configuration becomes the contract that drives the entire platform.
 
 ============================================================
 
-KEEP FROM PHASE 4
+Implement proper schema separation.
 
-✓ Connection Manager inside collapsible Expander
+Physical Schema
 
-✓ Single Page Configuration
+↓
 
-✓ Streaming workflow improvements
+Canonical Schema
 
-✓ UX improvements discovered through real user testing
+↓
+
+Business Mapping
 
 ============================================================
 
-KEEP FROM PHASE 5
+Physical Schema
 
-✓ Data Operations Framework
+Represents exactly what Discovery found.
 
-✓ Operation Registry
-
-✓ Aggregate Operation
-
-✓ Statistics
-
-✓ Export
-
-✓ Preview
-
-✓ Operation Architecture
+Never changes.
 
 ============================================================
 
-WORKFLOW
+Canonical Schema
 
-Connection Manager
+Editable by the user.
 
-↓
+Business-friendly names.
 
-RAW Preview
+Immediately propagates to
 
-↓
+Business Rules
 
-Discovery Summary
+Operations
 
-↓
-
-Single Page Configuration
-
-↓
-
-Configuration Validation
-
-↓
-
-Streaming Processing
-
-↓
-
-Data Operations
-
-↓
-
-Validation (optional)
-
-↓
+Validation
 
 Reports
 
 ============================================================
 
-RAW PREVIEW
+Business Mapping
 
-Connection Manager must show
+Maps business concepts
 
-RAW FILE CONTENT
+Store
 
-Exactly as stored.
+UPC
 
-No parsing.
+Description
 
-No delimiter split.
+Quantity
 
-No flattening.
+Price
 
-Structured Preview belongs ONLY after Configuration.
-
-============================================================
-
-DISCOVERY
-
-Discovery happens exactly once.
-
-Connection Manager owns
-
-Connection
-
-Browse
-
-Sample
-
-Discovery
-
-RAW Preview
-
-DiscoveryResult
-
-Discovery page becomes Discovery Summary.
-
-No duplicate detection.
-
-No duplicate preview.
-
-No duplicate flattening.
+to Canonical Schema.
 
 ============================================================
 
-CONNECTION MANAGER UX
+VALIDATOR
 
-Connection Manager automatically collapses after
+Validator validates
 
-Connection
+Canonical Schema
 
-Dataset Selection
+NOT Physical Schema.
 
-Discovery
+Never require mapping of unused columns.
 
-RAW Preview
-
-Collapsed view shows
-
-Connection
-
-Dataset
-
-Encoding
-
-Delimiter
-
-Discovery Status
-
-Expand only on demand.
+Validate only required mappings for the selected operation.
 
 ============================================================
 
-CONFIGURATION
-
-Keep Single Page Configuration.
-
-Do NOT restore wizard.
-
-Organize into sections
-
-General
-
-Structure
-
-Schema
-
-Business Rules
+OPERATION-AWARE VALIDATION
 
 Validation
 
-Review
+Requires
+
+Store
+
+UPC
+
+Description
+
+Quantity
+
+Price
+
+Aggregate
+
+Requires
+
+Group By
+
+Aggregation Columns
+
+Statistics
+
+No mappings required.
+
+Export
+
+No mappings required.
+
+============================================================
+
+QUANTITY ABSTRACTION
+
+Support
+
+Units
+
+Weight
+
+Mixed datasets
+
+Configuration
+
+Units Column
+
+Weight Column
+
+Weight UOM
+
+Resolution Rule
+
+Canonical Dataset exposes
+
+EFFECTIVE_QUANTITY
+
+QUANTITY_TYPE
+
+Original retailer columns remain.
 
 ============================================================
 
 TESTING
 
-Run after every logical merge
+Header
 
-Unit Tests
+No Header
 
-Regression Tests
+Delimited
 
-Playwright
+Fixed Width
 
-Memory Tests
+Multiline
 
-Streaming Tests
+Units Only
+
+Weight Only
+
+Mixed
 
 ============================================================
 
 OUTPUT
 
-MERGE_REPORT.md
+CONFIGURATION_REVIEW.md
 
-Files merged
+Schema propagation report
 
-Conflicts
+Validator report
 
-Tests
+Quantity architecture
 
-Remaining issues
-
-Architecture preserved
-
-No regressions.
+Regression report

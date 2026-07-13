@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 STAGE_LABELS = {
     ConfigSection.GENERAL: "Stage A: General Information",
     ConfigSection.FILE: "Stage B: File Format",
-    ConfigSection.SCHEMA: "Stage C: Schema & Columns",
-    ConfigSection.BUSINESS_RULES: "Stage D: Business Rules",
-    ConfigSection.VALIDATION: "Stage E: Validation Settings",
-    ConfigSection.OUTPUT: "Stage F: Output Settings",
+    ConfigSection.PHYSICAL_SCHEMA: "Stage C: Physical Schema (read-only)",
+    ConfigSection.CANONICAL_SCHEMA: "Stage D: Canonical Schema (editable)",
+    ConfigSection.BUSINESS_MAPPING: "Stage E: Business Mapping",
+    ConfigSection.QUANTITY: "Stage F: Quantity Configuration",
+    ConfigSection.VALIDATION: "Stage G: Validation Settings",
+    ConfigSection.OUTPUT: "Stage H: Output Settings",
 }
 
 
@@ -73,10 +75,11 @@ class ConfigValidationError(Exception):
 def validate_config(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE) -> List[str]:
     """Validate configuration completeness and correctness for the given OutputMode.
 
+    Validates against the CANONICAL schema (not physical schema).
     The validator only checks fields required by the selected operation:
-    - VALIDATE: all standard fields (store, upc, units, price, etc.)
-    - AGGREGATE_ONLY: requires group_by and aggregation columns
-    - STATISTICS: nothing required (schema columns remain available, not errors)
+    - VALIDATE: store, upc, description, quantity, price
+    - AGGREGATE_ONLY: group_by (store)
+    - STATISTICS: nothing required
     - EXPORT: nothing required
 
     Returns a list of error messages (empty = valid).
@@ -103,18 +106,22 @@ def validate_config(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE) -
     if cfg.file_type == "delimited" and not cfg.delimiter:
         errors.append("Delimited files require a delimiter.")
 
-    # SCHEMA
-    if not cfg.schema and not cfg.detected_columns:
-        errors.append("No schema or detected columns — cannot determine data structure.")
+    # PHYSICAL SCHEMA
+    if not cfg.physical_schema:
+        errors.append("Physical schema not populated — cannot determine data structure.")
 
-    # BUSINESS RULES — operation-aware
+    # CANONICAL SCHEMA
+    if not cfg.canonical_schema:
+        errors.append("Canonical schema not set.")
+
+    # BUSINESS MAPPING — operation-aware, validates against CANONICAL schema
     if mode == OutputMode.VALIDATE:
         if not cfg.store_col:
             errors.append("Store column mapping is required for Validate mode.")
         if not cfg.upc_col:
             errors.append("UPC column mapping is required for Validate mode.")
-        if not cfg.units_col:
-            errors.append("Units column mapping is required for Validate mode.")
+        if not cfg.quantity_col:
+            errors.append("Quantity column mapping is required for Validate mode.")
         if not cfg.price_col:
             errors.append("Price column mapping is required for Validate mode.")
 
@@ -131,17 +138,21 @@ def validate_config(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE) -
     elif mode == OutputMode.EXPORT:
         pass  # No column mapping required
 
-    # Check mapped columns exist in schema (only for VALIDATE and AGGREGATE_ONLY)
+    # Check mapped columns exist in CANONICAL schema (only for VALIDATE and AGGREGATE_ONLY)
     if mode in (OutputMode.VALIDATE, OutputMode.AGGREGATE_ONLY):
-        all_cols = (cfg.schema or []) + (cfg.detected_columns or [])
-        if all_cols:
+        canonical = cfg.canonical_schema or []
+        if canonical:
             required = {cfg.store_col}
             if mode == OutputMode.VALIDATE:
-                required.update({cfg.upc_col, cfg.desc_col, cfg.units_col, cfg.price_col})
+                required.update({cfg.upc_col, cfg.desc_col, cfg.quantity_col, cfg.price_col})
             required.discard(None)
-            missing = required - set(all_cols)
+            missing = required - set(canonical)
             if missing:
-                errors.append(f"Mapped columns not found in schema: {', '.join(sorted(missing))}")
+                errors.append(f"Mapped columns not found in CANONICAL schema: {', '.join(sorted(missing))}")
+
+    # QUANTITY — validate quantity type
+    if mode == OutputMode.VALIDATE and cfg.quantity_type not in ("units", "weight", "mixed"):
+        errors.append(f"Invalid quantity type '{cfg.quantity_type}'. Must be: units, weight, or mixed.")
 
     return errors
 
@@ -179,20 +190,32 @@ def validate_section(cfg: FormatConfig, section: ConfigSection) -> List[str]:
         if cfg.file_type == "delimited" and not cfg.delimiter:
             errors.append("Delimited files require a delimiter.")
 
-    elif section == ConfigSection.SCHEMA:
-        if not cfg.schema and not cfg.detected_columns:
-            errors.append("No columns detected. Ensure a sample was loaded.")
+    elif section == ConfigSection.PHYSICAL_SCHEMA:
+        if not cfg.physical_schema:
+            errors.append("Physical schema not populated. Ensure discovery completed.")
 
-    elif section == ConfigSection.BUSINESS_RULES:
+    elif section == ConfigSection.CANONICAL_SCHEMA:
+        if not cfg.canonical_schema:
+            errors.append("Canonical schema not set. Edit the schema above.")
+
+    elif section == ConfigSection.BUSINESS_MAPPING:
         if not cfg.store_col:
             errors.append("Store column is required.")
         if not cfg.upc_col:
             errors.append("UPC column is required.")
-        if not cfg.units_col:
-            errors.append("Units column is required.")
+        if not cfg.quantity_col:
+            errors.append("Quantity column is required.")
         if not cfg.price_col:
             errors.append("Price column is required.")
         if cfg.price_type and cfg.price_type not in ("Total Price", "Unit Price"):
             errors.append(f"Invalid price type '{cfg.price_type}'.")
+
+    elif section == ConfigSection.QUANTITY:
+        if cfg.quantity_type not in ("units", "weight", "mixed"):
+            errors.append(f"Invalid quantity type '{cfg.quantity_type}'.")
+        if cfg.quantity_type == "weight" and not cfg.weight_col:
+            errors.append("Weight column is required when quantity type is 'weight'.")
+        if cfg.quantity_type == "mixed" and not cfg.weight_col:
+            errors.append("Weight column is required when quantity type is 'mixed'.")
 
     return errors

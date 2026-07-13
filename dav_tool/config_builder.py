@@ -204,11 +204,13 @@ def build_config(
                 )
 
         if sample is not None and not sample.is_empty():
-            cfg.detected_columns = list(sample.columns)
+            cols = list(sample.columns)
+            cfg.physical_schema = cols
+            cfg.canonical_schema = list(cols)
             cfg.detected_data_types = _infer_data_types(sample)
 
             from dav_tool._column_utils import smart_column_indices
-            indices = smart_column_indices(sample.columns)
+            indices = smart_column_indices(cols)
             mapping = {}
             for role, (idx, col) in indices.items():
                 if col:
@@ -218,10 +220,8 @@ def build_config(
             cfg.store_col = mapping.get("store")
             cfg.upc_col = mapping.get("upc")
             cfg.desc_col = mapping.get("description")
-            cfg.units_col = mapping.get("units")
+            cfg.quantity_col = mapping.get("units")
             cfg.price_col = mapping.get("price")
-
-            cfg.schema = list(sample.columns)
     finally:
         if source is not None and fp_local != fp:
             try:
@@ -260,23 +260,35 @@ def config_to_summary_dict(cfg: FormatConfig) -> Dict[str, Any]:
         sections["Multiline Settings"] = ml_info
 
     schema_info = {}
-    if cfg.detected_columns:
-        schema_info["Columns"] = ", ".join(cfg.detected_columns)
+    if cfg.physical_schema:
+        schema_info["Physical Columns"] = ", ".join(cfg.physical_schema)
     if cfg.detected_data_types:
         type_strs = [f"{k}: {v}" for k, v in cfg.detected_data_types.items()]
         schema_info["Data Types"] = "; ".join(type_strs)
     if schema_info:
-        sections["Schema"] = schema_info
+        sections["Physical Schema"] = schema_info
 
-    sections["Column Mapping"] = {
+    if cfg.canonical_schema:
+        sections["Canonical Schema"] = {
+            "Columns": ", ".join(cfg.canonical_schema),
+        }
+
+    sections["Business Mapping"] = {
         "Store": cfg.store_col or "—",
         "UPC": cfg.upc_col or "—",
         "Description": cfg.desc_col or "—",
-        "Units": cfg.units_col or "—",
+        "Quantity": cfg.quantity_col or "—",
         "Price": cfg.price_col or "—",
         "Price Type": cfg.price_type,
         "Implied Dollars": "Yes" if cfg.implied_dollars else "No",
         "Implied Units": "Yes" if cfg.implied_units else "No",
+    }
+
+    sections["Quantity Configuration"] = {
+        "Quantity Type": cfg.quantity_type,
+        "Weight Column": cfg.weight_col or "—",
+        "Weight UOM": cfg.weight_uom,
+        "Resolution Rule": cfg.resolution_rule,
     }
 
     return sections
@@ -374,12 +386,13 @@ def build_schema_section(
     )
 
     if sample is not None and not sample.is_empty():
-        cfg.detected_columns = list(sample.columns)
+        cols = list(sample.columns)
+        cfg.physical_schema = cols
+        cfg.canonical_schema = list(cols)
         cfg.detected_data_types = _infer_data_types(sample)
-        cfg.schema = list(sample.columns)
 
         from dav_tool._column_utils import smart_column_indices
-        indices = smart_column_indices(sample.columns)
+        indices = smart_column_indices(cols)
         mapping = {}
         for role, (idx, col) in indices.items():
             if col:
@@ -388,7 +401,7 @@ def build_schema_section(
         cfg.store_col = mapping.get("store")
         cfg.upc_col = mapping.get("upc")
         cfg.desc_col = mapping.get("description")
-        cfg.units_col = mapping.get("units")
+        cfg.quantity_col = mapping.get("units")
         cfg.price_col = mapping.get("price")
 
     _cleanup_sample(fp, local_fp, source)
@@ -400,7 +413,7 @@ def build_business_rules_section(
     store_col: Optional[str] = None,
     upc_col: Optional[str] = None,
     desc_col: Optional[str] = None,
-    units_col: Optional[str] = None,
+    quantity_col: Optional[str] = None,
     price_col: Optional[str] = None,
     price_type: str = "Total Price",
     implied_dollars: bool = False,
@@ -413,8 +426,8 @@ def build_business_rules_section(
         cfg.upc_col = upc_col
     if desc_col:
         cfg.desc_col = desc_col
-    if units_col:
-        cfg.units_col = units_col
+    if quantity_col:
+        cfg.quantity_col = quantity_col
     if price_col:
         cfg.price_col = price_col
     cfg.price_type = price_type
