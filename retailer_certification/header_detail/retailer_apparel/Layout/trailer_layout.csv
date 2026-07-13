@@ -1,0 +1,3 @@
+From,Length,Field,Type
+4,5,TotalUnits,numeric
+10,9,TotalPrice,numeric

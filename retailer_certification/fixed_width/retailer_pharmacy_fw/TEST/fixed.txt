@@ -1,0 +1,5 @@
+S001      100001Widget A               12  119.88
+S001      100002Gadget B                5   49.95
+S002      100001Widget A                8   79.92
+S003      100003Doohickey              20  199.80
+S004      100004NewItem                 7   69.93

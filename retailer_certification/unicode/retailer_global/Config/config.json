@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "name": "Retailer Global",
+  "file_type": "delimited",
+  "delimiter": ",",
+  "encoding": "utf-8",
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "quantity_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price"
+}

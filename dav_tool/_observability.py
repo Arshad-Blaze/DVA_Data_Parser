@@ -138,6 +138,16 @@ class ProcessingMetrics:
     rows_failed: int = 0
     peak_memory_phase: str = ""
 
+    def record(self, phase: str, label: str, elapsed: float):
+        """Record elapsed time for a phase group.
+
+        *phase* is one of "aggregation", "validation", "report", "parse".
+        Maps to the corresponding time field via _PHASE_MAP.
+        """
+        attr = _PHASE_MAP.get(phase)
+        if attr:
+            setattr(self, attr, getattr(self, attr, 0.0) + elapsed)
+
 
 _PHASE_MAP = {
     "aggregation": "aggregation_time",

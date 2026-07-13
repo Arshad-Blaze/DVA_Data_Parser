@@ -37,11 +37,14 @@ from dav_tool.ui.helpers import (
 )
 
 PHASE_DISCOVERY = 1
-PHASE_CONFIG = 2
-PHASE_CONFIG_VALIDATED = 3
-PHASE_PROCESSING = 4
-PHASE_VALIDATION = 5
-PHASE_REPORTS = 6
+PHASE_DISCOVERY_COMPARE = 2
+PHASE_CONFIG = 3
+PHASE_SCHEMA_COMPARE = 4
+PHASE_CONFIG_VALIDATED = 5
+PHASE_PROCESSING = 6
+PHASE_VALIDATION = 7
+PHASE_REPORTS = 8
+PHASE_MIGRATION_REPORT = 9
 
 
 def _get_ex_validation_config(ctx):
@@ -83,9 +86,9 @@ def _reset_phase():
 
 def run():
     setup_logging()
-    log_phase("Page Loaded — Existing")
+    log_phase("Page Loaded — Certification")
 
-    st.title("Existing")
+    st.title("Certification")
 
     if "ex_ctx" not in st.session_state:
         st.session_state.ex_ctx = ExistingContext()
@@ -96,10 +99,16 @@ def run():
     dev_mode = st.sidebar.checkbox("Developer Mode", key="ex_dev_mode")
     if dev_mode:
         display_dev_diagnostics(ctx)
+        from dav_tool.ui.certification_suite import render_certification_suite
+        render_certification_suite()
 
     _phase1_discovery(ctx)
+    if ctx.phase >= PHASE_DISCOVERY_COMPARE:
+        _phase_discovery_compare(ctx)
     if ctx.phase >= PHASE_CONFIG:
         _phase2_configuration(ctx)
+    if ctx.phase >= PHASE_SCHEMA_COMPARE:
+        _phase_schema_compare(ctx)
     if ctx.phase >= PHASE_CONFIG_VALIDATED:
         _phase3_config_validation(ctx)
     if ctx.phase >= PHASE_PROCESSING:
@@ -108,6 +117,8 @@ def run():
         _phase5_validation(ctx)
     if ctx.phase >= PHASE_REPORTS:
         _phase6_reports(ctx)
+    if ctx.phase >= PHASE_MIGRATION_REPORT:
+        _phase7_migration_report(ctx)
 
 
 def _phase1_discovery(ctx):
@@ -333,16 +344,87 @@ def _phase1_discovery(ctx):
         ctx.test.file_paths = test_file_paths
         ctx.ml_delimiter = ml_delim
 
-        if st.button("Progressive Configuration \u2192", use_container_width=True):
-            ctx.phase = PHASE_CONFIG
+        if st.button("Compare Discovery Results \u2192", use_container_width=True):
+            ctx.phase = PHASE_DISCOVERY_COMPARE
             st.rerun()
+
+
+def _phase_discovery_compare(ctx):
+    if ctx.phase >= PHASE_CONFIG:
+        return
+
+    st.markdown("### Step 3: Discovery Comparison — BAU vs Test")
+
+    prod_detected = bool(ctx.prod.file_type)
+    test_detected = bool(ctx.test.file_type)
+
+    if not prod_detected or not test_detected:
+        st.warning("Both BAU and Test must complete detection before comparison.")
+        return
+
+    _ex_source = get_active_source()
+
+    prod_type = ctx.prod.file_type or "unknown"
+    test_type = ctx.test.file_type or "unknown"
+    prod_delim = ctx.prod.delimiter or "N/A"
+    test_delim = ctx.test.delimiter or "N/A"
+    prod_cols = ctx.prod.columns or []
+    test_cols = ctx.test.columns or []
+    prod_col_count = len(prod_cols)
+    test_col_count = len(test_cols)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("BAU")
+        st.markdown(f"**File Type:** `{prod_type}`")
+        st.markdown(f"**Delimiter:** `{prod_delim}`")
+        st.markdown(f"**Columns ({prod_col_count}):**")
+        for col in prod_cols:
+            st.text(f"  {col}")
+
+    with c2:
+        st.subheader("Test")
+        st.markdown(f"**File Type:** `{test_type}`")
+        st.markdown(f"**Delimiter:** `{test_delim}`")
+        st.markdown(f"**Columns ({test_col_count}):**")
+        for col in test_cols:
+            st.text(f"  {col}")
+
+    st.subheader("Comparison")
+
+    same_type = prod_type == test_type
+    same_delim = prod_delim == test_delim
+    same_col_count = prod_col_count == test_col_count
+
+    st.markdown(f"- **File Type Match:** {'✓' if same_type else '✗'} ({prod_type} vs {test_type})")
+    st.markdown(f"- **Delimiter Match:** {'✓' if same_delim else '✗'} ({prod_delim} vs {test_delim})")
+    st.markdown(f"- **Column Count Match:** {'✓' if same_col_count else '✗'} ({prod_col_count} vs {test_col_count})")
+
+    if same_col_count and prod_cols == test_cols:
+        st.success("Columns are identical between BAU and Test.")
+    elif same_col_count:
+        st.warning("Same column count but different column names.")
+        prod_set = set(prod_cols)
+        test_set = set(test_cols)
+        only_prod = prod_set - test_set
+        only_test = test_set - prod_set
+        if only_prod:
+            st.markdown(f"- Columns only in BAU: {', '.join(only_prod)}")
+        if only_test:
+            st.markdown(f"- Columns only in Test: {', '.join(only_test)}")
+    else:
+        st.info("Column counts differ — schema comparison will be available after configuration.")
+
+    if st.button("Proceed to Configuration \u2192", use_container_width=True):
+        ctx.phase = PHASE_CONFIG
+        st.rerun()
 
 
 def _phase2_configuration(ctx):
     if ctx.phase >= PHASE_CONFIG_VALIDATED:
         return
 
-    st.markdown("### Step 3: Configuration")
+    st.markdown("### Step 4: Configuration")
     _ex_source = get_active_source()
 
     active_side = st.session_state.get("ex_active_side", "prod")
@@ -433,17 +515,75 @@ def _phase2_configuration(ctx):
             st.rerun()
 
     if ctx.prod.config_locked and ctx.test.config_locked:
-        st.success("Both configurations locked. Ready to validate.")
-        if st.button("Validate Configurations \u2192", use_container_width=True):
+        st.success("Both configurations locked. Ready to compare schemas.")
+        if st.button("Compare Schemas \u2192", use_container_width=True):
+            ctx.phase = PHASE_SCHEMA_COMPARE
+            st.rerun()
+
+
+def _phase_schema_compare(ctx):
+    if ctx.phase >= PHASE_CONFIG_VALIDATED:
+        return
+
+    st.markdown("### Step 5: Schema Comparison")
+
+    prod_cols = ctx.prod.schema or ctx.prod.columns or []
+    test_cols = ctx.test.schema or ctx.test.columns or []
+
+    if not prod_cols or not test_cols:
+        st.warning("Both BAU and Test must have column schemas for comparison.")
+        if st.button("Skip Schema Comparison \u2192", use_container_width=True):
             ctx.phase = PHASE_CONFIG_VALIDATED
             st.rerun()
+        return
+
+    prod_set = set(prod_cols)
+    test_set = set(test_cols)
+
+    common = prod_set & test_set
+    only_prod = prod_set - test_set
+    only_test = test_set - prod_set
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Common Columns", len(common))
+    with c2:
+        st.metric("BAU-Only Columns", len(only_prod))
+    with c3:
+        st.metric("Test-Only Columns", len(only_test))
+
+    if only_prod:
+        st.warning(f"Columns present in BAU but missing in Test ({len(only_prod)}):")
+        st.text(", ".join(sorted(only_prod)))
+    if only_test:
+        st.info(f"New columns in Test not present in BAU ({len(only_test)}):")
+        st.text(", ".join(sorted(only_test)))
+
+    if not only_prod and not only_test:
+        st.success("Schemas match exactly — no new or removed columns detected.")
+
+    with st.expander("Full Schema Comparison"):
+        import polars as pl
+        all_cols = sorted(prod_set | test_set)
+        rows = []
+        for col in all_cols:
+            rows.append({
+                "Column": col,
+                "In BAU": "✓" if col in prod_set else "—",
+                "In Test": "✓" if col in test_set else "—",
+            })
+        st.dataframe(pl.DataFrame(rows).to_pandas())
+
+    if st.button("Proceed to Config Validation \u2192", use_container_width=True, type="primary"):
+        ctx.phase = PHASE_CONFIG_VALIDATED
+        st.rerun()
 
 
 def _phase3_config_validation(ctx):
     if ctx.phase >= PHASE_PROCESSING:
         return
 
-    st.markdown("### Step 4: Validate Configuration")
+    st.markdown("### Step 6: Validate Configuration")
 
     prod_ok = True
     test_ok = True
@@ -472,7 +612,7 @@ def _phase4_processing(ctx):
     if ctx.phase >= PHASE_VALIDATION:
         return
 
-    st.markdown("### Step 5: Processing")
+    st.markdown("### Step 7: Processing")
     _ex_source = get_active_source()
 
     prod_paths = ctx.prod.file_paths
@@ -647,7 +787,7 @@ def _phase4_processing(ctx):
                         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
                         detail_layout=hdr_detail_prod,
                         trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
-                        multiline_record_types=prod_ml_rtypes_prod if prod_type == "multiline" and not hdr_prefix_prod else None,
+                        multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
                         multiline_delimiter=ml_delim_val,
                     )
                     prod_mapping = ColumnMapping.from_context(ctx.prod)
@@ -659,7 +799,7 @@ def _phase4_processing(ctx):
                         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
                         detail_layout=hdr_detail_test,
                         trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
-                        multiline_record_types=test_ml_rtypes if test_type == "multiline" and not hdr_prefix_test else None,
+                        multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
                         multiline_delimiter=ml_delim_val,
                     )
                     test_mapping = ColumnMapping.from_context(ctx.test)
@@ -712,7 +852,7 @@ def _phase5_validation(ctx):
     if ctx.phase >= PHASE_REPORTS:
         return
 
-    st.markdown("### Step 6: Validation")
+    st.markdown("### Step 8: Certification")
     _ex_source = get_active_source()
 
     prod_paths = ctx.prod.file_paths
@@ -877,10 +1017,14 @@ def _phase5_validation(ctx):
 
 
 def _phase6_reports(ctx):
-    st.markdown("### Step 7: Reports")
+    st.markdown("### Step 9: Reports")
 
     _display_results()
     display_processing_history()
+
+    if st.button("Generate Migration Report \u2192", use_container_width=True, type="primary"):
+        ctx.phase = PHASE_MIGRATION_REPORT
+        st.rerun()
 
     if st.button("Start Over", use_container_width=True):
         _reset_phase()
@@ -1426,3 +1570,142 @@ def _display_results():
                     st.download_button("Download Test File Review", fr.write_csv(), "test_file_review.csv")
 
     display_execution_summary(ctx.metrics)
+
+
+def _phase7_migration_report(ctx):
+    st.markdown("### Step 10: Migration Report")
+
+    st.subheader("Certification Summary")
+
+    prod_type = ctx.prod.file_type or "unknown"
+    test_type = ctx.test.file_type or "unknown"
+    prod_cols = ctx.prod.schema or ctx.prod.columns or []
+    test_cols = ctx.test.schema or ctx.test.columns or []
+    prod_set = set(prod_cols)
+    test_set = set(test_cols)
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("BAU Columns", len(prod_cols))
+    with c2:
+        st.metric("Test Columns", len(test_cols))
+    with c3:
+        st.metric("Common", len(prod_set & test_set))
+    with c4:
+        st.metric("New in Test", len(test_set - prod_set))
+
+    st.subheader("Aggregation Comparison")
+    store_present = ctx.prod.store_agg is not None and ctx.test.store_agg is not None
+    item_present = ctx.prod.item_agg is not None and ctx.test.item_agg is not None
+
+    if store_present:
+        prod_stores = ctx.prod.store_agg.height if hasattr(ctx.prod.store_agg, 'height') else len(ctx.prod.store_agg)
+        test_stores = ctx.test.store_agg.height if hasattr(ctx.test.store_agg, 'height') else len(ctx.test.store_agg)
+        st.info(f"**Store Count:** BAU={prod_stores}, Test={test_stores}")
+    else:
+        st.info("Store aggregation not available for both sides.")
+
+    if item_present:
+        prod_items = ctx.prod.item_agg.height if hasattr(ctx.prod.item_agg, 'height') else len(ctx.prod.item_agg)
+        test_items = ctx.test.item_agg.height if hasattr(ctx.test.item_agg, 'height') else len(ctx.test.item_agg)
+        st.info(f"**Item Count:** BAU={prod_items}, Test={test_items}")
+    else:
+        st.info("Item aggregation not available for both sides.")
+
+    st.subheader("Validation Results")
+    if ctx.compare_result is not None:
+        st.markdown(f"- **Store Comparison:** {len(ctx.compare_result.get('missing_in_test', '').split(',')) if ctx.compare_result.get('missing_in_test') else 0} stores missing in Test, "
+                    f"{len(ctx.compare_result.get('missing_in_prod', '').split(',')) if ctx.compare_result.get('missing_in_prod') else 0} stores missing in BAU")
+    else:
+        st.info("Store list comparison not performed.")
+
+    if ctx.summary_df is not None:
+        st.markdown(f"- **Item Summary:** Available ({ctx.summary_df.height if hasattr(ctx.summary_df, 'height') else len(ctx.summary_df)} rows)")
+    else:
+        st.info("Item summary not available.")
+
+    st.subheader("Recommendations")
+    recommendations = []
+
+    if prod_cols and test_cols:
+        only_test = test_set - prod_set
+        only_prod = prod_set - test_set
+        if only_test:
+            recommendations.append(f"**New columns detected** in Test data: {', '.join(sorted(only_test))[:200]}. "
+                                   "Verify these columns are expected in the new format.")
+        if only_prod:
+            recommendations.append(f"**Columns removed** in Test data: {', '.join(sorted(only_prod))[:200]}. "
+                                   "Confirm these columns are no longer required.")
+    if prod_type != test_type:
+        recommendations.append(f"**File type mismatch** ({prod_type} vs {test_type}). Ensure processing handles both formats.")
+    if store_present and ctx.compare_result:
+        if ctx.compare_result.get('missing_in_test'):
+            recommendations.append("**Stores missing in Test:** Review the store list to ensure coverage is complete.")
+        if ctx.compare_result.get('missing_in_prod'):
+            recommendations.append("**Stores missing in BAU:** Review the store list for completeness.")
+    if ctx.metrics.errors:
+        recommendations.append(f"**{len(ctx.metrics.errors)} errors** encountered during processing. Review error log before migration.")
+    if ctx.metrics.warnings:
+        recommendations.append(f"**{len(ctx.metrics.warnings)} warnings** generated. Review warnings for potential issues.")
+
+    if not recommendations:
+        recommendations.append("No issues detected — the Test data is certified for migration.")
+
+    for rec in recommendations:
+        st.markdown(f"- {rec}")
+
+    with st.expander("Execution Metrics"):
+        display_execution_summary(ctx.metrics)
+
+    st.download_button(
+        "Download Migration Report (JSON)",
+        _generate_migration_report_json(ctx),
+        file_name="migration_report.json",
+        use_container_width=True,
+    )
+
+    if st.button("Start Over", use_container_width=True):
+        _reset_phase()
+        st.rerun()
+
+
+def _generate_migration_report_json(ctx):
+    import json
+
+    prod_cols = ctx.prod.schema or ctx.prod.columns or []
+    test_cols = ctx.test.schema or ctx.test.columns or []
+    prod_set = set(prod_cols)
+    test_set = set(test_cols)
+
+    report = {
+        "certification_type": "Configuration Certification",
+        "bau": {
+            "file_type": ctx.prod.file_type,
+            "delimiter": ctx.prod.delimiter,
+            "column_count": len(prod_cols),
+            "columns": prod_cols,
+        },
+        "test": {
+            "file_type": ctx.test.file_type,
+            "delimiter": ctx.test.delimiter,
+            "column_count": len(test_cols),
+            "columns": test_cols,
+        },
+        "schema_differences": {
+            "common_columns": sorted(prod_set & test_set),
+            "bau_only": sorted(prod_set - test_set),
+            "test_only": sorted(test_set - prod_set),
+        },
+        "validation": {
+            "store_list_missing_in_test": ctx.compare_result.get("missing_in_test", "") if ctx.compare_result else "",
+            "store_list_missing_in_prod": ctx.compare_result.get("missing_in_prod", "") if ctx.compare_result else "",
+            "errors": ctx.metrics.errors,
+            "warnings": ctx.metrics.warnings,
+        },
+        "metrics": {
+            "rows_processed": ctx.metrics.rows_processed,
+            "total_execution_time": ctx.metrics.total_execution_time,
+            "peak_memory_mb": ctx.metrics.peak_memory,
+        },
+    }
+    return json.dumps(report, indent=2)

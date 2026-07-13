@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "Retailer Grocery",
+  "file_type": "delimited",
+  "delimiter": ",",
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "quantity_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price"
+}

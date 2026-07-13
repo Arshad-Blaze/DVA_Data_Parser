@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "name": "Retailer Legacy",
+  "file_type": "delimited",
+  "delimiter": ",",
+  "encoding": "cp1252",
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "quantity_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price"
+}

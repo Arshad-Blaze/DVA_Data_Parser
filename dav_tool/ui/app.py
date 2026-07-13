@@ -38,7 +38,7 @@ with col_toggle:
     if c1.button("Onboarding", key="btn_onboarding", use_container_width=True):
         st.session_state.page = "onboarding"
 
-    if c2.button("Existing", key="btn_existing", use_container_width=True):
+    if c2.button("Certification", key="btn_existing", use_container_width=True):
         st.session_state.page = "existing"
 
 if st.session_state.page == "onboarding":

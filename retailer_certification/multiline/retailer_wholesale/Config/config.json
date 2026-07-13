@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "name": "Retailer Wholesale",
+  "file_type": "multiline",
+  "ml_record_types": [
+    "H",
+    "D"
+  ],
+  "ml_delimiter": "|",
+  "canonical_schema": [
+    "Store",
+    "UPC",
+    "Description",
+    "Units",
+    "Price"
+  ],
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "quantity_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price"
+}

@@ -1,0 +1,5 @@
+From,Length,Field,Type
+1,12,UPC,text
+13,21,Description,text
+34,2,Units,numeric
+36,8,Price,numeric

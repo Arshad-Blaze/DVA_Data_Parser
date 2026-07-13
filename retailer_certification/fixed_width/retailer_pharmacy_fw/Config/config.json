@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "name": "Retailer Pharmacy FW",
+  "file_type": "fixed",
+  "layout_file": "/home/arshad/Documents/current_app/retailer_certification/fixed_width/retailer_pharmacy_fw/Layout/layout.csv",
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "quantity_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price"
+}

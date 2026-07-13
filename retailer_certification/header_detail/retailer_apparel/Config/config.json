@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "Retailer Apparel",
+  "file_type": "multiline",
+  "header_prefix": "HDR",
+  "header_layout_file": "/home/arshad/Documents/current_app/retailer_certification/header_detail/retailer_apparel/Layout/header_layout.csv",
+  "detail_layout_file": "/home/arshad/Documents/current_app/retailer_certification/header_detail/retailer_apparel/Layout/detail_layout.csv",
+  "trailer_prefix": "TRL",
+  "trailer_layout_file": "/home/arshad/Documents/current_app/retailer_certification/header_detail/retailer_apparel/Layout/trailer_layout.csv",
+  "store_col": "Store",
+  "upc_col": "UPC",
+  "desc_col": "Description",
+  "quantity_col": "Units",
+  "price_col": "Price",
+  "price_type": "Total Price"
+}
