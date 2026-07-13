@@ -64,33 +64,100 @@ def _init_state():
         st.session_state[_TEST_SEARCH_KEY] = ""
 
 
+def _setup_complete() -> bool:
+    """Check whether the Connection Manager has completed its job."""
+    if not is_connected():
+        return False
+    workflow = st.session_state.get(_WORKFLOW_KEY, "onboarding")
+    if workflow == "onboarding":
+        if not st.session_state.get(_SELECTED_PATH_KEY):
+            return False
+    else:
+        if not st.session_state.get(_BAU_PATH_KEY) and not st.session_state.get(_TEST_PATH_KEY):
+            return False
+    return True
+
+
+def _status_summary() -> str:
+    """Build a one-line status summary for the collapsed CM header."""
+    source = get_active_source()
+    workflow = st.session_state.get(_WORKFLOW_KEY, "onboarding")
+    parts = []
+    if source:
+        try:
+            parts.append(source.get_connection_string()[:30])
+        except Exception:
+            parts.append("Connected")
+    if workflow == "onboarding":
+        path = st.session_state.get(_SELECTED_PATH_KEY, "")
+        if path:
+            parts.append(f"📁 {os.path.basename(path.rstrip('/'))}")
+    else:
+        bau = st.session_state.get(_BAU_PATH_KEY, "")
+        test = st.session_state.get(_TEST_PATH_KEY, "")
+        if bau:
+            parts.append(f"BAU: {os.path.basename(bau.rstrip('/'))}")
+        if test:
+            parts.append(f"Test: {os.path.basename(test.rstrip('/'))}")
+    discovery = st.session_state.get("_cm_discovery") or st.session_state.get("_cm_bau_discovery")
+    if discovery:
+        if discovery.file_type:
+            parts.append(f"Type: {discovery.file_type}")
+        if discovery.delimiter:
+            parts.append(f"Delim: {discovery.delimiter}")
+    return " | ".join(parts) if parts else "Setup complete"
+
+
 def render_connection_manager():
     _init_state()
 
-    with st.container(border=True):
-        st.markdown("### Connection Manager")
-        col1, col2 = st.columns([1, 3])
+    if "_cm_expanded" not in st.session_state:
+        st.session_state["_cm_expanded"] = True
 
-        with col1:
-            conn_type = st.radio(
-                "Connection Type",
-                options=["Local", "Remote Server"],
-                index=0 if st.session_state[_CONN_TYPE_KEY] == "local" else 1,
-                key="cm_type_radio",
-                horizontal=True,
-            )
-            st.session_state[_CONN_TYPE_KEY] = conn_type.lower().replace(" ", "_")
+    setup_done = _setup_complete()
 
-        with col2:
-            if conn_type == "Local":
-                _render_local()
-            else:
-                _render_remote_connect()
+    if setup_done and not st.session_state["_cm_expanded"]:
+        with st.container(border=True):
+            cols = st.columns([4, 1])
+            with cols[0]:
+                st.markdown(f"**🔌 Connection Manager** — {_status_summary()}")
+            with cols[1]:
+                if st.button("Expand", use_container_width=True):
+                    st.session_state["_cm_expanded"] = True
+                    st.rerun()
+    else:
+        with st.container(border=True):
+            _render_cm_content()
+            if setup_done:
+                if st.button("Collapse Connection Manager", use_container_width=True):
+                    st.session_state["_cm_expanded"] = False
+                    st.rerun()
 
-        if is_connected():
-            _render_connection_info()
-            _render_workflow_selector()
-            _render_selected_preview()
+
+def _render_cm_content():
+    st.markdown("### Connection Manager")
+    col1, col2 = st.columns([1, 3])
+
+    with col1:
+        conn_type = st.radio(
+            "Connection Type",
+            options=["Local", "Remote Server"],
+            index=0 if st.session_state[_CONN_TYPE_KEY] == "local" else 1,
+            key="cm_type_radio",
+            horizontal=True,
+        )
+        st.session_state[_CONN_TYPE_KEY] = conn_type.lower().replace(" ", "_")
+
+    with col2:
+        if conn_type == "Local":
+            _render_local()
+        else:
+            _render_remote_connect()
+
+    if is_connected():
+        _render_connection_info()
+        _render_workflow_selector()
+        _render_selected_preview()
 
 
 def _render_local():

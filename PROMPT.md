@@ -1,65 +1,232 @@
-The workflow now reaches the Configuration phase successfully.
+# DVA Platform 1.0 RC1
+# Sprint A - RC1 Integration
 
-However the workflow cannot progress beyond Step 3.
+Read BOTH branches completely.
 
-Observed behaviour:
+Branch A
+Phase 4 - Stable Streaming Workflow
 
-1. Discovery completes successfully.
-2. Configuration page loads.
-3. Configuration values are populated.
-4. Clicking "Confirm General Information" does not advance.
-5. No exception is displayed.
-6. No validation errors are displayed.
-7. Workflow remains on Configuration.
+Branch B
+Phase 5 - Data Operations
 
-Do NOT guess.
+DO NOT begin coding immediately.
 
-Trace the entire execution path of the Confirm General Information button.
+First compare both branches and generate an internal implementation matrix.
 
-Verify:
+============================================================
 
-• Button callback executes.
-• Configuration object updates.
-• ProcessingContext updates.
-• Session state updates.
-• Configuration validator executes.
-• Validation result is returned.
-• Workflow phase changes.
-• Streamlit reruns.
-• Updated ProcessingContext survives rerun.
+MISSION
 
-For every step print:
+DVA is a Retail Data Integration & Certification Platform.
 
-PASS
+It supports
 
-or
+1. New Retailer Integration
 
-FAIL
+2. Existing Retailer Format Certification
 
-with the exact reason.
+The architecture is frozen.
 
-Also verify:
+Do NOT redesign the architecture.
 
-• Which condition controls transition from Configuration → Validate Config?
+Do NOT add experimental features.
 
-• Which variable is checked?
+Merge the best implementation from both branches.
 
-• Which variable is set?
+============================================================
 
-Ensure they are the same object.
+KEEP FROM PHASE 4
 
-If validation fails, display every validation error to the user.
+✓ Connection Manager inside collapsible Expander
 
-Silent failures are not acceptable.
+✓ Single Page Configuration
 
-If validation succeeds, automatically advance to Validate Config.
+✓ Streaming workflow improvements
 
-Fix the issue.
+✓ UX improvements discovered through real user testing
 
-Run Playwright and regression tests afterwards.
+============================================================
 
-Also silence the Polars warning by explicitly specifying:
+KEEP FROM PHASE 5
 
-orient="row"
+✓ Data Operations Framework
 
-This warning is not the root cause but should be cleaned up.
+✓ Operation Registry
+
+✓ Aggregate Operation
+
+✓ Statistics
+
+✓ Export
+
+✓ Preview
+
+✓ Operation Architecture
+
+============================================================
+
+WORKFLOW
+
+Connection Manager
+
+↓
+
+RAW Preview
+
+↓
+
+Discovery Summary
+
+↓
+
+Single Page Configuration
+
+↓
+
+Configuration Validation
+
+↓
+
+Streaming Processing
+
+↓
+
+Data Operations
+
+↓
+
+Validation (optional)
+
+↓
+
+Reports
+
+============================================================
+
+RAW PREVIEW
+
+Connection Manager must show
+
+RAW FILE CONTENT
+
+Exactly as stored.
+
+No parsing.
+
+No delimiter split.
+
+No flattening.
+
+Structured Preview belongs ONLY after Configuration.
+
+============================================================
+
+DISCOVERY
+
+Discovery happens exactly once.
+
+Connection Manager owns
+
+Connection
+
+Browse
+
+Sample
+
+Discovery
+
+RAW Preview
+
+DiscoveryResult
+
+Discovery page becomes Discovery Summary.
+
+No duplicate detection.
+
+No duplicate preview.
+
+No duplicate flattening.
+
+============================================================
+
+CONNECTION MANAGER UX
+
+Connection Manager automatically collapses after
+
+Connection
+
+Dataset Selection
+
+Discovery
+
+RAW Preview
+
+Collapsed view shows
+
+Connection
+
+Dataset
+
+Encoding
+
+Delimiter
+
+Discovery Status
+
+Expand only on demand.
+
+============================================================
+
+CONFIGURATION
+
+Keep Single Page Configuration.
+
+Do NOT restore wizard.
+
+Organize into sections
+
+General
+
+Structure
+
+Schema
+
+Business Rules
+
+Validation
+
+Review
+
+============================================================
+
+TESTING
+
+Run after every logical merge
+
+Unit Tests
+
+Regression Tests
+
+Playwright
+
+Memory Tests
+
+Streaming Tests
+
+============================================================
+
+OUTPUT
+
+MERGE_REPORT.md
+
+Files merged
+
+Conflicts
+
+Tests
+
+Remaining issues
+
+Architecture preserved
+
+No regressions.

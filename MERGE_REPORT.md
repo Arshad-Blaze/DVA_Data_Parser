@@ -25,6 +25,7 @@ Merge Phase 4 (Stable Streaming Workflow) and Phase 5 (Data Operations Framework
 | `dav_tool/ui/connection_manager.py` | Phase 4 + RAW | RAW Preview using `preview_raw_lines()` |
 | `dav_tool/_parsers.py` | Merged | Added `preview_raw_lines()` for truly raw preview |
 | `dav_tool/ui/helpers.py` | Phase 4 | Enhanced `display_dev_diagnostics()` |
+| `dav_tool/ui/connection_manager.py` | Phase 4 | CM auto-collapses after setup; collapsed view shows status summary |
 | `tests/test_operations.py` | Phase 5 | Added — 61 operation tests |
 
 ## Conflicts Resolved
@@ -39,7 +40,7 @@ Merge Phase 4 (Stable Streaming Workflow) and Phase 5 (Data Operations Framework
 
 ## UX Decisions
 
-- **Connection Manager**: Inside collapsible Expander (Phase 4) — keeps UI clean after discovery
+- **Connection Manager**: Auto-collapses after connection + dataset selection + discovery + RAW preview into a compact status bar showing Connection, Dataset, Type, and Delimiter. Expands on demand.
 - **Single Page Configuration**: All sections on one page (Phase 4) — faster, easier to review/edit
 - **RAW Preview**: During CM discovery, shows raw lines (no parsing, no splitting, no flattening)
 - **Structured Preview**: Only after Configuration is available — uses delimiter/layout/header settings
@@ -54,6 +55,9 @@ Merge Phase 4 (Stable Streaming Workflow) and Phase 5 (Data Operations Framework
 - **Single Discovery**: CM discovery result consumed by workflow — no re-detection
 
 ## Workflow Improvements
+
+- CM auto-collapses after setup complete — reduces visual clutter, shows only essential status
+- CM collapsed view shows Connection, Dataset, File Type, Delimiter at a glance
 
 - Discovery happens exactly once in Connection Manager
 - RAW Preview shows bytes as-is for format understanding
@@ -116,7 +120,7 @@ tests/test_validation_service.py .......                                 [100%]
 
 ## Final Acceptance Checklist
 
-- [x] Connection Manager works
+- [x] Connection Manager works (auto-collapses, status summary)
 - [x] Streaming works
 - [x] RAW Preview works
 - [x] Discovery Summary works (CM stores DiscoveryResult)
