@@ -306,6 +306,42 @@ def flatten_multiline_fixed_width(
                 yield pl.DataFrame(buffer)
 
 
+def preview_raw_lines(
+    file_paths: Union[str, List[str]],
+    n_rows: int = DEFAULT_PREVIEW_ROWS,
+    source: Optional[IDataSource] = None,
+) -> List[str]:
+    """Read raw lines from a file without ANY parsing or interpretation.
+
+    Displays exactly what exists inside the source file — no delimiter
+    splitting, no canonical conversion, no flattening, no column mapping.
+    This is intended ONLY for understanding source data format.
+    """
+    if isinstance(file_paths, str):
+        file_paths = [file_paths]
+
+    if not file_paths:
+        return []
+
+    fp = file_paths[0]
+    if source is None and not os.path.exists(fp):
+        return []
+
+    try:
+        lines = []
+        with _open_text_stream(fp, source) as f:
+            for i, line in enumerate(f):
+                if n_rows and len(lines) >= n_rows:
+                    break
+                line = line.rstrip("\n\r")
+                if line:
+                    lines.append(line)
+        return lines
+    except Exception:
+        logger.warning("preview_raw_lines failed for %s", fp)
+        return []
+
+
 def preview_raw(
     file_paths: Union[str, List[str]],
     file_type: str,

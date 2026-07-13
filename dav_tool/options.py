@@ -9,9 +9,24 @@ Design:
 - Objects are constructed once per workflow phase, then passed down
 """
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Dict, Any, Optional
 
 from dav_tool.datasource.base import IDataSource
+
+
+class OutputMode(str, Enum):
+    """Determines which downstream stages execute after aggregation.
+
+    VALIDATE        — full pipeline: aggregation → validation → reports
+    AGGREGATE_ONLY  — stop after aggregation; export becomes available
+    STATISTICS      — aggregation → statistics; skip validation/reports
+    EXPORT          — aggregation → export; skip validation/reports
+    """
+    VALIDATE = "validate"
+    AGGREGATE_ONLY = "aggregate_only"
+    STATISTICS = "statistics"
+    EXPORT = "export"
 
 
 @dataclass(frozen=True)
@@ -147,5 +162,27 @@ class WorkflowState:
     parse: Optional[ParseOptions] = None
     mapping: Optional[ColumnMapping] = None
     validation: Optional[ValidationOptions] = None
+    output_mode: OutputMode = OutputMode.VALIDATE
     is_complete: bool = False
     error: Optional[str] = None
+
+
+def validation_options_for_mode(
+    mode: OutputMode,
+    base: Optional[ValidationOptions] = None,
+) -> ValidationOptions:
+    """Return ValidationOptions appropriate for the given OutputMode.
+
+    AGGREGATE_ONLY / STATISTICS / EXPORT disable all validation and report
+    flags.  VALIDATE keeps whatever the caller specified (or the defaults).
+    """
+    if mode == OutputMode.VALIDATE:
+        return base or ValidationOptions()
+
+    return ValidationOptions(
+        run_store_validation=False,
+        run_item_validation=False,
+        run_compare_store_list=False,
+        run_summary=False,
+        run_file_review=False,
+    )

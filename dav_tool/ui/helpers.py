@@ -85,26 +85,46 @@ def display_execution_summary(metrics):
 
 def display_dev_diagnostics(ctx):
     st.sidebar.divider()
-    st.sidebar.markdown("### Developer Diagnostics")
-    m = ctx.metrics
-    st.sidebar.markdown(f"**Phase:** {ctx.phase}")
-    st.sidebar.markdown(f"**Parser Type:** {getattr(ctx, 'file_type', 'N/A')}")
-    if hasattr(ctx, 'prod') and hasattr(ctx, 'test'):
-        st.sidebar.markdown(f"**BAU Type:** {ctx.prod.file_type or '—'}")
-        st.sidebar.markdown(f"**Test Type:** {ctx.test.file_type or '—'}")
-    layout = getattr(ctx, 'layout', None) or getattr(ctx, 'schema', None)
-    if layout:
-        st.sidebar.markdown(f"**Schema/Columns:** {layout}")
-    st.sidebar.markdown(f"**Current Memory:** {m.current_memory:.1f} MB")
-    st.sidebar.markdown(f"**Peak Memory:** {m.peak_memory:.1f} MB")
-    st.sidebar.markdown(f"**Current CPU:** {m.current_cpu:.1f}%")
-    st.sidebar.markdown(f"**Chunks Processed:** {m.chunks_processed}")
-    if hasattr(ctx, 'store_agg') and ctx.store_agg is not None and not ctx.store_agg.is_empty():
-        st.sidebar.markdown(f"**Store Agg:** {len(ctx.store_agg)} rows")
-    if hasattr(ctx, 'item_agg') and ctx.item_agg is not None and not ctx.item_agg.is_empty():
-        st.sidebar.markdown(f"**Item Agg:** {len(ctx.item_agg)} rows")
-    done = getattr(ctx, 'done', None) or getattr(ctx, 'validation_done', None)
-    st.sidebar.markdown(f"**Validation Done:** {bool(done)}")
+    with st.sidebar.expander("Developer Diagnostics", expanded=False):
+        from dav_tool.options import OutputMode
+        from dav_tool.datasource.manager import is_connected, get_active_source
+
+        m = ctx.metrics
+
+        output_mode = getattr(ctx, 'output_mode', OutputMode.VALIDATE)
+        if hasattr(output_mode, 'value'):
+            output_mode = output_mode.value
+
+        st.markdown(f"**Current Phase:** {ctx.phase}")
+        st.markdown(f"**Current Operation:** {output_mode}")
+        source = get_active_source()
+        conn_status = "Connected" if is_connected() and source is not None else "Disconnected"
+        if source is not None:
+            try:
+                conn_status += f" ({source.get_connection_string()[:50]})"
+            except Exception:
+                pass
+        st.markdown(f"**Connection Status:** {conn_status}")
+
+        if hasattr(ctx, 'prod') and hasattr(ctx, 'test'):
+            st.markdown(f"**BAU Type:** {ctx.prod.file_type or '—'}")
+            st.markdown(f"**Test Type:** {ctx.test.file_type or '—'}")
+        else:
+            st.markdown(f"**Parser Type:** {getattr(ctx, 'file_type', 'N/A')}")
+
+        st.markdown(f"**Rows Sampled:** {getattr(m, 'rows_sampled', 'N/A')}")
+        st.markdown(f"**Rows Processed:** {getattr(m, 'rows_processed', 'N/A')}")
+        st.markdown(f"**Discovery Time:** {getattr(m, 'discovery_time', 0):.2f}s" if hasattr(m, 'discovery_time') else "")
+        st.markdown(f"**Processing Time:** {getattr(m, 'aggregation_time', 0):.2f}s")
+        st.markdown(f"**Memory Usage:** {m.current_memory:.1f} MB (peak: {m.peak_memory:.1f} MB)")
+        st.markdown(f"**Current CPU:** {m.current_cpu:.1f}%")
+        st.markdown(f"**Chunks Processed:** {m.chunks_processed}")
+        st.markdown(f"**Streaming Status:** {'Active' if m.chunks_processed > 0 else 'N/A'}")
+
+        conf_status = "Locked" if getattr(ctx, 'config_locked', False) else "Not locked"
+        st.markdown(f"**Configuration Status:** {conf_status}")
+        val_done = getattr(ctx, 'done', None) or getattr(ctx, 'validation_done', None)
+        st.markdown(f"**Validation Status:** {'Done' if val_done else 'Pending'}")
 
 
 COLUMN_SYNONYMS = COLUMN_SYNONYMS  # re-export from _column_utils for backward compat

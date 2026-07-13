@@ -13,6 +13,7 @@ from dav_tool.datasource.manager import (
 )
 from dav_tool._observability import log_phase
 from dav_tool.workflow.discovery import detect_file, DiscoveryResult
+from dav_tool._parsers import preview_raw_lines
 from dav_tool.ui.helpers import get_file_list
 
 logger = logging.getLogger(__name__)
@@ -360,7 +361,12 @@ def _render_selected_preview():
 
 
 def _show_path_preview(path, source, label="Data Preview", discovery_key="_cm_discovery"):
-    """Detect file type via Discovery service and show a preview for a selected path."""
+    """Detect file type via Discovery service and show a RAW preview for a selected path.
+
+    The preview displays exactly what exists inside the source file — no parsing,
+    no canonical conversion, no delimiter splitting, no flattening, no column mapping.
+    This is intended only for understanding source data format.
+    """
     with st.expander(label, expanded=False):
         file_paths = get_file_list(path, source=source)
         if not file_paths:
@@ -384,24 +390,13 @@ def _show_path_preview(path, source, label="Data Preview", discovery_key="_cm_di
         # Ensure file_paths are always carried in the discovery result
         discovery.file_paths = file_paths
         st.session_state[discovery_key] = discovery
-        st.session_state["_cm_selected_path"] = path
 
-        try:
-            from dav_tool.workflow.discovery import get_preview
-            df = get_preview(
-                file_paths, discovery.file_type,
-                delimiter=discovery.delimiter,
-                n_rows=5, source=source,
-            )
-        except Exception:
-            st.caption("Could not generate preview")
-            return
-
-        if df is not None and not df.is_empty():
-            st.dataframe(df.to_pandas(), height=150)
-            st.caption(f"{discovery.file_type} — {len(file_paths)} file(s)")
-        else:
-            st.caption(f"{discovery.file_type} detected — preview empty")
+        # RAW Preview — display raw lines without any parsing
+        raw_lines = preview_raw_lines(file_paths, n_rows=10, source=source)
+        if raw_lines:
+            raw_preview_data = {"raw_record": raw_lines}
+            st.dataframe(pl.DataFrame(raw_preview_data).to_pandas(), height=200)
+            st.caption(f"{discovery.file_type} — {len(file_paths)} file(s) — {discovery.file_type} detected, delimiter={discovery.delimiter!r}")
 
 
 def _navigate_to_path(browse_key, input_key):

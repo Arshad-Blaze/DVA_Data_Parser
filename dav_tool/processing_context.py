@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import polars as pl
 from dav_tool._observability import ProcessingMetrics
+from dav_tool.options import OutputMode
 
 
 @dataclass
@@ -17,6 +18,9 @@ class ProcessingContext:
 
     # === Phase ===
     phase: int = 0
+
+    # === Output Mode ===
+    output_mode: OutputMode = OutputMode.VALIDATE
 
     # === Discovery Result (single source of truth) ===
     # Populated once during Connection → Discovery, consumed by all downstream phases.
@@ -136,3 +140,6 @@ class ExistingContext:
     validation_done: bool = False
     fr_prod: Optional[pl.DataFrame] = None
     fr_test: Optional[pl.DataFrame] = None
+
+    # === Output Mode ===
+    output_mode: OutputMode = OutputMode.VALIDATE

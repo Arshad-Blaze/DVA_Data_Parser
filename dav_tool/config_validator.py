@@ -11,6 +11,7 @@ from dav_tool.format_config import (
     FormatConfig, ConfigSection, ValidationConfig, ValidationRule, OutputConfig,
     iter_sections, get_section_fields,
 )
+from dav_tool.options import OutputMode
 
 logger = logging.getLogger(__name__)
 
@@ -69,20 +70,26 @@ class ConfigValidationError(Exception):
     """Raised when configuration fails validation."""
 
 
-def validate_config(cfg: FormatConfig) -> List[str]:
-    """Validate configuration completeness and correctness.
+def validate_config(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE) -> List[str]:
+    """Validate configuration completeness and correctness for the given OutputMode.
+
+    The validator only checks fields required by the selected operation:
+    - VALIDATE: all standard fields (store, upc, units, price, etc.)
+    - AGGREGATE_ONLY: requires group_by and aggregation columns
+    - STATISTICS: nothing required (schema columns remain available, not errors)
+    - EXPORT: nothing required
 
     Returns a list of error messages (empty = valid).
     """
     errors: List[str] = []
 
-    # GENERAL
+    # GENERAL (always required)
     if not cfg.file_type:
         errors.append("File type is not set (required: delimited, fixed, or multiline).")
     elif cfg.file_type not in ("delimited", "fixed", "multiline"):
         errors.append(f"Invalid file type '{cfg.file_type}'. Must be: delimited, fixed, or multiline.")
 
-    # FILE
+    # FILE (always required for parsing)
     if cfg.file_type == "fixed" and not cfg.layout_file:
         errors.append("Fixed-width files require a layout CSV file path.")
     if cfg.file_type == "multiline":
@@ -100,35 +107,48 @@ def validate_config(cfg: FormatConfig) -> List[str]:
     if not cfg.schema and not cfg.detected_columns:
         errors.append("No schema or detected columns — cannot determine data structure.")
 
-    # BUSINESS RULES
-    if not cfg.store_col:
-        errors.append("Store column mapping is required.")
-    if not cfg.upc_col:
-        errors.append("UPC column mapping is required.")
-    if not cfg.units_col:
-        errors.append("Units column mapping is required.")
-    if not cfg.price_col:
-        errors.append("Price column mapping is required.")
+    # BUSINESS RULES — operation-aware
+    if mode == OutputMode.VALIDATE:
+        if not cfg.store_col:
+            errors.append("Store column mapping is required for Validate mode.")
+        if not cfg.upc_col:
+            errors.append("UPC column mapping is required for Validate mode.")
+        if not cfg.units_col:
+            errors.append("Units column mapping is required for Validate mode.")
+        if not cfg.price_col:
+            errors.append("Price column mapping is required for Validate mode.")
 
-    # Price type
-    if cfg.price_type and cfg.price_type not in ("Total Price", "Unit Price"):
-        errors.append(f"Invalid price type '{cfg.price_type}'. Must be: Total Price or Unit Price.")
+        if cfg.price_type and cfg.price_type not in ("Total Price", "Unit Price"):
+            errors.append(f"Invalid price type '{cfg.price_type}'. Must be: Total Price or Unit Price.")
 
-    # Check columns exist in schema
-    all_cols = (cfg.schema or []) + (cfg.detected_columns or [])
-    if all_cols:
-        mapped = {cfg.store_col, cfg.upc_col, cfg.desc_col, cfg.units_col, cfg.price_col}
-        mapped.discard(None)
-        missing = mapped - set(all_cols)
-        if missing:
-            errors.append(f"Mapped columns not found in schema: {', '.join(sorted(missing))}")
+    elif mode == OutputMode.AGGREGATE_ONLY:
+        if not cfg.store_col:
+            errors.append("Store column (group_by) is required for Aggregate Only mode.")
+
+    elif mode == OutputMode.STATISTICS:
+        pass  # No column mapping required
+
+    elif mode == OutputMode.EXPORT:
+        pass  # No column mapping required
+
+    # Check mapped columns exist in schema (only for VALIDATE and AGGREGATE_ONLY)
+    if mode in (OutputMode.VALIDATE, OutputMode.AGGREGATE_ONLY):
+        all_cols = (cfg.schema or []) + (cfg.detected_columns or [])
+        if all_cols:
+            required = {cfg.store_col}
+            if mode == OutputMode.VALIDATE:
+                required.update({cfg.upc_col, cfg.desc_col, cfg.units_col, cfg.price_col})
+            required.discard(None)
+            missing = required - set(all_cols)
+            if missing:
+                errors.append(f"Mapped columns not found in schema: {', '.join(sorted(missing))}")
 
     return errors
 
 
-def assert_config_valid(cfg: FormatConfig):
-    """Raise ConfigValidationError if config is invalid."""
-    errors = validate_config(cfg)
+def assert_config_valid(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE):
+    """Raise ConfigValidationError if config is invalid for the given mode."""
+    errors = validate_config(cfg, mode=mode)
     if errors:
         raise ConfigValidationError(
             "Configuration validation failed:\n  - " + "\n  - ".join(errors)
