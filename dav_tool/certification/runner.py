@@ -4,7 +4,6 @@ Scans retailer_certification/ for dataset categories and retailers,
 runs Discovery → Configuration → Processing → Validation for each,
 and compares results against expected outputs.
 """
-import csv
 import json
 import logging
 import os
@@ -14,14 +13,14 @@ from typing import List, Dict, Optional, Tuple
 
 import polars as pl
 
-from dav_tool.options import ParseOptions, ColumnMapping, ValidationOptions, OutputMode
+from dav_tool.options import ParseOptions, ColumnMapping, ValidationOptions
 from dav_tool.processing_context import ProcessingContext, ExistingContext
-from dav_tool.workflow.discovery import detect_file, DiscoveryResult, flatten_multiline
+from dav_tool.workflow.discovery import detect_file
 from dav_tool.workflow.processing import run_store_aggregation, run_item_aggregation
 from dav_tool.workflow.validation import run_existing_validation
 from dav_tool._observability import ProcessingMetrics, log_phase
 from dav_tool.config_builder import build_config
-from dav_tool.format_config import load_format_config, apply_format_config, load_layout
+from dav_tool.format_config import load_format_config, apply_format_config
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +29,16 @@ CERTIFICATION_ROOT = os.path.join(
     "retailer_certification",
 )
 
+_MULTILINE_DELIMITED_HINT = (
+    "Delimited multiline (H/D record types) requires the UI schema editor "
+    "for column renaming and cannot be fully automated. "
+    "Run this dataset through the Certification UI developer mode."
+)
+
 
 @dataclass
 class CertificationResult:
+    """Result of certifying a single retailer dataset."""
     category: str = ""
     retailer: str = ""
     passed: bool = False
@@ -49,6 +55,7 @@ class CertificationResult:
 
 @dataclass
 class CertificationSuiteResult:
+    """Aggregated result across multiple retailer certifications."""
     total: int = 0
     passed: int = 0
     failed: int = 0
@@ -78,50 +85,65 @@ def discover_retailer_datasets(root: Optional[str] = None) -> List[Tuple[str, st
     return datasets
 
 
+def _is_delimited_multiline(ctx_prod: ProcessingContext) -> bool:
+    """Detect if the dataset uses delimited multiline (H/D record types).
+
+    HDR fixed-width multiline (with header_prefix + header_layout) works
+    correctly.  Delimited multiline (ml_record_types without header_prefix)
+    requires the UI schema editor.
+    """
+    if ctx_prod.file_type != "multiline":
+        return False
+    if ctx_prod.header_prefix:
+        return False
+    return bool(ctx_prod.ml_record_types)
+
+
 class CertificationRunner:
     """Runs full certification pipeline for one or more retailer datasets."""
 
     def __init__(self, root: Optional[str] = None):
         self.root = root or CERTIFICATION_ROOT
-        self.suite_result = CertificationSuiteResult()
 
     def run_all(self) -> CertificationSuiteResult:
+        self._suite = CertificationSuiteResult()
         datasets = discover_retailer_datasets(self.root)
         t0 = time.perf_counter()
         for category, retailer in datasets:
             result = self.run_one(category, retailer)
-            self.suite_result.results.append(result)
-            self.suite_result.total += 1
+            self._suite.results.append(result)
+            self._suite.total += 1
             if result.passed:
-                self.suite_result.passed += 1
+                self._suite.passed += 1
             else:
-                self.suite_result.failed += 1
-        self.suite_result.duration = time.perf_counter() - t0
-        return self.suite_result
+                self._suite.failed += 1
+        self._suite.duration = time.perf_counter() - t0
+        return self._suite
 
     def run_category(self, category: str) -> CertificationSuiteResult:
+        self._suite = CertificationSuiteResult()
         datasets = [(c, r) for c, r in discover_retailer_datasets(self.root) if c == category]
         t0 = time.perf_counter()
         for cat, retailer in datasets:
             result = self.run_one(cat, retailer)
-            self.suite_result.results.append(result)
-            self.suite_result.total += 1
+            self._suite.results.append(result)
+            self._suite.total += 1
             if result.passed:
-                self.suite_result.passed += 1
+                self._suite.passed += 1
             else:
-                self.suite_result.failed += 1
-        self.suite_result.duration = time.perf_counter() - t0
-        return self.suite_result
+                self._suite.failed += 1
+        self._suite.duration = time.perf_counter() - t0
+        return self._suite
 
     def run_one(self, category: str, retailer: str) -> CertificationResult:
         result = CertificationResult(category=category, retailer=retailer)
+        result.metrics = ProcessingMetrics()
         t0 = time.perf_counter()
         retailer_dir = os.path.join(self.root, category, retailer)
         bau_dir = os.path.join(retailer_dir, "BAU")
         test_dir = os.path.join(retailer_dir, "TEST")
         expected_dir = os.path.join(retailer_dir, "expected")
         config_path = os.path.join(retailer_dir, "Config", "config.json")
-        layout_dir = os.path.join(retailer_dir, "Layout")
 
         log_phase(f"Certification: {category}/{retailer}")
 
@@ -159,14 +181,13 @@ class CertificationRunner:
         if os.path.exists(config_path):
             try:
                 format_cfg = load_format_config(config_path)
-                result.config_ok = True
             except Exception as e:
                 result.errors.append(f"Config load error: {e}")
                 logger.exception("Config load failed for %s/%s", category, retailer)
 
         # ——— Discovery (or apply config if loaded) ———
-        try:
-            if format_cfg is not None:
+        if format_cfg is not None:
+            try:
                 apply_format_config(format_cfg, ctx.prod, os.path.dirname(config_path), bau_files)
                 apply_format_config(format_cfg, ctx.test, os.path.dirname(config_path), test_files)
                 ctx.prod.file_paths = bau_files
@@ -174,7 +195,12 @@ class CertificationRunner:
                 ctx.prod.config_locked = True
                 ctx.test.config_locked = True
                 result.discovery_ok = True
-            else:
+                result.config_ok = True
+            except Exception as e:
+                result.errors.append(f"Config application error: {e}")
+                logger.exception("Config application failed for %s/%s", category, retailer)
+        else:
+            try:
                 bau_discovery = detect_file(bau_files)
                 test_discovery = detect_file(test_files)
                 if bau_discovery.error:
@@ -182,6 +208,7 @@ class CertificationRunner:
                 if test_discovery.error:
                     result.errors.append(f"TEST discovery failed: {test_discovery.error}")
                 if bau_discovery.error or test_discovery.error:
+                    result.details = {"bau_files": len(bau_files), "test_files": len(test_files)}
                     result.duration = time.perf_counter() - t0
                     return result
                 bau_discovery.apply_to_context(ctx.prod)
@@ -189,9 +216,9 @@ class CertificationRunner:
                 ctx.prod.file_paths = bau_files
                 ctx.test.file_paths = test_files
                 result.discovery_ok = True
-        except Exception as e:
-            result.errors.append(f"Discovery error: {e}")
-            logger.exception("Discovery failed for %s/%s", category, retailer)
+            except Exception as e:
+                result.errors.append(f"Discovery error: {e}")
+                logger.exception("Discovery failed for %s/%s", category, retailer)
 
         # ——— Configuration (only if no config was loaded) ———
         if result.discovery_ok and not ctx.prod.config_locked:
@@ -233,7 +260,18 @@ class CertificationRunner:
                 logger.exception("Configuration failed for %s/%s", category, retailer)
 
         # ——— Processing ———
+        prod_parse: Optional[ParseOptions] = None
+        test_parse: Optional[ParseOptions] = None
+        prod_mapping: Optional[ColumnMapping] = None
+        test_mapping: Optional[ColumnMapping] = None
+
         if result.config_ok:
+            if _is_delimited_multiline(ctx.prod):
+                result.errors.append(_MULTILINE_DELIMITED_HINT)
+                result.details = {"bau_files": len(bau_files), "test_files": len(test_files)}
+                result.duration = time.perf_counter() - t0
+                return result
+
             try:
                 prod_parse = ParseOptions.from_context(ctx.prod)
                 test_parse = ParseOptions.from_context(ctx.test)
@@ -256,12 +294,12 @@ class CertificationRunner:
 
         # ——— Validation ———
         if result.processing_ok:
-            try:
-                prod_parse = ParseOptions.from_context(ctx.prod)
-                test_parse = ParseOptions.from_context(ctx.test)
-                prod_mapping = ColumnMapping.from_context(ctx.prod)
-                test_mapping = ColumnMapping.from_context(ctx.test)
+            assert prod_parse is not None
+            assert test_parse is not None
+            assert prod_mapping is not None
+            assert test_mapping is not None
 
+            try:
                 val_opts = ValidationOptions(
                     run_store_validation=True,
                     run_item_validation=True,
@@ -297,6 +335,8 @@ class CertificationRunner:
                 ctx, expected_dir, result.errors
             )
 
+        # expected_outputs_match is not included because the expected/ dir is optional.
+        # If it exists and comparison fails, it adds errors causing `passed == False`.
         passed_checks = [
             result.discovery_ok,
             result.config_ok,
@@ -330,8 +370,12 @@ class CertificationRunner:
         else:
             return _report_text(suite_result)
 
+    @property
+    def suite_result(self) -> CertificationSuiteResult:
+        return getattr(self, '_suite', CertificationSuiteResult())
 
-def _compare_expected(ctx, expected_dir: str, errors: List[str]) -> bool:
+
+def _compare_expected(ctx: ExistingContext, expected_dir: str, errors: List[str]) -> bool:
     """Compare processing results against expected CSV outputs."""
     all_match = True
     expected_files = {
@@ -361,7 +405,7 @@ def _compare_expected(ctx, expected_dir: str, errors: List[str]) -> bool:
                     continue
                 exp_col = expected[col].cast(pl.Utf8).fill_null("")
                 res_col = result_df[col].cast(pl.Utf8).fill_null("")
-                if not (exp_col.to_list() == res_col.to_list()):
+                if not exp_col.series_equal(res_col):
                     errors.append(f"{exp_name}: column '{col}' values differ")
                     all_match = False
         except Exception as e:
@@ -371,6 +415,7 @@ def _compare_expected(ctx, expected_dir: str, errors: List[str]) -> bool:
 
 
 def _report_json(suite: CertificationSuiteResult) -> str:
+    """Generate a JSON report from a suite result."""
     data = {
         "suite": {
             "total": suite.total,
@@ -398,6 +443,7 @@ def _report_json(suite: CertificationSuiteResult) -> str:
 
 
 def _report_markdown(suite: CertificationSuiteResult) -> str:
+    """Generate a Markdown report from a suite result."""
     lines = [
         "# Certification Suite Report",
         "",
@@ -428,15 +474,18 @@ def _report_markdown(suite: CertificationSuiteResult) -> str:
 
 
 def _report_html(suite: CertificationSuiteResult) -> str:
+    """Generate an HTML report from a suite result."""
     md = _report_markdown(suite)
     try:
         import markdown
         return markdown.markdown(md, extensions=["tables"])
     except ImportError:
-        return f"<pre>{md}</pre>"
+        html = ["<!DOCTYPE html><html><body><pre>", md, "</pre></body></html>"]
+        return "\n".join(html)
 
 
 def _report_text(suite: CertificationSuiteResult) -> str:
+    """Generate a plain-text report from a suite result."""
     lines = [
         f"Certification Suite: {suite.passed}/{suite.total} passed ({suite.duration:.2f}s)",
         "",
