@@ -56,6 +56,11 @@ class ProcessingContext:
     price_type: str = "Total Price"
     implied_dollars: bool = False
     implied_units: bool = False
+    quantity_type: str = "units"
+    weight_col: Optional[str] = None
+    weight_uom: str = "lb"
+    weight_uom_col: Optional[str] = None
+    resolution_rule: str = "units_preferred"
     mapping_confirmed: bool = False
 
     # === Effective Config (frozen at Save Mapping) ===

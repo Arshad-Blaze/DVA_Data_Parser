@@ -120,7 +120,9 @@ def render_connection_manager():
         with st.container(border=True):
             cols = st.columns([4, 1])
             with cols[0]:
-                st.markdown(f"**🔌 Connection Manager** — {_status_summary()}")
+                conn_str = _status_summary()
+                st.markdown(f"**🔌 Connection Manager** — {conn_str}")
+                st.caption("Click Expand to change connection, paths, or re-run detection.")
             with cols[1]:
                 if st.button("Expand", use_container_width=True):
                     st.session_state["_cm_expanded"] = True
@@ -273,7 +275,7 @@ def _render_connection_info():
 def _render_workflow_selector():
     workflow = st.radio(
         "Workflow",
-        options=["Onboarding", "Existing Comparison"],
+        options=["Onboarding", "Format Change"],
         index=0 if st.session_state.get(_WORKFLOW_KEY, "onboarding") == "onboarding" else 1,
         horizontal=True,
         key="cm_workflow_radio",
@@ -323,6 +325,7 @@ def _render_file_browser(
     with select_cols[1]:
         if st.button(button_label, use_container_width=True, type="primary", key=f"use_{selected_key}"):
             st.session_state[selected_key] = st.session_state[browse_key]
+            st.session_state["_cm_expanded"] = False
             st.rerun()
 
     nav_cols = st.columns([1, 1, 4, 1])

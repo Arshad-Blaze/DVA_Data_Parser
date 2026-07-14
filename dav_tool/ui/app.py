@@ -4,7 +4,7 @@ from dav_tool.ui.existing import run as run_existing
 from dav_tool.ui.connection_manager import render_connection_manager
 from dav_tool.datasource.manager import is_connected
 
-st.set_page_config(page_title="DAV TOOL", layout="wide")
+st.set_page_config(page_title="DVA Platform", layout="wide")
 
 if "page" not in st.session_state:
     st.session_state.page = "existing"
@@ -38,7 +38,7 @@ with col_toggle:
     if c1.button("Onboarding", key="btn_onboarding", use_container_width=True):
         st.session_state.page = "onboarding"
 
-    if c2.button("Certification", key="btn_existing", use_container_width=True):
+    if c2.button("Format Change", key="btn_existing", use_container_width=True):
         st.session_state.page = "existing"
 
 if st.session_state.page == "onboarding":

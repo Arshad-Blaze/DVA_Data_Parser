@@ -36,7 +36,7 @@ COLUMN_SYNONYMS = {
 
 def find_best_column_index(cols, target, synonyms):
     if not cols:
-        return 0
+        return -1
     col_lower = [c.lower().strip() for c in cols]
     target_lower = target.lower()
 
@@ -58,7 +58,7 @@ def find_best_column_index(cols, target, synonyms):
         if target_lower in col or col in target_lower:
             return i
 
-    return 0
+    return -1
 
 
 def smart_column_indices(cols):
@@ -66,8 +66,8 @@ def smart_column_indices(cols):
     for target, synonyms in COLUMN_SYNONYMS.items():
         idx = find_best_column_index(cols, target, synonyms)
         key = target.lower()
-        if idx < len(cols):
+        if 0 <= idx < len(cols):
             indices[key] = (idx, cols[idx])
         else:
-            indices[key] = (0, cols[0] if cols else None)
+            indices[key] = (None, None)
     return indices

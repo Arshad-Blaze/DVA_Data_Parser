@@ -438,6 +438,173 @@ def preview_flattened_multiline(
     return pl.DataFrame()
 
 
+def iter_chunks(
+    file_paths, file_type, layout, start_line,
+    record_type, multiline_record_types, multiline_delimiter,
+    header_prefix=None, header_layout=None,
+    detail_layout=None, trailer_prefix=None, trailer_layout=None,
+    source=None, delimiter=None,
+):
+    """Yield raw DataFrames from file(s) based on file type.
+
+    Internal — used by ``canonical_chunk_stream()``.
+    """
+    if file_type == "delimited":
+        if source is not None:
+            return parse_delimited_chunks(file_paths, delimiter, source=source)
+        return parse_delimited_chunks(file_paths, delimiter)
+    elif file_type == "fixed":
+        return parse_fixed_width_chunks(file_paths, layout, start_line,
+                                        record_type, source=source)
+    elif file_type == "multiline":
+        if header_prefix and header_layout:
+            return flatten_multiline_fixed_width(
+                file_paths, header_prefix, header_layout,
+                detail_layout or layout or [],
+                trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
+                source=source,
+            )
+        rtypes = multiline_record_types or ["H", "D"]
+        return flatten_multiline_chunks(file_paths, rtypes, multiline_delimiter,
+                                        source=source)
+    raise ValueError(f"Unsupported file type: {file_type}")
+
+
+def canonical_chunk_stream(
+    file_paths,
+    file_type: str,
+    layout,
+    start_line: int = 0,
+    record_type=None,
+    multiline_record_types=None,
+    multiline_delimiter: str = "|",
+    header_prefix=None,
+    header_layout=None,
+    detail_layout=None,
+    trailer_prefix=None,
+    trailer_layout=None,
+    source=None,
+    delimiter=None,
+    column_names=None,
+    # Level-specific args for normalization
+    level: str = "store",
+    store_col=None,
+    upc_col=None,
+    desc_col=None,
+    units_col=None,
+    price_col=None,
+    price_type: str = "Total Price",
+    implied_units: bool = False,
+    implied_dollars: bool = False,
+    quantity_type: str = "units",
+    weight_col=None,
+    weight_uom: str = "lb",
+    weight_uom_col=None,
+):
+    """Yield canonically-normalized DataFrames from file(s).
+
+    Hides all file-format details (delimiter, encoding, fixed-width,
+    multiline, etc.) from the caller. The caller receives chunks
+    pre-renamed to canonical column names.
+
+    The *level* determines which normalizer to apply:
+    - ``"store"`` → ``Units``, ``Totalprice``, ``STORE_NUMBER``
+    - ``"item"`` → ``UPC_CODE``, ``PRODUCT_DESCRIPTION``, ``UNITS_SOLD``, ``TOTAL_DOLLARS``
+    - ``"upc"`` → ``UPC``, ``UNITS_SOLD``, ``TOTAL_DOLLARS``
+    """
+    from dav_tool._normalizer import (
+        apply_column_names,
+        store_normalize_exprs,
+        normalize_store_chunk,
+        item_normalize_exprs,
+        normalize_item_chunk,
+        upc_normalize_exprs,
+        normalize_upc_chunk,
+    )
+
+    if isinstance(file_paths, str):
+        file_paths = [file_paths]
+
+    can_use_fast_path = start_line == 0 and record_type is None and (
+        source is None or getattr(source, 'supports_direct_path', False)
+    )
+
+    # ---- Fast path: delimited + simple → LazyFrame with lazy normalization ----
+    if file_type == "delimited" and can_use_fast_path:
+        cols_for_scan = []
+        if level == "store":
+            cols_for_scan = [store_col, units_col, price_col]
+        elif level == "item":
+            cols_for_scan = [upc_col, desc_col, units_col, price_col]
+        elif level == "upc":
+            cols_for_scan = [upc_col, units_col, price_col]
+        if weight_col and quantity_type in ("weight", "mixed"):
+            cols_for_scan.append(weight_col)
+        if weight_uom_col:
+            cols_for_scan.append(weight_uom_col)
+        cols_for_scan = list(dict.fromkeys(cols for cols in cols_for_scan if cols))
+
+        lazy = scan_delimited(file_paths, delimiter, columns=cols_for_scan)
+        if level == "store":
+            lazy = lazy.with_columns(
+                store_normalize_exprs(store_col, units_col, price_col,
+                                       implied_units, implied_dollars, price_type,
+                                       quantity_type, weight_col, weight_uom, weight_uom_col)
+            )
+        elif level == "item":
+            lazy = lazy.with_columns(
+                item_normalize_exprs(upc_col, desc_col, units_col, price_col,
+                                      implied_units, implied_dollars,
+                                      quantity_type, weight_col, weight_uom, weight_uom_col)
+            )
+        elif level == "upc":
+            lazy = lazy.with_columns(
+                upc_normalize_exprs(upc_col, units_col, price_col,
+                                     implied_units, implied_dollars,
+                                     quantity_type, weight_col, weight_uom, weight_uom_col)
+            )
+        yield lazy.collect(engine="streaming")
+        return
+
+    # ---- General chunk path ----
+    raw_chunks = iter_chunks(
+        file_paths, file_type, layout, start_line,
+        record_type, multiline_record_types, multiline_delimiter,
+        header_prefix, header_layout,
+        detail_layout, trailer_prefix, trailer_layout,
+        source=source, delimiter=delimiter,
+    )
+
+    for chunk in raw_chunks:
+        chunk = apply_column_names(chunk, column_names)
+
+        if level == "store":
+            if store_col not in chunk.columns:
+                logger.warning("Skipping chunk: column '%s' not found", store_col)
+                del chunk
+                continue
+            yield normalize_store_chunk(chunk, store_col, units_col, price_col,
+                                         implied_units, implied_dollars, price_type,
+                                         quantity_type, weight_col, weight_uom, weight_uom_col)
+        elif level == "item":
+            if upc_col not in chunk.columns:
+                logger.warning("Skipping chunk: column '%s' not found", upc_col)
+                del chunk
+                continue
+            yield normalize_item_chunk(chunk, upc_col, desc_col, units_col, price_col,
+                                        implied_units, implied_dollars,
+                                        quantity_type, weight_col, weight_uom, weight_uom_col)
+        elif level == "upc":
+            if upc_col not in chunk.columns:
+                logger.warning("Skipping chunk: column '%s' not found", upc_col)
+                del chunk
+                continue
+            yield normalize_upc_chunk(chunk, upc_col, units_col, price_col,
+                                       implied_units, implied_dollars,
+                                       quantity_type, weight_col, weight_uom, weight_uom_col)
+        del chunk
+
+
 def preview_flattened_multiline_fixed(
     file_paths: Union[str, List[str]],
     header_prefix: str,

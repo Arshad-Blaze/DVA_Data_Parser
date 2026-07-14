@@ -14,7 +14,6 @@ from dav_tool._observability import (
     ProcessingTimer, log_phase, setup_logging,
     print_memory_snapshot, log_dataframe_summary,
 )
-from dav_tool.validation.store import compare_files
 from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
     detect_hdr_prefix,
@@ -86,9 +85,9 @@ def _reset_phase():
 
 def run():
     setup_logging()
-    log_phase("Page Loaded — Certification")
+    log_phase("Page Loaded — Format Change")
 
-    st.title("Certification")
+    st.title("Format Change")
 
     if "ex_ctx" not in st.session_state:
         st.session_state.ex_ctx = ExistingContext()
@@ -170,6 +169,8 @@ def _phase1_discovery(ctx):
                 ctx.prod.file_type = discovery.file_type
                 ctx.prod.delimiter = discovery.delimiter
                 ctx.prod.layout = discovery.layout
+                ctx.prod.columns = discovery.columns or []
+                ctx.prod.schema = discovery.schema or discovery.columns or []
                 ctx.prod.header_prefix = getattr(discovery, 'header_prefix', None)
             log_phase("BAU Discovery consumed from Connection Manager — no re-detection")
         elif prod_txt:
@@ -186,7 +187,7 @@ def _phase1_discovery(ctx):
                 st.success(f"BAU config '{bau_cfg.name or 'unnamed'}' loaded")
                 st.rerun()
 
-        # Clear failure flag when path changes
+        # Clear failure flag and stale discovery when path changes
         prev_path = st.session_state.get("ex_bau_prev_path")
         if prod_txt != prev_path:
             st.session_state.pop("ex_bau_detection_failed", None)
@@ -194,6 +195,9 @@ def _phase1_discovery(ctx):
                 ctx.prod.file_type = None
                 ctx.prod.delimiter = None
                 ctx.prod.layout = None
+                ctx.prod.columns = None
+                ctx.prod.schema = None
+                ctx.prod.discovery = None
             st.session_state["ex_bau_prev_path"] = prod_txt
 
         if getattr(ctx.prod, '_config_applied', False):
@@ -235,6 +239,8 @@ def _phase1_discovery(ctx):
                 ctx.test.file_type = discovery.file_type
                 ctx.test.delimiter = discovery.delimiter
                 ctx.test.layout = discovery.layout
+                ctx.test.columns = discovery.columns or []
+                ctx.test.schema = discovery.schema or discovery.columns or []
                 ctx.test.header_prefix = getattr(discovery, 'header_prefix', None)
             log_phase("Test Discovery consumed from Connection Manager — no re-detection")
         elif test_txt:
@@ -251,7 +257,7 @@ def _phase1_discovery(ctx):
                 st.success(f"Test config '{test_cfg.name or 'unnamed'}' loaded")
                 st.rerun()
 
-        # Clear failure flag when path changes
+        # Clear failure flag and stale discovery when path changes
         prev_path = st.session_state.get("ex_test_prev_path")
         if test_txt != prev_path:
             st.session_state.pop("ex_test_detection_failed", None)
@@ -259,6 +265,9 @@ def _phase1_discovery(ctx):
                 ctx.test.file_type = None
                 ctx.test.delimiter = None
                 ctx.test.layout = None
+                ctx.test.columns = None
+                ctx.test.schema = None
+                ctx.test.discovery = None
             st.session_state["ex_test_prev_path"] = test_txt
 
         if getattr(ctx.test, '_config_applied', False):
@@ -364,54 +373,40 @@ def _phase_discovery_compare(ctx):
 
     _ex_source = get_active_source()
 
-    prod_type = ctx.prod.file_type or "unknown"
-    test_type = ctx.test.file_type or "unknown"
-    prod_delim = ctx.prod.delimiter or "N/A"
-    test_delim = ctx.test.delimiter or "N/A"
-    prod_cols = ctx.prod.columns or []
-    test_cols = ctx.test.columns or []
-    prod_col_count = len(prod_cols)
-    test_col_count = len(test_cols)
+    from dav_tool.workflow.discovery_compare import compare_discovery
+    dc = compare_discovery(ctx.prod, ctx.test)
 
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("BAU")
-        st.markdown(f"**File Type:** `{prod_type}`")
-        st.markdown(f"**Delimiter:** `{prod_delim}`")
-        st.markdown(f"**Columns ({prod_col_count}):**")
-        for col in prod_cols:
+        st.markdown(f"**File Type:** `{dc.prod_file_type or 'unknown'}`")
+        st.markdown(f"**Delimiter:** `{dc.prod_delimiter or 'N/A'}`")
+        st.markdown(f"**Columns ({len(dc.prod_columns)}):**")
+        for col in dc.prod_columns:
             st.text(f"  {col}")
 
     with c2:
         st.subheader("Test")
-        st.markdown(f"**File Type:** `{test_type}`")
-        st.markdown(f"**Delimiter:** `{test_delim}`")
-        st.markdown(f"**Columns ({test_col_count}):**")
-        for col in test_cols:
+        st.markdown(f"**File Type:** `{dc.test_file_type or 'unknown'}`")
+        st.markdown(f"**Delimiter:** `{dc.test_delimiter or 'N/A'}`")
+        st.markdown(f"**Columns ({len(dc.test_columns)}):**")
+        for col in dc.test_columns:
             st.text(f"  {col}")
 
     st.subheader("Comparison")
 
-    same_type = prod_type == test_type
-    same_delim = prod_delim == test_delim
-    same_col_count = prod_col_count == test_col_count
+    st.markdown(f"- **File Type Match:** {'✓' if dc.same_type else '✗'} ({dc.prod_file_type} vs {dc.test_file_type})")
+    st.markdown(f"- **Delimiter Match:** {'✓' if dc.same_delimiter else '✗'} ({dc.prod_delimiter} vs {dc.test_delimiter})")
+    st.markdown(f"- **Column Count Match:** {'✓' if dc.same_col_count else '✗'} ({len(dc.prod_columns)} vs {len(dc.test_columns)})")
 
-    st.markdown(f"- **File Type Match:** {'✓' if same_type else '✗'} ({prod_type} vs {test_type})")
-    st.markdown(f"- **Delimiter Match:** {'✓' if same_delim else '✗'} ({prod_delim} vs {test_delim})")
-    st.markdown(f"- **Column Count Match:** {'✓' if same_col_count else '✗'} ({prod_col_count} vs {test_col_count})")
-
-    if same_col_count and prod_cols == test_cols:
+    if dc.identical_columns:
         st.success("Columns are identical between BAU and Test.")
-    elif same_col_count:
+    elif dc.same_col_count:
         st.warning("Same column count but different column names.")
-        prod_set = set(prod_cols)
-        test_set = set(test_cols)
-        only_prod = prod_set - test_set
-        only_test = test_set - prod_set
-        if only_prod:
-            st.markdown(f"- Columns only in BAU: {', '.join(only_prod)}")
-        if only_test:
-            st.markdown(f"- Columns only in Test: {', '.join(only_test)}")
+        if dc.only_prod:
+            st.markdown(f"- Columns only in BAU: {', '.join(dc.only_prod)}")
+        if dc.only_test:
+            st.markdown(f"- Columns only in Test: {', '.join(dc.only_test)}")
     else:
         st.info("Column counts differ — schema comparison will be available after configuration.")
 
@@ -426,8 +421,6 @@ def _phase2_configuration(ctx):
 
     st.markdown("### Step 4: Configuration")
     _ex_source = get_active_source()
-
-    active_side = st.session_state.get("ex_active_side", "prod")
 
     if not ctx.prod.config_locked:
         st.subheader("BAU Configuration")
@@ -454,7 +447,7 @@ def _phase2_configuration(ctx):
             ctx.prod.delimiter or ",", ctx.prod.layout,
             source=_ex_source,
         )
-        prod_done = progressive_config_wizard(
+        prod_done = render_all_config_sections(
             prod_cfg, detected_columns=prod_cols,
             key_prefix="ex_prod", file_paths=ctx.prod.file_paths,
         )
@@ -469,7 +462,6 @@ def _phase2_configuration(ctx):
             ctx.prod.price_type = prod_cfg.price_type
             ctx.prod.implied_dollars = prod_cfg.implied_dollars
             ctx.prod.implied_units = prod_cfg.implied_units
-            st.session_state["ex_active_side"] = "test"
             st.rerun()
 
     elif not ctx.test.config_locked:
@@ -497,7 +489,7 @@ def _phase2_configuration(ctx):
             ctx.test.delimiter or ",", ctx.test.layout,
             source=_ex_source,
         )
-        test_done = progressive_config_wizard(
+        test_done = render_all_config_sections(
             test_cfg, detected_columns=test_cols,
             key_prefix="ex_test", file_paths=ctx.test.file_paths,
         )
@@ -527,50 +519,46 @@ def _phase_schema_compare(ctx):
 
     st.markdown("### Step 5: Schema Comparison")
 
-    prod_cols = ctx.prod.schema or ctx.prod.columns or []
-    test_cols = ctx.test.schema or ctx.test.columns or []
+    from dav_tool.workflow.schema_comparison import compare_schemas
+    sd = compare_schemas(
+        ctx.prod.schema or ctx.prod.columns,
+        ctx.test.schema or ctx.test.columns,
+    )
 
-    if not prod_cols or not test_cols:
+    if not sd.prod_count or not sd.test_count:
         st.warning("Both BAU and Test must have column schemas for comparison.")
         if st.button("Skip Schema Comparison \u2192", use_container_width=True):
             ctx.phase = PHASE_CONFIG_VALIDATED
             st.rerun()
         return
 
-    prod_set = set(prod_cols)
-    test_set = set(test_cols)
-
-    common = prod_set & test_set
-    only_prod = prod_set - test_set
-    only_test = test_set - prod_set
-
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("Common Columns", len(common))
+        st.metric("Common Columns", len(sd.common))
     with c2:
-        st.metric("BAU-Only Columns", len(only_prod))
+        st.metric("BAU-Only Columns", len(sd.only_prod))
     with c3:
-        st.metric("Test-Only Columns", len(only_test))
+        st.metric("Test-Only Columns", len(sd.only_test))
 
-    if only_prod:
-        st.warning(f"Columns present in BAU but missing in Test ({len(only_prod)}):")
-        st.text(", ".join(sorted(only_prod)))
-    if only_test:
-        st.info(f"New columns in Test not present in BAU ({len(only_test)}):")
-        st.text(", ".join(sorted(only_test)))
+    if sd.only_prod:
+        st.warning(f"Columns present in BAU but missing in Test ({len(sd.only_prod)}):")
+        st.text(", ".join(sorted(sd.only_prod)))
+    if sd.only_test:
+        st.info(f"New columns in Test not present in BAU ({len(sd.only_test)}):")
+        st.text(", ".join(sorted(sd.only_test)))
 
-    if not only_prod and not only_test:
+    if sd.identical:
         st.success("Schemas match exactly — no new or removed columns detected.")
 
     with st.expander("Full Schema Comparison"):
         import polars as pl
-        all_cols = sorted(prod_set | test_set)
+        all_cols = sorted(sd.common | sd.only_prod | sd.only_test)
         rows = []
         for col in all_cols:
             rows.append({
                 "Column": col,
-                "In BAU": "✓" if col in prod_set else "—",
-                "In Test": "✓" if col in test_set else "—",
+                "In BAU": "✓" if col in sd.common or col in sd.only_prod else "—",
+                "In Test": "✓" if col in sd.common or col in sd.only_test else "—",
             })
         st.dataframe(pl.DataFrame(rows).to_pandas())
 
@@ -664,14 +652,14 @@ def _phase4_processing(ctx):
     eff_layout_prod_cols = hdr_detail_prod if hdr_prefix_prod else prod_layout_list
     eff_layout_test_cols = hdr_detail_test if hdr_prefix_test else test_layout_list
 
-    prod_cols = cached_get_column_names(
+    prod_cols = ctx.prod.schema or cached_get_column_names(
         prod_paths, eff_prod_type, eff_delim_prod,
         eff_layout_prod_cols, prod_start_line, eff_rt_prod,
         header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
         trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
         source=_ex_source,
     )
-    test_cols = cached_get_column_names(
+    test_cols = ctx.test.schema or cached_get_column_names(
         test_paths, eff_test_type, eff_delim_test,
         eff_layout_test_cols, test_start_line, eff_rt_test,
         header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
@@ -852,7 +840,7 @@ def _phase5_validation(ctx):
     if ctx.phase >= PHASE_REPORTS:
         return
 
-    st.markdown("### Step 8: Certification")
+    st.markdown("### Step 8: Validation")
     _ex_source = get_active_source()
 
     prod_paths = ctx.prod.file_paths
@@ -1047,6 +1035,8 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
 
         # Store discovery result on the side context
         side_ctx.discovery = discovery
+        side_ctx.columns = discovery.columns or []
+        side_ctx.schema = discovery.schema or discovery.columns or []
 
         if discovery.file_type == "multiline":
             st.warning(f"Multi-line structured file detected ({side_label})")
@@ -1390,6 +1380,8 @@ def _execute_validation(
         ctx.compare_result = val_result.store_list_result
     if val_result.file_review is not None:
         ctx.fr_prod = val_result.file_review
+    if val_result.file_review_test is not None:
+        ctx.fr_test = val_result.file_review_test
 
     for err in val_result.errors:
         ctx.metrics.errors.append(err)
@@ -1404,126 +1396,6 @@ def _execute_validation(
               f"{len(ctx.metrics.warnings)} warnings, {len(ctx.metrics.errors)} errors")
     ctx.validation_done = True
     st.rerun()
-
-
-def _compare_stores(
-    prod_store_col, prod_units_col, prod_price_col,
-    test_store_col, test_units_col, test_price_col,
-    prod_store_agg=None, test_store_agg=None,
-):
-    ctx = st.session_state.ex_ctx
-    _ex_source = get_active_source()
-
-    if prod_store_agg is not None:
-        prod_series = prod_store_agg.select(["STORE_NUMBER"])
-    else:
-        from dav_tool.options import ParseOptions, ColumnMapping
-        from dav_tool.workflow.processing import run_store_aggregation
-
-        prod_parse = ParseOptions.from_context(ctx.prod)
-        prod_mapping = ColumnMapping(
-            store=prod_store_col, upc="", description="",
-            units=prod_units_col, price=prod_price_col,
-            price_type=ctx.prod.price_type,
-            implied_dollars=ctx.prod.implied_dollars, implied_units=ctx.prod.implied_units,
-        )
-        prod_series = run_store_aggregation(ctx.prod.file_paths, prod_parse, prod_mapping, source=_ex_source)[0].select(["STORE_NUMBER"])
-
-    if test_store_agg is not None:
-        test_series = test_store_agg.select(["STORE_NUMBER"])
-    else:
-        from dav_tool.options import ParseOptions, ColumnMapping
-        from dav_tool.workflow.processing import run_store_aggregation
-
-        test_parse = ParseOptions.from_context(ctx.test)
-        test_mapping = ColumnMapping(
-            store=test_store_col, upc="", description="",
-            units=test_units_col, price=test_price_col,
-            price_type=ctx.test.price_type,
-            implied_dollars=ctx.test.implied_dollars, implied_units=ctx.test.implied_units,
-        )
-        test_series = run_store_aggregation(ctx.test.file_paths, test_parse, test_mapping, source=_ex_source)[0].select(["STORE_NUMBER"])
-
-    if not prod_series.is_empty() and not test_series.is_empty():
-        result = compare_files(
-            prod_series.to_series().to_frame("store"),
-            test_series.to_series().to_frame("store"), "store", "store",
-        )
-    else:
-        result = {"missing_in_test": "", "missing_in_prod": ""}
-    ctx.compare_result = result
-
-
-def _generate_file_reviews(
-    prod_paths, test_paths, prod_type, test_type,
-    prod_delim, test_delim, prod_layout_list, test_layout_list,
-    prod_start_line, test_start_line, prod_record_type, test_record_type,
-    prod_store_col, prod_upc_col, prod_units_col, prod_price_col,
-    test_store_col, test_upc_col, test_units_col, test_price_col,
-    price_type_bau, price_type_test,
-    isimplied_dollars_prod, isimplied_units_prod,
-    isimplied_dollars_test, isimplied_units_test,
-    hdr_prefix_prod=None, hdr_prefix_test=None,
-    hdr_header_prod=None, hdr_header_test=None,
-    trailer_prefix_prod=None, trailer_layout_prod=None,
-    trailer_prefix_test=None, trailer_layout_test=None,
-    source=None,
-):
-    ctx = st.session_state.ex_ctx
-
-    from dav_tool.options import ParseOptions, ColumnMapping
-    from dav_tool.workflow.processing import run_file_review
-
-    prod_parse = ParseOptions(
-        file_type=prod_type, delimiter=prod_delim,
-        start_line=prod_start_line, record_type=prod_record_type,
-        layout=prod_layout_list, column_names=ctx.prod.schema,
-        header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
-        multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
-        multiline_delimiter=ctx.ml_delimiter,
-    )
-    prod_mapping = ColumnMapping(
-        store=prod_store_col, upc=prod_upc_col, description="",
-        units=prod_units_col, price=prod_price_col,
-        price_type=price_type_bau,
-        implied_dollars=isimplied_dollars_prod, implied_units=isimplied_units_prod,
-    )
-    test_parse = ParseOptions(
-        file_type=test_type, delimiter=test_delim,
-        start_line=test_start_line, record_type=test_record_type,
-        layout=test_layout_list, column_names=ctx.test.schema,
-        header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
-        multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
-        multiline_delimiter=ctx.ml_delimiter,
-    )
-    test_mapping = ColumnMapping(
-        store=test_store_col, upc=test_upc_col, description="",
-        units=test_units_col, price=test_price_col,
-        price_type=price_type_test,
-        implied_dollars=isimplied_dollars_test, implied_units=isimplied_units_test,
-    )
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-        futs = [
-            ex.submit(run_file_review, prod_paths, prod_parse, prod_mapping,
-                     precomputed_store_agg=ctx.prod.store_agg,
-                     precomputed_upc_summary=ctx.prod.item_agg, source=source),
-            ex.submit(run_file_review, test_paths, test_parse, test_mapping,
-                     precomputed_store_agg=ctx.test.store_agg,
-                     precomputed_upc_summary=ctx.test.item_agg, source=source),
-        ]
-        names = ["BAU generate_file_review", "Test generate_file_review"]
-        for i, future in enumerate(futs):
-            result, elapsed = future.result(timeout=600)
-            ctx.metrics.record("report", names[i], elapsed)
-            if i == 0:
-                fr_prod = result
-            else:
-                fr_test = result
-    ctx.fr_prod = fr_prod
-    ctx.fr_test = fr_test
 
 
 def _display_results():
@@ -1575,83 +1447,69 @@ def _display_results():
 def _phase7_migration_report(ctx):
     st.markdown("### Step 10: Migration Report")
 
-    st.subheader("Certification Summary")
+    from dav_tool.workflow.schema_comparison import compare_schemas
+    from dav_tool.workflow.operation_comparison import compare_operations
+    from dav_tool.workflow.migration_report import generate_report
 
-    prod_type = ctx.prod.file_type or "unknown"
-    test_type = ctx.test.file_type or "unknown"
     prod_cols = ctx.prod.schema or ctx.prod.columns or []
     test_cols = ctx.test.schema or ctx.test.columns or []
-    prod_set = set(prod_cols)
-    test_set = set(test_cols)
+    sd = compare_schemas(prod_cols, test_cols)
+    oc = compare_operations(
+        ctx.prod.store_agg, ctx.test.store_agg,
+        ctx.prod.item_agg, ctx.test.item_agg,
+    )
+
+    report = generate_report(
+        prod_file_type=ctx.prod.file_type,
+        test_file_type=ctx.test.file_type,
+        prod_delimiter=ctx.prod.delimiter,
+        test_delimiter=ctx.test.delimiter,
+        prod_columns=prod_cols,
+        test_columns=test_cols,
+        store_missing_in_test=(ctx.compare_result or {}).get("missing_in_test", ""),
+        store_missing_in_prod=(ctx.compare_result or {}).get("missing_in_prod", ""),
+        errors=ctx.metrics.errors,
+        warnings=ctx.metrics.warnings,
+        rows_processed=ctx.metrics.rows_processed,
+        total_execution_time=ctx.metrics.total_execution_time,
+        peak_memory=ctx.metrics.peak_memory,
+        operation_compare=oc,
+        schema_diff=sd,
+    )
+
+    st.subheader("Migration Summary")
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric("BAU Columns", len(prod_cols))
+        st.metric("BAU Columns", sd.prod_count)
     with c2:
-        st.metric("Test Columns", len(test_cols))
+        st.metric("Test Columns", sd.test_count)
     with c3:
-        st.metric("Common", len(prod_set & test_set))
+        st.metric("Common", len(sd.common))
     with c4:
-        st.metric("New in Test", len(test_set - prod_set))
+        st.metric("New in Test", len(sd.only_test))
 
     st.subheader("Aggregation Comparison")
-    store_present = ctx.prod.store_agg is not None and ctx.test.store_agg is not None
-    item_present = ctx.prod.item_agg is not None and ctx.test.item_agg is not None
-
-    if store_present:
-        prod_stores = ctx.prod.store_agg.height if hasattr(ctx.prod.store_agg, 'height') else len(ctx.prod.store_agg)
-        test_stores = ctx.test.store_agg.height if hasattr(ctx.test.store_agg, 'height') else len(ctx.test.store_agg)
-        st.info(f"**Store Count:** BAU={prod_stores}, Test={test_stores}")
+    if oc.prod_store_count or oc.test_store_count:
+        st.info(f"**Store Count:** BAU={oc.prod_store_count}, Test={oc.test_store_count}")
     else:
         st.info("Store aggregation not available for both sides.")
 
-    if item_present:
-        prod_items = ctx.prod.item_agg.height if hasattr(ctx.prod.item_agg, 'height') else len(ctx.prod.item_agg)
-        test_items = ctx.test.item_agg.height if hasattr(ctx.test.item_agg, 'height') else len(ctx.test.item_agg)
-        st.info(f"**Item Count:** BAU={prod_items}, Test={test_items}")
+    if oc.prod_item_count or oc.test_item_count:
+        st.info(f"**Item Count:** BAU={oc.prod_item_count}, Test={oc.test_item_count}")
     else:
         st.info("Item aggregation not available for both sides.")
 
     st.subheader("Validation Results")
     if ctx.compare_result is not None:
-        st.markdown(f"- **Store Comparison:** {len(ctx.compare_result.get('missing_in_test', '').split(',')) if ctx.compare_result.get('missing_in_test') else 0} stores missing in Test, "
-                    f"{len(ctx.compare_result.get('missing_in_prod', '').split(',')) if ctx.compare_result.get('missing_in_prod') else 0} stores missing in BAU")
+        missing_test = len(ctx.compare_result.get("missing_in_test", "").split(",")) if ctx.compare_result.get("missing_in_test") else 0
+        missing_prod = len(ctx.compare_result.get("missing_in_prod", "").split(",")) if ctx.compare_result.get("missing_in_prod") else 0
+        st.markdown(f"- **Store Comparison:** {missing_test} stores missing in Test, {missing_prod} stores missing in BAU")
     else:
         st.info("Store list comparison not performed.")
 
-    if ctx.summary_df is not None:
-        st.markdown(f"- **Item Summary:** Available ({ctx.summary_df.height if hasattr(ctx.summary_df, 'height') else len(ctx.summary_df)} rows)")
-    else:
-        st.info("Item summary not available.")
-
     st.subheader("Recommendations")
-    recommendations = []
-
-    if prod_cols and test_cols:
-        only_test = test_set - prod_set
-        only_prod = prod_set - test_set
-        if only_test:
-            recommendations.append(f"**New columns detected** in Test data: {', '.join(sorted(only_test))[:200]}. "
-                                   "Verify these columns are expected in the new format.")
-        if only_prod:
-            recommendations.append(f"**Columns removed** in Test data: {', '.join(sorted(only_prod))[:200]}. "
-                                   "Confirm these columns are no longer required.")
-    if prod_type != test_type:
-        recommendations.append(f"**File type mismatch** ({prod_type} vs {test_type}). Ensure processing handles both formats.")
-    if store_present and ctx.compare_result:
-        if ctx.compare_result.get('missing_in_test'):
-            recommendations.append("**Stores missing in Test:** Review the store list to ensure coverage is complete.")
-        if ctx.compare_result.get('missing_in_prod'):
-            recommendations.append("**Stores missing in BAU:** Review the store list for completeness.")
-    if ctx.metrics.errors:
-        recommendations.append(f"**{len(ctx.metrics.errors)} errors** encountered during processing. Review error log before migration.")
-    if ctx.metrics.warnings:
-        recommendations.append(f"**{len(ctx.metrics.warnings)} warnings** generated. Review warnings for potential issues.")
-
-    if not recommendations:
-        recommendations.append("No issues detected — the Test data is certified for migration.")
-
-    for rec in recommendations:
+    for rec in report.recommendations:
         st.markdown(f"- {rec}")
 
     with st.expander("Execution Metrics"):
@@ -1659,7 +1517,7 @@ def _phase7_migration_report(ctx):
 
     st.download_button(
         "Download Migration Report (JSON)",
-        _generate_migration_report_json(ctx),
+        report.to_json(),
         file_name="migration_report.json",
         use_container_width=True,
     )
@@ -1667,45 +1525,3 @@ def _phase7_migration_report(ctx):
     if st.button("Start Over", use_container_width=True):
         _reset_phase()
         st.rerun()
-
-
-def _generate_migration_report_json(ctx):
-    import json
-
-    prod_cols = ctx.prod.schema or ctx.prod.columns or []
-    test_cols = ctx.test.schema or ctx.test.columns or []
-    prod_set = set(prod_cols)
-    test_set = set(test_cols)
-
-    report = {
-        "certification_type": "Configuration Certification",
-        "bau": {
-            "file_type": ctx.prod.file_type,
-            "delimiter": ctx.prod.delimiter,
-            "column_count": len(prod_cols),
-            "columns": prod_cols,
-        },
-        "test": {
-            "file_type": ctx.test.file_type,
-            "delimiter": ctx.test.delimiter,
-            "column_count": len(test_cols),
-            "columns": test_cols,
-        },
-        "schema_differences": {
-            "common_columns": sorted(prod_set & test_set),
-            "bau_only": sorted(prod_set - test_set),
-            "test_only": sorted(test_set - prod_set),
-        },
-        "validation": {
-            "store_list_missing_in_test": ctx.compare_result.get("missing_in_test", "") if ctx.compare_result else "",
-            "store_list_missing_in_prod": ctx.compare_result.get("missing_in_prod", "") if ctx.compare_result else "",
-            "errors": ctx.metrics.errors,
-            "warnings": ctx.metrics.warnings,
-        },
-        "metrics": {
-            "rows_processed": ctx.metrics.rows_processed,
-            "total_execution_time": ctx.metrics.total_execution_time,
-            "peak_memory_mb": ctx.metrics.peak_memory,
-        },
-    }
-    return json.dumps(report, indent=2)

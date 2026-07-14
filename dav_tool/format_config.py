@@ -93,7 +93,7 @@ SECTION_FIELDS: Dict[ConfigSection, Tuple[str, ...]] = {
         "price_type", "implied_dollars", "implied_units",
     ),
     ConfigSection.QUANTITY: (
-        "quantity_type", "weight_col", "weight_uom", "resolution_rule",
+        "quantity_type", "weight_col", "weight_uom", "weight_uom_col", "resolution_rule",
     ),
     ConfigSection.VALIDATION: ("validation_config",),
     ConfigSection.OUTPUT: ("output_config",),
@@ -177,6 +177,7 @@ class FormatConfig:
     quantity_type: str = "units"  # "units", "weight", "mixed"
     weight_col: Optional[str] = None
     weight_uom: str = "lb"
+    weight_uom_col: Optional[str] = None
     resolution_rule: str = "units_preferred"  # "units_preferred", "weight_preferred", "average"
 
     # === Backward-compat aliases ===
@@ -242,11 +243,17 @@ def load_format_config(path: str) -> FormatConfig:
         data = json.load(f)
     version = data.pop("version", 1)
     name = data.pop("name", "")
-    cs = data.pop("_completed_sections", set())
+    cs_raw = data.pop("_completed_sections", [])
+    cs = set()
+    for s in cs_raw:
+        try:
+            cs.add(ConfigSection(s))
+        except (ValueError, TypeError):
+            pass
     # Handle nested ValidationConfig
     vc_data = data.pop("validation_config", None)
     oc_data = data.pop("output_config", None)
-    cfg = FormatConfig(version=version, name=name, _completed_sections=set(cs), **data)
+    cfg = FormatConfig(version=version, name=name, _completed_sections=cs, **data)
     if vc_data:
         for key in ("store_validation", "item_validation", "compare_store_list", "file_review"):
             rule_data = vc_data.get(key)
@@ -260,8 +267,9 @@ def load_format_config(path: str) -> FormatConfig:
 def save_format_config(config: FormatConfig, path: str):
     """Save a FormatConfig to a JSON file."""
     d = asdict(config)
+    d["_completed_sections"] = [s.value for s in d["_completed_sections"]]
     with open(path, "w") as f:
-        json.dump(d, f, indent=2, default=str)
+        json.dump(d, f, indent=2)
 
 
 def apply_format_config(
@@ -304,6 +312,7 @@ def apply_format_config(
     ctx.quantity_type = config.quantity_type
     ctx.weight_col = config.weight_col
     ctx.weight_uom = config.weight_uom
+    ctx.weight_uom_col = config.weight_uom_col
     ctx.resolution_rule = config.resolution_rule
 
     if config.canonical_schema:
@@ -405,6 +414,7 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
         quantity_type=getattr(ctx, 'quantity_type', 'units'),
         weight_col=getattr(ctx, 'weight_col', None),
         weight_uom=getattr(ctx, 'weight_uom', 'lb'),
+        weight_uom_col=getattr(ctx, 'weight_uom_col', None),
         resolution_rule=getattr(ctx, 'resolution_rule', 'units_preferred'),
     )
     cfg.suggested_mapping = mapping or None

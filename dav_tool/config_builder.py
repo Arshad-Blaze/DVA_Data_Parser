@@ -46,20 +46,21 @@ def _detect_encoding(
     source: Optional[IDataSource] = None,
 ) -> str:
     """Quick encoding detection by trying common encodings."""
-    sample = None
     if source is not None:
         try:
-            sample = source.read_sample(file_path, n=5)
+            stream = source.open_stream(file_path)
+            raw_bytes = stream.read(1024)
+            stream.close()
         except Exception:
-            pass
-    if sample is not None:
-        for enc in ["cp1252", "utf-8", "utf8-lossy", "latin-1"]:
-            try:
-                sample.encode(enc)
-                return enc
-            except (UnicodeEncodeError, UnicodeError):
-                continue
-        return "utf8-lossy"
+            raw_bytes = None
+        if raw_bytes:
+            for enc in ["cp1252", "utf-8", "utf8-lossy", "latin-1"]:
+                try:
+                    raw_bytes.decode(enc)
+                    return enc
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            return "utf8-lossy"
     for enc in ["cp1252", "utf-8", "utf8-lossy", "latin-1"]:
         try:
             with open(file_path, "r", encoding=enc) as f:

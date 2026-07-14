@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased] — 2026-07-15
+
+### High
+
+- **RC1-1: Architecture audit** — Created `IMPLEMENTATION_REVIEW.md` with full architecture compliance audit, layer-by-layer assessment, and gap analysis against the target 8-layer pipeline.
+
+- **RC1-2: Flush Layer** — Created `dav_tool/workflow/flush.py` as a formal cleanup stage that closes SSH connections, deletes temp files, releases DataFrames, clears session state, and logs final metrics. Called once per workflow execution.
+
+- **RC1-3: Format Change workflow** — Renamed "Certification" to "Format Change" throughout the UI (`app.py`, `existing.py`, `connection_manager.py`). Replaced progressive 8-section config wizard with single-page configuration (`render_all_config_sections`) for the Format Change workflow.
+
+- **RC1-4: Discovery column propagation** — Fixed "discovery comparison showing 0 columns" bug by ensuring `DiscoveryResult.columns` are propagated to `ProcessingContext.columns` and `ProcessingContext.schema` when consumed from the Connection Manager. Also fixed stale discovery data by clearing `columns`, `schema`, and `discovery` on path changes.
+
+- **RC1-5: Canonical Layer** — Created `dav_tool/workflow/canonical.py` as a formal pipeline stage for building Canonical Schema from Physical Schema, handling user schema edits, and propagating canonical names to downstream consumers. Added `CanonicalSchema` dataclass with `from_discovery()` and `update_canonical_names()` methods.
+
+- **RC1-6: CanonicalContext** — Created `CanonicalContext` option object in `dav_tool/options.py` as the single input contract for the Processing Layer. Added `run_store_aggregation_canonical()` and `run_item_aggregation_canonical()` methods that consume only `CanonicalContext`.
+
+- **RC1-7: Requirement Layer** — Created `dav_tool/workflow/requirement.py` as the Operation Selection layer, supporting Raw Data Review, Aggregate Only, and Aggregate + Calculate operations. Wires the existing 7 registered operations (Aggregate, Filter, Sort, Sample, Statistics, Export, Preview) into the pipeline.
+
+### Medium
+
+- **RC1-8: Phase label update** — Updated `PHASE_LABELS` in `workflow/__init__.py` to use "Detection" instead of "Discovery" for Phase 2, matching the target pipeline terminology.
+
+- **RC1-9: App title update** — Changed page title from "DAV TOOL" to "DVA Platform".
+
+- **RC1-10: Onboarding discovery optimization** — Updated `onboarding.py` to use `DiscoveryResult.columns` when available instead of re-reading files with `get_column_names()`, avoiding redundant file reads.
+
+### Low
+
+- **RC1-11: Code cleanup** — Removed unused `progressive_config_wizard` import from `existing.py`, replaced with `render_all_config_sections`.
+
 ## [Unreleased] — 2026-07-14 03:16
 
 ### High

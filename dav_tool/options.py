@@ -18,13 +18,17 @@ from dav_tool.datasource.base import IDataSource
 class OutputMode(str, Enum):
     """Determines which downstream stages execute after aggregation.
 
-    VALIDATE        — full pipeline: aggregation → validation → reports
-    AGGREGATE_ONLY  — stop after aggregation; export becomes available
-    STATISTICS      — aggregation → statistics; skip validation/reports
-    EXPORT          — aggregation → export; skip validation/reports
+    RAW_REVIEW          — preview raw canonical data, no aggregation
+    AGGREGATE_ONLY      — stop after aggregation; export becomes available
+    AGGREGATE_CALCULATE — aggregation + statistics + calculations
+    VALIDATE            — full pipeline: aggregation → validation → reports
+    STATISTICS          — aggregation → statistics; skip validation/reports
+    EXPORT              — aggregation → export; skip validation/reports
     """
-    VALIDATE = "validate"
+    RAW_REVIEW = "raw_review"
     AGGREGATE_ONLY = "aggregate_only"
+    AGGREGATE_CALCULATE = "aggregate_calculate"
+    VALIDATE = "validate"
     STATISTICS = "statistics"
     EXPORT = "export"
 
@@ -92,6 +96,14 @@ class ColumnMapping:
 
     Maps user-selected column names to the canonical roles
     used by the aggregation and calculation engines.
+
+    The ``quantity_type`` field selects the effective quantity mode:
+    - ``"units"`` (default): read quantity from ``units`` col
+    - ``"weight"``: read quantity from ``weight_col``, convert via UOM
+    - ``"mixed"``: coalesce ``weight_col`` and ``units_col``
+
+    When ``weight_uom_col`` is set, per-row UOM values are read from
+    that column and converted to a canonical UOM before aggregation.
     """
     store: str
     upc: str
@@ -101,6 +113,10 @@ class ColumnMapping:
     price_type: str = "Total Price"
     implied_dollars: bool = False
     implied_units: bool = False
+    quantity_type: str = "units"
+    weight_col: Optional[str] = None
+    weight_uom: str = "lb"
+    weight_uom_col: Optional[str] = None
 
     @classmethod
     def from_context(cls, ctx) -> "ColumnMapping":
@@ -114,6 +130,10 @@ class ColumnMapping:
             price_type=getattr(ctx, "price_type", "Total Price"),
             implied_dollars=getattr(ctx, "implied_dollars", False),
             implied_units=getattr(ctx, "implied_units", False),
+            quantity_type=getattr(ctx, "quantity_type", "units"),
+            weight_col=getattr(ctx, "weight_col", None),
+            weight_uom=getattr(ctx, "weight_uom", "lb"),
+            weight_uom_col=getattr(ctx, "weight_uom_col", None),
         )
 
 
@@ -132,6 +152,47 @@ class AggregationOptions:
     @property
     def file_paths(self) -> Optional[List[str]]:
         return None  # Set by caller, not part of options
+
+
+@dataclass(frozen=True)
+class CanonicalContext:
+    """The single input contract for the Processing Layer.
+
+    Bundles everything the processing layer needs:
+    - File parsing details (ParseOptions) — how to read the raw data
+    - Column mapping (ColumnMapping) — which columns map to business concepts
+    - Canonical schema (list of column names) — the canonical column names
+
+    The processing layer NEVER references physical schema names directly.
+    All column references use canonical schema names.
+    """
+    parse: ParseOptions
+    mapping: ColumnMapping
+    canonical_schema: List[str] = field(default_factory=list)
+
+    @classmethod
+    def from_context(cls, ctx, canonical_schema=None) -> "CanonicalContext":
+        """Build CanonicalContext from a ProcessingContext."""
+        from dav_tool.workflow.canonical import CanonicalSchema
+        parse = ParseOptions.from_context(ctx)
+        mapping = ColumnMapping.from_context(ctx)
+        if canonical_schema is None:
+            schema = getattr(ctx, 'schema', None) or getattr(ctx, 'columns', None) or []
+        else:
+            schema = canonical_schema
+        return cls(
+            parse=parse,
+            mapping=mapping,
+            canonical_schema=list(schema),
+        )
+
+    @classmethod
+    def from_sides(cls, prod_ctx, test_ctx) -> tuple["CanonicalContext", "CanonicalContext"]:
+        """Build a pair of CanonicalContext for BAU/Test."""
+        return (
+            cls.from_context(prod_ctx),
+            cls.from_context(test_ctx),
+        )
 
 
 @dataclass(frozen=True)

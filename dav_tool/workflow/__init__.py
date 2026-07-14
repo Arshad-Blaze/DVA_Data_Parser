@@ -29,7 +29,7 @@ class WorkflowPhase(IntEnum):
 
 PHASE_LABELS = {
     WorkflowPhase.CONNECTION: "1. Connection",
-    WorkflowPhase.DISCOVERY: "2. Discovery",
+    WorkflowPhase.DISCOVERY: "2. Detection",
     WorkflowPhase.CONFIGURATION: "3. Configuration",
     WorkflowPhase.CONFIG_VALIDATED: "4. Validate Config",
     WorkflowPhase.PROCESSING: "5. Processing",

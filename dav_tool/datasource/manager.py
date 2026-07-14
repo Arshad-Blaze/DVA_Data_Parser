@@ -1,5 +1,6 @@
 """Connection Manager — singleton that manages the active data source."""
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -22,6 +23,7 @@ class ConnectionConfig:
 
 _ACTIVE_SOURCE: Optional[IDataSource] = None
 _ACTIVE_CONFIG: Optional[ConnectionConfig] = None
+_LOCK = threading.RLock()
 
 
 def get_active_source() -> Optional[IDataSource]:
@@ -43,11 +45,12 @@ def is_connected() -> bool:
 
 def connect_local() -> IDataSource:
     global _ACTIVE_SOURCE, _ACTIVE_CONFIG
-    disconnect()
-    source = LocalDataSource()
-    source.connect()
-    _ACTIVE_SOURCE = source
-    _ACTIVE_CONFIG = ConnectionConfig(type="local")
+    with _LOCK:
+        disconnect()
+        source = LocalDataSource()
+        source.connect()
+        _ACTIVE_SOURCE = source
+        _ACTIVE_CONFIG = ConnectionConfig(type="local")
     logger.info("Connected to local file system")
     return source
 
@@ -62,37 +65,39 @@ def connect_ssh(
     timeout: int = 15,
 ) -> IDataSource:
     global _ACTIVE_SOURCE, _ACTIVE_CONFIG
-    disconnect()
-    source = SSHDataSource(
-        host=host,
-        port=port,
-        username=username,
-        password=password,
-        key_file=key_file,
-        key_passphrase=key_passphrase,
-        timeout=timeout,
-    )
-    source.connect()
-    _ACTIVE_SOURCE = source
-    _ACTIVE_CONFIG = ConnectionConfig(
-        type="ssh",
-        host=host,
-        port=port,
-        username=username,
-        auth_method="key" if key_file else "password",
-        key_file=key_file or "",
-    )
+    with _LOCK:
+        disconnect()
+        source = SSHDataSource(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            key_file=key_file,
+            key_passphrase=key_passphrase,
+            timeout=timeout,
+        )
+        source.connect()
+        _ACTIVE_SOURCE = source
+        _ACTIVE_CONFIG = ConnectionConfig(
+            type="ssh",
+            host=host,
+            port=port,
+            username=username,
+            auth_method="key" if key_file else "password",
+            key_file=key_file or "",
+        )
     logger.info("Connected to SSH: %s@%s:%d", username, host, port)
     return source
 
 
 def disconnect() -> None:
     global _ACTIVE_SOURCE, _ACTIVE_CONFIG
-    if _ACTIVE_SOURCE is not None:
-        try:
-            _ACTIVE_SOURCE.disconnect()
-        except Exception as e:
-            logger.warning("Error during disconnect: %s", e)
-        _ACTIVE_SOURCE = None
-        _ACTIVE_CONFIG = None
-        logger.info("Disconnected")
+    with _LOCK:
+        if _ACTIVE_SOURCE is not None:
+            try:
+                _ACTIVE_SOURCE.disconnect()
+            except Exception as e:
+                logger.warning("Error during disconnect: %s", e)
+            _ACTIVE_SOURCE = None
+            _ACTIVE_CONFIG = None
+            logger.info("Disconnected")

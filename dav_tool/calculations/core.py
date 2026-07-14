@@ -60,8 +60,13 @@ def full_join_with_coalesce(
     suffix: str = "_Test",
     fill_value: float = 0.0,
 ) -> pl.DataFrame:
-    """Full outer join with null-fill and rename collision handling."""
-    merged = left_df.join(right_df, on=on, how="full", suffix=suffix).fill_null(fill_value)
+    """Full outer join with null-fill and rename collision handling.
+
+    Fill only applies to non-key columns to avoid corrupting key columns.
+    """
+    merged = left_df.join(right_df, on=on, how="full", suffix=suffix)
+    value_cols = [c for c in merged.columns if c not in on]
+    merged = merged.with_columns([pl.col(c).fill_null(fill_value) for c in value_cols])
     return merged
 
 

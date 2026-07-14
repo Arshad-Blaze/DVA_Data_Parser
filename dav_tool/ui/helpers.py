@@ -613,14 +613,27 @@ def _render_section_fields(
             if new_wt != cfg.weight_col:
                 cfg.weight_col = new_wt; changed = True
 
-            new_uom = st.selectbox(
-                "Weight Unit of Measure",
-                ["lb", "oz", "kg", "g"],
-                index=["lb", "oz", "kg", "g"].index(cfg.weight_uom) if cfg.weight_uom in ["lb", "oz", "kg", "g"] else 0,
-                key=f"{key_prefix}_q_uom",
+            cols_for_uom = ["(none)"] + cols_list
+            uom_col_idx = 0
+            if cfg.weight_uom_col and cfg.weight_uom_col in cols_list:
+                uom_col_idx = cols_list.index(cfg.weight_uom_col) + 1
+            new_uom_col = st.selectbox(
+                "UOM Column (optional — reads UOM from data)",
+                cols_for_uom, index=uom_col_idx, key=f"{key_prefix}_q_uom_col",
             )
-            if new_uom != cfg.weight_uom:
-                cfg.weight_uom = new_uom; changed = True
+            resolved_uom_col = new_uom_col if new_uom_col != "(none)" else None
+            if resolved_uom_col != cfg.weight_uom_col:
+                cfg.weight_uom_col = resolved_uom_col; changed = True
+
+            if not cfg.weight_uom_col:
+                new_uom = st.selectbox(
+                    "Default Weight UOM (fallback)",
+                    ["lb", "oz", "kg", "g"],
+                    index=["lb", "oz", "kg", "g"].index(cfg.weight_uom) if cfg.weight_uom in ["lb", "oz", "kg", "g"] else 0,
+                    key=f"{key_prefix}_q_uom",
+                )
+                if new_uom != cfg.weight_uom:
+                    cfg.weight_uom = new_uom; changed = True
 
         if cfg.quantity_type == "mixed":
             new_rule = st.selectbox(

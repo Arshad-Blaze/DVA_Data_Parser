@@ -55,6 +55,10 @@ def generate_file_review(
     precomputed_store_agg: Optional[pl.DataFrame] = None,
     precomputed_upc_summary: Optional[pl.DataFrame] = None,
     source: Optional[IDataSource] = None,
+    quantity_type: str = "units",
+    weight_col: Optional[str] = None,
+    weight_uom: str = "lb",
+    weight_uom_col: Optional[str] = None,
 ) -> pl.DataFrame:
     """Generate per-file summary statistics.
 
@@ -99,8 +103,12 @@ def generate_file_review(
             trailer_prefix=trailer_prefix,
             trailer_layout=trailer_layout,
             source=source,
+            quantity_type=quantity_type,
+            weight_col=weight_col,
+            weight_uom=weight_uom,
+            weight_uom_col=weight_uom_col,
         )
-
+        
         ua = stream_upc_summary(
             [f], file_type, upc_col, units_col, dollars_col,
             delimiter=delimiter, layout=layout,
@@ -115,6 +123,10 @@ def generate_file_review(
             trailer_prefix=trailer_prefix,
             trailer_layout=trailer_layout,
             source=source,
+            quantity_type=quantity_type,
+            weight_col=weight_col,
+            weight_uom=weight_uom,
+            weight_uom_col=weight_uom_col,
         )
 
         store_count = sa.height if sa is not None and not sa.is_empty() else 0

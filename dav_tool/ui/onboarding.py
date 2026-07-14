@@ -214,7 +214,7 @@ def _phase1_discovery(ctx):
                         start_line = ctx.start_line
                         record_type = ctx.record_type or ""
                         if file_paths:
-                            cols = get_column_names(
+                            cols = ctx.columns or get_column_names(
                                 file_paths, file_type, prod_delim or ",",
                                 layout_list, start_line, record_type,
                                 header_prefix=ctx.header_prefix,
@@ -280,16 +280,22 @@ def _phase1_discovery(ctx):
                 if file_type and not getattr(ctx, '_config_applied', False):
                     log_phase(f"Detection Completed — {file_type}")
 
-                # Get columns — no re-detection for standard delimited/fixed
+                # Get columns — use discovery result first, avoid re-detection
                 if not getattr(ctx, '_config_applied', False):
+                    discovery_cols = getattr(ctx.discovery, 'columns', None) if ctx.discovery else None
                     if file_type and file_type == "multiline":
                         if ctx.ml_flattened and ctx.schema:
                             cols = ctx.schema
+                        elif ctx.discovery and discovery_cols:
+                            cols = discovery_cols
                         else:
                             cols = []
                     elif file_type and file_paths:
-                        cols = get_column_names(file_paths, file_type, prod_delim or ",", layout_list,
-                                                 start_line, record_type, source=_onb_source)
+                        if discovery_cols:
+                            cols = discovery_cols
+                        else:
+                            cols = get_column_names(file_paths, file_type, prod_delim or ",", layout_list,
+                                                     start_line, record_type, source=_onb_source)
 
         if cols:
             log_phase(f"Schema Generated — {len(cols)} columns")
@@ -403,11 +409,11 @@ def _phase4_processing(ctx):
     ll = ctx.layout
     sl = ctx.start_line
     rt = ctx.record_type
-    cols = ctx.columns
+    cols = ctx.schema or ctx.columns
 
-    st.subheader("Store List Input")
-    storelist_path = st.text_input("Store List File Path")
-    storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"])
+    with st.expander("Store List (optional)", expanded=False):
+        storelist_path = st.text_input("Store List File Path")
+        storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"])
 
     st.subheader("Column Selection")
     smart_idx = smart_column_indices(cols)
@@ -521,7 +527,7 @@ def _phase5_validation(ctx):
     ll = ctx.layout
     sl = ctx.start_line
     rt = ctx.record_type
-    cols = ctx.columns
+    cols = ctx.schema or ctx.columns
 
     _onb_source = get_active_source()
 

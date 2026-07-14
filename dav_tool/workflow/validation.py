@@ -5,7 +5,7 @@ No Streamlit imports. No rendering. Pure validation logic.
 """
 import logging
 import time
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 import polars as pl
 
@@ -15,8 +15,23 @@ from dav_tool.validation.item import run_item_validation
 from dav_tool._reports import generate_file_review
 from dav_tool._observability import ProcessingMetrics
 from dav_tool.datasource.base import IDataSource
+from dav_tool.workflow.data_access import wrap_source
 
 logger = logging.getLogger(__name__)
+
+
+def _wrap_validation_source(source, *path_lists):
+    """Wrap source in DataAccessor for validation functions."""
+    if source is None:
+        return None
+    all_paths = []
+    for paths in path_lists:
+        if paths:
+            all_paths.extend(p for p in paths if p not in all_paths)
+    if not all_paths:
+        return source
+    accessor, _ = wrap_source(source, all_paths)
+    return accessor
 
 
 class ValidationResult:
@@ -28,6 +43,7 @@ class ValidationResult:
         self.item_summary: Optional[pl.DataFrame] = None
         self.store_list_result: Optional[Dict[str, str]] = None
         self.file_review: Optional[pl.DataFrame] = None
+        self.file_review_test: Optional[pl.DataFrame] = None
         self.upc_summary: Optional[pl.DataFrame] = None
         self.errors: list = []
         self.warnings: list = []
@@ -44,6 +60,7 @@ def run_onboarding_validation(
     source: Optional[IDataSource] = None,
 ) -> ValidationResult:
     """Run onboarding validations. Pure logic, no UI."""
+    source = _wrap_validation_source(source, file_paths)
     result = ValidationResult()
 
     if validation_opts.run_compare_store_list:
@@ -81,6 +98,7 @@ def run_existing_validation(
     source: Optional[IDataSource] = None,
 ) -> ValidationResult:
     """Run existing (two-sided) validations. Pure logic, no UI."""
+    source = _wrap_validation_source(source, prod_paths, test_paths)
     result = ValidationResult()
 
     if validation_opts.run_store_validation:
@@ -126,7 +144,8 @@ def run_existing_validation(
                 test_store_agg, test_item_agg,
                 source=source,
             )
-            result.file_review = fr_prod  # Store prod; test stored separately
+            result.file_review = fr_prod
+            result.file_review_test = fr_test
             metrics.record("report", "generate_file_reviews", elapsed)
         except Exception as e:
             result.errors.append(f"File review failed: {e}")
@@ -138,6 +157,8 @@ def run_existing_validation(
 def _run_store_list_compare(store_agg, validation_opts, source=None):
     """Compare store list against aggregated stores."""
     if store_agg is None or store_agg.is_empty():
+        return {"missing_in_test": "", "missing_in_prod": ""}
+    if not validation_opts.store_list_path:
         return {"missing_in_test": "", "missing_in_prod": ""}
 
     from dav_tool.io import safe_read_csv
@@ -279,6 +300,10 @@ def _generate_single_file_review(
         trailer_prefix=parse_opts.trailer_prefix,
         trailer_layout=parse_opts.trailer_layout,
         source=source,
+        quantity_type=mapping.quantity_type,
+        weight_col=mapping.weight_col,
+        weight_uom=mapping.weight_uom,
+        weight_uom_col=mapping.weight_uom_col,
     )
     elapsed = time.perf_counter() - t0
     return fr, elapsed
@@ -314,6 +339,10 @@ def _generate_both_file_reviews(
         precomputed_store_agg=prod_store_agg,
         precomputed_upc_summary=prod_item_agg,
         source=source,
+        quantity_type=prod_mapping.quantity_type,
+        weight_col=prod_mapping.weight_col,
+        weight_uom=prod_mapping.weight_uom,
+        weight_uom_col=prod_mapping.weight_uom_col,
     )
     fr_test = generate_file_review(
         test_paths, test_parse.file_type,
@@ -336,6 +365,10 @@ def _generate_both_file_reviews(
         precomputed_store_agg=test_store_agg,
         precomputed_upc_summary=test_item_agg,
         source=source,
+        quantity_type=test_mapping.quantity_type,
+        weight_col=test_mapping.weight_col,
+        weight_uom=test_mapping.weight_uom,
+        weight_uom_col=test_mapping.weight_uom_col,
     )
     elapsed = time.perf_counter() - t0
     return fr_prod, fr_test, elapsed

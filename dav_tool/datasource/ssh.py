@@ -88,8 +88,8 @@ class SSHDataSource(IDataSource):
         if self._client is None:
             return False
         try:
-            self._client.exec_command("echo connected", timeout=5)
-            return True
+            transport = self._client.get_transport()
+            return transport is not None and transport.is_active()
         except Exception:
             return False
 
@@ -172,14 +172,22 @@ class SSHDataSource(IDataSource):
 
     def download_if_required(self, path: str) -> str:
         rpath = self._resolve(path)
+        tmp = None
         try:
             tmp = tempfile.NamedTemporaryFile(
                 delete=False, suffix="_" + os.path.basename(rpath)
             )
+            tmp.close()
             self._sftp.get(rpath, tmp.name)
             logger.info("Downloaded %s to local temp %s", rpath, tmp.name)
             return tmp.name
         except Exception as e:
+            if tmp is not None:
+                tmp.close()
+                try:
+                    os.unlink(tmp.name)
+                except Exception:
+                    pass
             raise DataSourceError(f"Cannot download {rpath}: {e}")
 
     def exists(self, path: str) -> bool:
