@@ -66,6 +66,7 @@ class SSHDataSource(IDataSource):
             self._gather_info()
             return True
         except Exception as e:
+            logger.exception("SSH connection failed: %s", e)
             self.disconnect()
             raise DataSourceError(f"SSH connection failed: {e}")
 
@@ -73,14 +74,14 @@ class SSHDataSource(IDataSource):
         if self._sftp:
             try:
                 self._sftp.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to close SFTP client: %s", e)
             self._sftp = None
         if self._client:
             try:
                 self._client.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to close SSH client: %s", e)
             self._client = None
 
     @property
@@ -90,7 +91,8 @@ class SSHDataSource(IDataSource):
         try:
             transport = self._client.get_transport()
             return transport is not None and transport.is_active()
-        except Exception:
+        except Exception as e:
+            logger.warning("is_connected check failed: %s", e)
             return False
 
     def _gather_info(self) -> None:
@@ -106,7 +108,8 @@ class SSHDataSource(IDataSource):
             if len(lines) > 1:
                 info["disk"] = lines[1]
             self._server_info = info
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to gather SSH server info: %s", e)
             self._server_info = {"type": "ssh", "host": self.host, "port": self.port}
 
     def _resolve(self, path: str) -> str:
@@ -133,6 +136,7 @@ class SSHDataSource(IDataSource):
                 ))
             return sorted(entries, key=lambda e: (not e.is_dir, e.name.lower()))
         except Exception as e:
+            logger.exception("Failed to list directory %s", rpath)
             raise DataSourceError(f"Cannot list directory {rpath}: {e}")
 
     def list_files(self, path: str) -> List[str]:
@@ -147,6 +151,7 @@ class SSHDataSource(IDataSource):
                     files.append(rpath.rstrip("/") + "/" + entry.filename)
             return sorted(files)
         except Exception as e:
+            logger.exception("Failed to list files at %s", rpath)
             raise DataSourceError(f"Cannot list files at {rpath}: {e}")
 
     def read_sample(self, path: str, n: int = 100) -> str:
@@ -161,6 +166,7 @@ class SSHDataSource(IDataSource):
                         break
                 return "".join(lines)
         except Exception as e:
+            logger.exception("Failed to read sample from %s", rpath)
             raise DataSourceError(f"Cannot read sample from {rpath}: {e}")
 
     def open_stream(self, path: str) -> BinaryIO:
@@ -168,6 +174,7 @@ class SSHDataSource(IDataSource):
         try:
             return self._sftp.open(rpath, "rb")
         except Exception as e:
+            logger.exception("Failed to open stream for %s", rpath)
             raise DataSourceError(f"Cannot open stream for {rpath}: {e}")
 
     def download_if_required(self, path: str) -> str:
@@ -186,8 +193,9 @@ class SSHDataSource(IDataSource):
                 tmp.close()
                 try:
                     os.unlink(tmp.name)
-                except Exception:
-                    pass
+                except Exception as cleanup_e:
+                    logger.warning("Failed to clean up temp file %s: %s", tmp.name, cleanup_e)
+            logger.exception("Failed to download %s", rpath)
             raise DataSourceError(f"Cannot download {rpath}: {e}")
 
     def exists(self, path: str) -> bool:
@@ -195,7 +203,8 @@ class SSHDataSource(IDataSource):
         try:
             self._sftp.stat(rpath)
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("exists check failed for %s: %s", rpath, e)
             return False
 
     def stat(self, path: str) -> dict:
@@ -209,6 +218,7 @@ class SSHDataSource(IDataSource):
                 "is_file": stat_module.S_ISREG(attr.st_mode),
             }
         except Exception as e:
+            logger.exception("Failed to stat %s", rpath)
             raise DataSourceError(f"Cannot stat {rpath}: {e}")
 
     def get_server_info(self) -> dict:

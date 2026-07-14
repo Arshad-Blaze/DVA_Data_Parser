@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Dict, Any, Optional
 
-from dav_tool.datasource.base import IDataSource
-
 
 class OutputMode(str, Enum):
     """Determines which downstream stages execute after aggregation.
@@ -58,15 +56,6 @@ class ParseOptions:
     trailer_layout: Optional[List[Dict[str, Any]]] = None
     multiline_record_types: Optional[List[str]] = None
     multiline_delimiter: str = "|"
-
-    @property
-    def effective_type(self) -> str:
-        """Return the effective file type for the parser.
-
-        For multiline files that have been flattened, the parser
-        should treat them as their underlying type.
-        """
-        return self.file_type
 
     @classmethod
     def from_context(cls, ctx) -> "ParseOptions":
@@ -138,23 +127,6 @@ class ColumnMapping:
 
 
 @dataclass(frozen=True)
-class AggregationOptions:
-    """Options for a single aggregation task.
-
-    Bundles ParseOptions + ColumnMapping + level into one object
-    that can be passed to aggregate() without 20+ parameters.
-    """
-    parse: ParseOptions
-    mapping: ColumnMapping
-    level: str  # "store", "item", "upc"
-    source: Optional[IDataSource] = None
-
-    @property
-    def file_paths(self) -> Optional[List[str]]:
-        return None  # Set by caller, not part of options
-
-
-@dataclass(frozen=True)
 class CanonicalContext:
     """The single input contract for the Processing Layer.
 
@@ -186,13 +158,6 @@ class CanonicalContext:
             canonical_schema=list(schema),
         )
 
-    @classmethod
-    def from_sides(cls, prod_ctx, test_ctx) -> tuple["CanonicalContext", "CanonicalContext"]:
-        """Build a pair of CanonicalContext for BAU/Test."""
-        return (
-            cls.from_context(prod_ctx),
-            cls.from_context(test_ctx),
-        )
 
 
 @dataclass(frozen=True)
@@ -211,39 +176,3 @@ class ValidationOptions:
     store_list_store_col: Optional[str] = None
 
 
-@dataclass(frozen=True)
-class WorkflowState:
-    """Immutable snapshot of a workflow's current state.
-
-    Created at the start of each phase transition.
-    UI reads this to render; workflow services write new states.
-    """
-    phase: int = 0
-    file_paths: Optional[List[str]] = None
-    parse: Optional[ParseOptions] = None
-    mapping: Optional[ColumnMapping] = None
-    validation: Optional[ValidationOptions] = None
-    output_mode: OutputMode = OutputMode.VALIDATE
-    is_complete: bool = False
-    error: Optional[str] = None
-
-
-def validation_options_for_mode(
-    mode: OutputMode,
-    base: Optional[ValidationOptions] = None,
-) -> ValidationOptions:
-    """Return ValidationOptions appropriate for the given OutputMode.
-
-    AGGREGATE_ONLY / STATISTICS / EXPORT disable all validation and report
-    flags.  VALIDATE keeps whatever the caller specified (or the defaults).
-    """
-    if mode == OutputMode.VALIDATE:
-        return base or ValidationOptions()
-
-    return ValidationOptions(
-        run_store_validation=False,
-        run_item_validation=False,
-        run_compare_store_list=False,
-        run_summary=False,
-        run_file_review=False,
-    )

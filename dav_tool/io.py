@@ -16,7 +16,8 @@ def safe_read_csv(path: str, source: Optional[IDataSource] = None, **kwargs) -> 
             logger.warning("Could not download %s via source, falling back to direct path", path)
     try:
         return pl.read_csv(local_path, encoding=FALLBACK_ENCODING, **kwargs)
-    except Exception:
+    except Exception as e:
+        logger.warning("Polars read_csv failed for %s, falling back to csv.reader: %s", local_path, e)
         import csv
 
         with open(local_path, "r", encoding=DEFAULT_ENCODING, errors="ignore") as f:

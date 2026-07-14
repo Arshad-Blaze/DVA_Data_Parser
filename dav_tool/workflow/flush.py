@@ -113,8 +113,8 @@ def _flush_dataframes(ctx_objects: Optional[List]):
                     release_df(df, name=attr, owner="flush")
                     try:
                         setattr(ctx, attr, None)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Could not clear context attr %s: %s", attr, e)
 
 
 def _flush_registry():
@@ -135,11 +135,11 @@ def _flush_session_state():
         for k in keys_to_clear:
             try:
                 del st.session_state[k]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not clear session key %s: %s", k, e)
         logger.debug("Cleared %d session state keys", len(keys_to_clear))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to clear session state: %s", e)
 
 
 def _log_metrics(metrics: ProcessingMetrics):

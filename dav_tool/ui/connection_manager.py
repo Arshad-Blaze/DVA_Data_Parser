@@ -12,8 +12,8 @@ from dav_tool.datasource.manager import (
     get_active_source, is_connected, get_active_config,
 )
 from dav_tool._observability import log_phase
-from dav_tool.workflow.discovery import detect_file, DiscoveryResult
-from dav_tool._parsers import preview_raw_lines
+from dav_tool.workflow.discovery import detect_file
+from dav_tool.workflow.preview import preview_raw_lines
 from dav_tool.ui.helpers import get_file_list
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,8 @@ def _status_summary() -> str:
     if source:
         try:
             parts.append(source.get_connection_string()[:30])
-        except Exception:
+        except Exception as e:
+            logger.debug("Could not get connection string: %s", e)
             parts.append("Connected")
     if workflow == "onboarding":
         path = st.session_state.get(_SELECTED_PATH_KEY, "")
@@ -252,7 +253,8 @@ def _render_connection_info():
     try:
         info = source.get_server_info()
         conn_str = source.get_connection_string()
-    except Exception:
+    except Exception as e:
+        logger.debug("Could not render connection info: %s", e)
         return
 
     with st.container(border=True):
@@ -445,7 +447,8 @@ def _show_path_preview(path, source, label="Data Preview", discovery_key="_cm_di
 
         try:
             discovery = detect_file(file_paths, source=source)
-        except Exception:
+        except Exception as e:
+            logger.warning("File detection failed: %s", e)
             st.caption("Could not detect file type")
             return
 

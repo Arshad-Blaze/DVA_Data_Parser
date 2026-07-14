@@ -218,9 +218,6 @@ class FormatConfig:
     def mark_section_complete(self, section: ConfigSection):
         self._completed_sections.add(section)
 
-    def section_fields(self, section: ConfigSection) -> Tuple[str, ...]:
-        return get_section_fields(section)
-
     def section_label(self, section: ConfigSection) -> str:
         return SECTION_LABELS.get(section, section.value)
 
@@ -232,10 +229,6 @@ class FormatConfig:
 
     def is_config_complete(self) -> bool:
         return all(s in self._completed_sections for s in iter_sections())
-
-    def reset_sections(self):
-        self._completed_sections.clear()
-
 
 def load_format_config(path: str) -> FormatConfig:
     """Load a FormatConfig from a JSON file."""

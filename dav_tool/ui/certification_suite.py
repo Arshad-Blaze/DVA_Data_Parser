@@ -4,8 +4,6 @@ Embeddable in Streamlit developer mode panel.
 Provides Run All / Run Category / Run Retailer controls
 and generates HTML/Markdown reports.
 """
-import os
-import threading
 import streamlit as st
 
 from dav_tool.certification.runner import (

@@ -51,7 +51,8 @@ def _detect_encoding(
             stream = source.open_stream(file_path)
             raw_bytes = stream.read(1024)
             stream.close()
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to open stream for encoding detection: %s", e)
             raw_bytes = None
         if raw_bytes:
             for enc in ["cp1252", "utf-8", "utf8-lossy", "latin-1"]:
@@ -193,7 +194,8 @@ def build_config(
                         fp_local, separator=delimiter or ",",
                         n_rows=SAMPLE_SIZE, encoding=FALLBACK_ENCODING,
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning("Polars read_csv failed for sample, falling back to preview_raw: %s", e)
                     sample = preview_raw(
                         file_paths_local, file_type, delimiter or ",",
                         n_rows=SAMPLE_SIZE,
@@ -227,8 +229,8 @@ def build_config(
         if source is not None and fp_local != fp:
             try:
                 os.unlink(fp_local)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to clean up temp file %s: %s", fp_local, e)
 
     return cfg
 
@@ -509,8 +511,8 @@ def _load_sample(
                 fp, separator=delimiter,
                 n_rows=SAMPLE_SIZE, encoding=FALLBACK_ENCODING,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Polars read for column detection failed: %s", e)
 
     return preview_raw(
         file_paths, file_type, delimiter,

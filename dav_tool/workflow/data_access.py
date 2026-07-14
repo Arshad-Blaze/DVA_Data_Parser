@@ -238,7 +238,8 @@ class DataAccessor:
                     label=f"stat({p})",
                 )
                 total_size += stat.get("size", 0)
-            except Exception:
+            except Exception as e:
+                logger.debug("Could not stat file, assuming 10MB: %s", e)
                 total_size += 10 * 1024 * 1024
 
         return {
@@ -343,7 +344,8 @@ def _available_disk_mb() -> float:
     try:
         usage = shutil.disk_usage(tempfile.gettempdir())
         return usage.free / (1024 * 1024)
-    except Exception:
+    except Exception as e:
+        logger.debug("Could not determine free disk space, assuming 10GB: %s", e)
         return 10 * 1024
 
 

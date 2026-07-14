@@ -8,17 +8,15 @@ from typing import Optional
 
 import streamlit as st
 import polars as pl
-from dav_tool._parsers import (
+from dav_tool.workflow.preview import (
     parse_fixed_width_chunks, preview_flattened_multiline,
     preview_flattened_multiline_fixed,
 )
 from dav_tool._observability import ProcessingRecord, MAX_HISTORY
 from dav_tool._column_utils import (
-    COLUMN_SYNONYMS,
     find_best_column_index as _find_best_column_index,
     smart_column_indices as _smart_column_indices,
 )
-from dav_tool.config import FALLBACK_ENCODING
 from dav_tool.io import safe_read_csv
 from dav_tool.datasource.base import IDataSource
 from dav_tool.datasource.manager import get_active_source
@@ -102,8 +100,8 @@ def display_dev_diagnostics(ctx):
         if source is not None:
             try:
                 conn_status += f" ({source.get_connection_string()[:50]})"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not get connection string: %s", e)
         st.markdown(f"**Connection Status:** {conn_status}")
 
         if hasattr(ctx, 'prod') and hasattr(ctx, 'test'):
@@ -127,7 +125,6 @@ def display_dev_diagnostics(ctx):
         st.markdown(f"**Validation Status:** {'Done' if val_done else 'Pending'}")
 
 
-COLUMN_SYNONYMS = COLUMN_SYNONYMS  # re-export from _column_utils for backward compat
 
 
 def find_best_column_index(cols, target, synonyms):
@@ -898,5 +895,5 @@ def cleanup_dataframes(ctx, keep_attrs=None):
             release_df(df, name=attr, owner="context")
             try:
                 setattr(ctx, attr, None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not clear context attr %s: %s", attr, e)

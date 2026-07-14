@@ -409,6 +409,7 @@ def _compare_expected(ctx: ExistingContext, expected_dir: str, errors: List[str]
                     errors.append(f"{exp_name}: column '{col}' values differ")
                     all_match = False
         except Exception as e:
+            logger.warning("Expected comparison failed for %s: %s", exp_name, e)
             errors.append(f"Expected comparison failed for {exp_name}: {e}")
             all_match = False
     return all_match

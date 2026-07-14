@@ -4,18 +4,11 @@ Moved from UI layer to be testable and reusable.
 No Streamlit imports. No rendering. Pure logic.
 """
 import logging
-import os
-from typing import List, Dict, Optional, Tuple
-
-import polars as pl
+from typing import List, Dict, Optional
 
 from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
-    detect_hdr_prefix, has_header,
-)
-from dav_tool._parsers import (
-    preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
-    load_layout,
+    detect_hdr_prefix,
 )
 from dav_tool.datasource.base import IDataSource
 
@@ -68,20 +61,6 @@ class DiscoveryResult:
         self.record_type = record_type
         self.layout = layout
         self.error = error
-
-    @property
-    def is_ready(self) -> bool:
-        """True if discovery produced a valid file type and columns."""
-        return bool(self.file_type and self.columns)
-
-    @property
-    def needs_flattening(self) -> bool:
-        """True if the file structure requires flattening before column extraction.
-
-        Only multiline (delimited multiline or HDR fixed-width) files need
-        flattening. Standard delimited and simple fixed-width files do NOT.
-        """
-        return self.file_type == "multiline" and not self.ml_flattened
 
     @classmethod
     def from_context(cls, ctx) -> "DiscoveryResult":
@@ -205,158 +184,6 @@ def _detect_multiline(
             ml_record_types=detected_types or ["H", "D"],
             ml_delimiter="|",
         )
-
-
-def flatten_multiline(
-    file_paths: List[str],
-    discovery: DiscoveryResult,
-    header_layout: Optional[List[Dict]] = None,
-    detail_layout: Optional[List[Dict]] = None,
-    trailer_layout: Optional[List[Dict]] = None,
-    source: Optional[IDataSource] = None,
-) -> DiscoveryResult:
-    """Flatten multiline data and return updated discovery with schema.
-
-    For HDR fixed-width: requires header_layout + detail_layout.
-    For delimited multiline: requires ml_record_types + ml_delimiter.
-    """
-    if discovery.header_prefix and header_layout and detail_layout:
-        flat = preview_flattened_multiline_fixed(
-            file_paths,
-            discovery.header_prefix,
-            header_layout,
-            detail_layout,
-            n_rows=10,
-            trailer_prefix=discovery.trailer_prefix,
-            trailer_layout=trailer_layout,
-            source=source,
-        )
-    elif discovery.ml_record_types:
-        flat = preview_flattened_multiline(
-            file_paths,
-            discovery.ml_record_types,
-            discovery.ml_delimiter,
-            n_rows=10,
-            source=source,
-        )
-    else:
-        return DiscoveryResult(error="Cannot flatten: no record types or HDR prefix")
-
-    if flat is not None and not flat.is_empty():
-        schema = list(flat.columns)
-        return DiscoveryResult(
-            file_type=discovery.file_type,
-            delimiter=discovery.delimiter,
-            columns=schema,
-            schema=schema,
-            header_prefix=discovery.header_prefix,
-            header_layout=header_layout,
-            detail_layout=detail_layout,
-            trailer_prefix=discovery.trailer_prefix,
-            trailer_layout=trailer_layout,
-            ml_record_types=discovery.ml_record_types,
-            ml_delimiter=discovery.ml_delimiter,
-            ml_flattened=True,
-        )
-
-    return DiscoveryResult(error="Flattening produced empty result")
-
-
-def get_preview(
-    file_paths: List[str],
-    file_type: str,
-    delimiter: Optional[str] = None,
-    layout: Optional[List[Dict]] = None,
-    n_rows: int = 10,
-    start_line: int = 0,
-    record_type: Optional[str] = None,
-    header_prefix: Optional[str] = None,
-    header_layout: Optional[List[Dict]] = None,
-    detail_layout: Optional[List[Dict]] = None,
-    trailer_prefix: Optional[str] = None,
-    trailer_layout: Optional[List[Dict]] = None,
-    source: Optional[IDataSource] = None,
-) -> Optional[pl.DataFrame]:
-    """Get a preview DataFrame for display. Pure logic, no UI."""
-    try:
-        if file_type == "multiline":
-            if header_prefix and header_layout and detail_layout:
-                return preview_flattened_multiline_fixed(
-                    file_paths, header_prefix, header_layout, detail_layout,
-                    n_rows=n_rows,
-                    trailer_prefix=trailer_prefix,
-                    trailer_layout=trailer_layout,
-                    source=source,
-                )
-            elif header_prefix is None:
-                ml_rt = record_type.split(",") if record_type else ["H", "D"]
-                return preview_flattened_multiline(
-                    file_paths, ml_rt, delimiter or "|",
-                    n_rows=n_rows, source=source,
-                )
-        else:
-            return preview_raw(
-                file_paths, file_type, delimiter or ",", layout,
-                n_rows=n_rows, start_line=start_line,
-                record_type=record_type, source=source,
-            )
-    except Exception as e:
-        logger.warning("Preview failed: %s", e)
-    return None
-
-
-def get_column_names_from_file(
-    file_paths: List[str],
-    file_type: str,
-    delimiter: Optional[str] = None,
-    layout: Optional[List[Dict]] = None,
-    start_line: int = 0,
-    record_type: Optional[str] = None,
-    header_prefix: Optional[str] = None,
-    header_layout: Optional[List[Dict]] = None,
-    trailer_prefix: Optional[str] = None,
-    trailer_layout: Optional[List[Dict]] = None,
-    source: Optional[IDataSource] = None,
-) -> List[str]:
-    """Extract column names from file without full parsing."""
-    from dav_tool._parsers import parse_fixed_width_chunks
-
-    if not file_paths:
-        return []
-
-    try:
-        if file_type == "delimited":
-            from dav_tool.io import safe_read_csv
-            df = safe_read_csv(file_paths[0], separator=delimiter or ",", n_rows=5, source=source)
-            return df.columns
-        elif file_type == "fixed" and layout:
-            chunks = list(parse_fixed_width_chunks(
-                file_paths[:1], layout, start_line, record_type,
-                chunk_size=5, source=source,
-            ))
-            if chunks:
-                return chunks[0].columns
-        elif file_type == "multiline":
-            if header_prefix and header_layout:
-                flat = preview_flattened_multiline_fixed(
-                    file_paths, header_prefix, header_layout, layout or [],
-                    n_rows=5,
-                    trailer_prefix=trailer_prefix,
-                    trailer_layout=trailer_layout,
-                    source=source,
-                )
-            else:
-                rt_list = record_type.split(",") if record_type else ["H", "D"]
-                flat = preview_flattened_multiline(
-                    file_paths, rt_list, delimiter or "|",
-                    n_rows=5, source=source,
-                )
-            if flat is not None and not flat.is_empty():
-                return flat.columns
-    except Exception as e:
-        logger.warning("Could not determine column names: %s", e)
-
-    return []
 
 
 def _get_delimited_columns(

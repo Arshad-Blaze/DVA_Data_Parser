@@ -39,7 +39,8 @@ def is_connected() -> bool:
         return False
     try:
         return _ACTIVE_SOURCE.is_connected
-    except Exception:
+    except Exception as e:
+        logger.warning("is_connected check failed: %s", e)
         return False
 
 

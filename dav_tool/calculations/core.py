@@ -4,7 +4,6 @@ Every function here is a pure function on Polars DataFrames/expressions.
 No file I/O, no aggregation, no parsing.
 """
 
-from typing import List, Optional
 import polars as pl
 
 
@@ -22,11 +21,6 @@ def pct_diff(base_col: str, comp_col: str) -> pl.Expr:
         .when(pl.col(comp_col) == 0).then(100.0)
         .otherwise((pl.col(base_col) - pl.col(comp_col)) / pl.col(base_col) * 100)
     )
-
-
-def abs_diff(a_col: str, b_col: str, result_col: str) -> pl.Expr:
-    """Absolute difference: a - b."""
-    return (pl.col(a_col) - pl.col(b_col)).alias(result_col)
 
 
 def classify_presence(
@@ -156,48 +150,3 @@ def item_summary(comparison_df: pl.DataFrame) -> pl.DataFrame:
     ]).sort("Present In")
 
 
-def sort_by_diff(
-    df: pl.DataFrame,
-    sort_col: str = "Units_Diff_%",
-    ascending: bool = False,
-) -> pl.DataFrame:
-    """Sort a comparison DataFrame by a difference column.
-
-    Defaults to descending by percentage difference.
-    """
-    return df.sort(sort_col, descending=not ascending)
-
-
-def rank_by_diff(
-    df: pl.DataFrame,
-    rank_col: str = "Units_Diff_%",
-    rank_name: str = "Rank",
-    ascending: bool = False,
-) -> pl.DataFrame:
-    """Rank rows by a difference column (1 = largest difference).
-
-    Defaults to ranking from largest percentage difference downward.
-    """
-    return df.with_columns(
-        pl.col(rank_col).rank(descending=not ascending).cast(pl.Int32).alias(rank_name)
-    )
-
-
-def apply_tolerance(
-    df: pl.DataFrame,
-    diff_col: str = "Units_Diff_%",
-    tolerance: float = 5.0,
-    status_col: str = "Status",
-    pass_label: str = "Pass",
-    fail_label: str = "Fail",
-) -> pl.DataFrame:
-    """Classify rows as Pass or Fail based on a tolerance threshold.
-
-    |diff_col| <= tolerance → Pass, otherwise Fail.
-    """
-    return df.with_columns(
-        pl.when(pl.col(diff_col).abs() <= tolerance)
-        .then(pl.lit(pass_label))
-        .otherwise(pl.lit(fail_label))
-        .alias(status_col)
-    )
