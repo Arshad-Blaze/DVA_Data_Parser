@@ -65,6 +65,7 @@ def run_store_aggregation(
             weight_col=mapping.weight_col,
             weight_uom=mapping.weight_uom,
             weight_uom_col=mapping.weight_uom_col,
+            numeric_config=getattr(parse_opts, 'numeric_config', None),
         )
         register_df(result, "store_agg", owner="processing", phase="aggregation")
     except Exception:
@@ -111,6 +112,7 @@ def run_item_aggregation(
             weight_col=mapping.weight_col,
             weight_uom=mapping.weight_uom,
             weight_uom_col=mapping.weight_uom_col,
+            numeric_config=getattr(parse_opts, 'numeric_config', None),
         )
         register_df(result, "item_agg", owner="processing", phase="aggregation")
     except Exception:

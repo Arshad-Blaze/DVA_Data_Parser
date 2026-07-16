@@ -2,55 +2,21 @@ import csv
 import io
 import logging
 import os
-from enum import Enum
 from typing import Iterator, List, Dict, Any, Optional, Union, BinaryIO
 
 import polars as pl
 
+from dav_tool._numeric import (  # noqa: F401 — re-exported for backward compat
+    NumericHandling,
+    NumericParsingConfig,
+    numeric_parse_expr,
+    safe_numeric,
+    _log_numeric_issue,
+)
 from dav_tool.config import DEFAULT_ENCODING, FALLBACK_ENCODING, DEFAULT_CHUNK_SIZE, DEFAULT_PREVIEW_ROWS
 from dav_tool.datasource.base import IDataSource
 
 logger = logging.getLogger(__name__)
-
-
-_NON_NUMERIC_PATTERNS = [
-    "NULL", "N/A", "NA", "NAN", "INF", "-", "--", ".",
-]
-
-
-class NumericHandling(Enum):
-    """Configurable behaviour for non-numeric values during conversion."""
-    AS_NULL = "as_null"
-    AS_ZERO = "as_zero"
-    REJECT = "reject"
-
-
-def _log_numeric_issue(column: str, original: str, reason: str):
-    logger.warning("Numeric conversion issue — col=%r value=%r reason=%s", column, original, reason)
-
-
-def safe_numeric(
-    column: str,
-    on_invalid: NumericHandling = NumericHandling.AS_NULL,
-) -> pl.Expr:
-    cleaned = (
-        pl.col(column)
-        .cast(pl.Utf8)
-        .str.strip_chars()
-    )
-    cleaned = pl.when(
-        cleaned.str.to_uppercase().is_in(_NON_NUMERIC_PATTERNS)
-    ).then(None).otherwise(cleaned)
-    cleaned = cleaned.str.replace_all(r"[^0-9.eE+\-]", "")
-    cleaned = pl.when(
-        (cleaned == "") | cleaned.is_null()
-    ).then(None).otherwise(cleaned)
-    result = cleaned.cast(pl.Float64, strict=False)
-    if on_invalid == NumericHandling.AS_ZERO:
-        return result.fill_null(0.0)
-    if on_invalid == NumericHandling.REJECT:
-        return result
-    return result
 
 
 def load_layout(layout_file: str) -> List[Dict[str, Any]]:
@@ -366,8 +332,7 @@ def preview_raw_lines(
                 if n_rows and len(lines) >= n_rows:
                     break
                 line = line.rstrip("\n\r")
-                if line:
-                    lines.append(line)
+                lines.append(line)
         return lines
     except Exception:
         logger.warning("preview_raw_lines failed for %s", fp)
@@ -532,6 +497,7 @@ def canonical_chunk_stream(
     weight_col=None,
     weight_uom: str = "lb",
     weight_uom_col=None,
+    numeric_config=None,
 ):
     """Yield canonically-normalized DataFrames from file(s).
 
@@ -581,19 +547,22 @@ def canonical_chunk_stream(
             lazy = lazy.with_columns(
                 store_normalize_exprs(store_col, units_col, price_col,
                                        implied_units, implied_dollars, price_type,
-                                       quantity_type, weight_col, weight_uom, weight_uom_col)
+                                       quantity_type, weight_col, weight_uom, weight_uom_col,
+                                       numeric_config=numeric_config)
             )
         elif level == "item":
             lazy = lazy.with_columns(
                 item_normalize_exprs(upc_col, desc_col, units_col, price_col,
                                       implied_units, implied_dollars,
-                                      quantity_type, weight_col, weight_uom, weight_uom_col)
+                                      quantity_type, weight_col, weight_uom, weight_uom_col,
+                                      numeric_config=numeric_config)
             )
         elif level == "upc":
             lazy = lazy.with_columns(
                 upc_normalize_exprs(upc_col, units_col, price_col,
                                      implied_units, implied_dollars,
-                                     quantity_type, weight_col, weight_uom, weight_uom_col)
+                                     quantity_type, weight_col, weight_uom, weight_uom_col,
+                                     numeric_config=numeric_config)
             )
         yield lazy.collect(engine="streaming")
         return
@@ -617,7 +586,8 @@ def canonical_chunk_stream(
                 continue
             yield normalize_store_chunk(chunk, store_col, units_col, price_col,
                                          implied_units, implied_dollars, price_type,
-                                         quantity_type, weight_col, weight_uom, weight_uom_col)
+                                         quantity_type, weight_col, weight_uom, weight_uom_col,
+                                         numeric_config=numeric_config)
         elif level == "item":
             if upc_col not in chunk.columns:
                 logger.warning("Skipping chunk: column '%s' not found", upc_col)
@@ -625,7 +595,8 @@ def canonical_chunk_stream(
                 continue
             yield normalize_item_chunk(chunk, upc_col, desc_col, units_col, price_col,
                                         implied_units, implied_dollars,
-                                        quantity_type, weight_col, weight_uom, weight_uom_col)
+                                        quantity_type, weight_col, weight_uom, weight_uom_col,
+                                        numeric_config=numeric_config)
         elif level == "upc":
             if upc_col not in chunk.columns:
                 logger.warning("Skipping chunk: column '%s' not found", upc_col)
@@ -633,7 +604,8 @@ def canonical_chunk_stream(
                 continue
             yield normalize_upc_chunk(chunk, upc_col, units_col, price_col,
                                        implied_units, implied_dollars,
-                                       quantity_type, weight_col, weight_uom, weight_uom_col)
+                                       quantity_type, weight_col, weight_uom, weight_uom_col,
+                                       numeric_config=numeric_config)
         del chunk
 
 

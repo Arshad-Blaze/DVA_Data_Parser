@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Dict, Any, Optional
 
+from dav_tool._numeric import NumericParsingConfig
+
 
 class OutputMode(str, Enum):
     """Determines which downstream stages execute after aggregation.
@@ -57,6 +59,9 @@ class ParseOptions:
     multiline_record_types: Optional[List[str]] = None
     multiline_delimiter: str = "|"
 
+    # Numeric parsing configuration
+    numeric_config: Optional[NumericParsingConfig] = None
+
     @classmethod
     def from_context(cls, ctx) -> "ParseOptions":
         """Build ParseOptions from a ProcessingContext."""
@@ -76,6 +81,7 @@ class ParseOptions:
             trailer_layout=ctx.trailer_layout,
             multiline_record_types=ctx.ml_record_types,
             multiline_delimiter=ctx.ml_delimiter or "|",
+            numeric_config=getattr(ctx, "numeric_config", None),
         )
 
 

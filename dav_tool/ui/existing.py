@@ -998,8 +998,11 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
     try:
         discovery = detect_file(file_paths, source=source)
         if discovery.error:
-            st.error(f"Detection failed for {side_label}: {discovery.error}")
-            return False
+            if discovery.file_type == "fixed":
+                st.warning(f"Fixed-width file detected ({side_label}). Define column positions below.")
+            else:
+                st.error(f"Detection failed for {side_label}: {discovery.error}")
+                return False
 
         # Store discovery result on the side context
         side_ctx.discovery = discovery
@@ -1030,6 +1033,10 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
             if fw_layout is not None:
                 side_ctx.layout = fw_layout
                 discovery.layout = fw_layout
+                # Set meaningful schema from layout field names
+                layout_fields = [c["field"] for c in fw_layout]
+                side_ctx.columns = layout_fields
+                side_ctx.schema = layout_fields
                 log_phase(f"Detection Completed — {side_label}: fixed-width with layout")
                 return True
         elif discovery.file_type == "excel":

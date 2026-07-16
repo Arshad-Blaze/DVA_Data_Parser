@@ -1,11 +1,15 @@
 import json
+import logging
 import os
 from dataclasses import dataclass, asdict, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+logger = logging.getLogger(__name__)
+
 import polars as pl
 
+from dav_tool._numeric import NumericParsingConfig
 from dav_tool._parsers import load_layout, preview_flattened_multiline, preview_flattened_multiline_fixed
 from dav_tool.processing_context import ProcessingContext
 
@@ -209,6 +213,7 @@ class FormatConfig:
 
     validation_config: ValidationConfig = field(default_factory=ValidationConfig)
     output_config: OutputConfig = field(default_factory=OutputConfig)
+    numeric_config: Optional[Dict] = None
     locked: bool = False
     _completed_sections: set = field(default_factory=set)
 
@@ -308,6 +313,12 @@ def apply_format_config(
     ctx.weight_uom_col = config.weight_uom_col
     ctx.resolution_rule = config.resolution_rule
 
+    if config.numeric_config:
+        try:
+            ctx.numeric_config = NumericParsingConfig(**config.numeric_config)
+        except Exception:
+            logger.warning("Failed to restore numeric_config from config dict")
+
     if config.canonical_schema:
         ctx.schema = config.canonical_schema
     if config.physical_schema:
@@ -384,6 +395,9 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
     if ctx.price_col:
         mapping["price"] = ctx.price_col
 
+    nc = getattr(ctx, 'numeric_config', None)
+    numeric_cfg = asdict(nc) if nc is not None else None
+
     cfg = FormatConfig(
         name="",
         file_type=ctx.file_type,
@@ -409,6 +423,7 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
         weight_uom=getattr(ctx, 'weight_uom', 'lb'),
         weight_uom_col=getattr(ctx, 'weight_uom_col', None),
         resolution_rule=getattr(ctx, 'resolution_rule', 'units_preferred'),
+        numeric_config=numeric_cfg,
     )
     cfg.suggested_mapping = mapping or None
     return cfg

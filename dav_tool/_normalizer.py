@@ -1,7 +1,11 @@
 import polars as pl
 from typing import List, Optional
 
-from dav_tool._parsers import safe_numeric
+from dav_tool._numeric import (
+    NumericParsingConfig,
+    numeric_parse_expr,
+    safe_numeric,
+)
 
 
 def apply_column_names(df: pl.DataFrame, column_names: Optional[List[str]] = None) -> pl.DataFrame:
@@ -41,19 +45,20 @@ def _effective_qty_expr(
     quantity_type: str = "units",
     weight_uom_col: Optional[str] = None,
     weight_uom: str = "lb",
+    numeric_config: Optional[NumericParsingConfig] = None,
 ) -> pl.Expr:
     """Return the effective quantity expression based on quantity type."""
     if quantity_type == "weight" and weight_col:
-        qty = safe_numeric(weight_col)
+        qty = numeric_parse_expr(weight_col, numeric_config)
         return _apply_uom_conversion(qty, weight_uom_col, weight_uom)
     if quantity_type == "mixed":
-        units_expr = safe_numeric(units_col)
+        units_expr = numeric_parse_expr(units_col, numeric_config)
         if weight_col:
-            weight_expr = safe_numeric(weight_col)
+            weight_expr = numeric_parse_expr(weight_col, numeric_config)
             weight_expr = _apply_uom_conversion(weight_expr, weight_uom_col, weight_uom)
             return pl.when(weight_expr.is_not_null() & (weight_expr != 0)).then(weight_expr).otherwise(units_expr)
         return units_expr
-    return safe_numeric(units_col)
+    return numeric_parse_expr(units_col, numeric_config)
 
 
 def store_normalize_exprs(
@@ -64,9 +69,10 @@ def store_normalize_exprs(
     weight_col: Optional[str] = None,
     weight_uom: str = "lb",
     weight_uom_col: Optional[str] = None,
+    numeric_config: Optional[NumericParsingConfig] = None,
 ) -> List[pl.Expr]:
-    u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom)
-    d = safe_numeric(price_col)
+    u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config)
+    d = numeric_parse_expr(price_col, numeric_config)
     if implied_units:
         u = u / 100
     if implied_dollars:
@@ -88,6 +94,7 @@ def normalize_store_chunk(
     weight_col: Optional[str] = None,
     weight_uom: str = "lb",
     weight_uom_col: Optional[str] = None,
+    numeric_config: Optional[NumericParsingConfig] = None,
 ) -> pl.DataFrame:
     qty_col = weight_col if quantity_type == "weight" and weight_col else units_col
     c = chunk.select([
@@ -95,8 +102,8 @@ def normalize_store_chunk(
         pl.col(qty_col),
         pl.col(price_col),
     ])
-    u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom)
-    d = safe_numeric(price_col)
+    u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config)
+    d = numeric_parse_expr(price_col, numeric_config)
     if implied_units:
         u = u / 100
     if implied_dollars:
@@ -113,9 +120,10 @@ def item_normalize_exprs(
     weight_col: Optional[str] = None,
     weight_uom: str = "lb",
     weight_uom_col: Optional[str] = None,
+    numeric_config: Optional[NumericParsingConfig] = None,
 ) -> List[pl.Expr]:
-    u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom)
-    d = safe_numeric(dollars_col)
+    u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config)
+    d = numeric_parse_expr(dollars_col, numeric_config)
     if implied_units:
         u = u / 100
     if implied_dollars:
@@ -135,6 +143,7 @@ def normalize_item_chunk(
     weight_col: Optional[str] = None,
     weight_uom: str = "lb",
     weight_uom_col: Optional[str] = None,
+    numeric_config: Optional[NumericParsingConfig] = None,
 ) -> pl.DataFrame:
     qty_col = weight_col if quantity_type == "weight" and weight_col else units_col
     c = chunk.select([
@@ -146,8 +155,8 @@ def normalize_item_chunk(
     c = c.with_columns([
         pl.col("UPC_CODE").cast(pl.Utf8).str.strip_chars(),
         pl.col("PRODUCT_DESCRIPTION").cast(pl.Utf8).str.strip_chars().fill_null(""),
-        _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom).alias("UNITS_SOLD"),
-        safe_numeric(dollars_col).alias("TOTAL_DOLLARS"),
+        _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config).alias("UNITS_SOLD"),
+        numeric_parse_expr(dollars_col, numeric_config).alias("TOTAL_DOLLARS"),
     ])
     if implied_units:
         c = c.with_columns(pl.col("UNITS_SOLD") / 100)
@@ -163,9 +172,10 @@ def upc_normalize_exprs(
     weight_col: Optional[str] = None,
     weight_uom: str = "lb",
     weight_uom_col: Optional[str] = None,
+    numeric_config: Optional[NumericParsingConfig] = None,
 ) -> List[pl.Expr]:
-    u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom)
-    d = safe_numeric(dollars_col)
+    u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config)
+    d = numeric_parse_expr(dollars_col, numeric_config)
     if implied_units:
         u = u / 100
     if implied_dollars:
@@ -184,6 +194,7 @@ def normalize_upc_chunk(
     weight_col: Optional[str] = None,
     weight_uom: str = "lb",
     weight_uom_col: Optional[str] = None,
+    numeric_config: Optional[NumericParsingConfig] = None,
 ) -> pl.DataFrame:
     qty_col = weight_col if quantity_type == "weight" and weight_col else units_col
     c = chunk.select([
@@ -193,8 +204,8 @@ def normalize_upc_chunk(
     ])
     c = c.with_columns([
         pl.col("UPC").cast(pl.Utf8).str.strip_chars(),
-        _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom).alias("UNITS_SOLD"),
-        safe_numeric(dollars_col).alias("TOTAL_DOLLARS"),
+        _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config).alias("UNITS_SOLD"),
+        numeric_parse_expr(dollars_col, numeric_config).alias("TOTAL_DOLLARS"),
     ])
     if implied_units:
         c = c.with_columns(pl.col("UNITS_SOLD") / 100)

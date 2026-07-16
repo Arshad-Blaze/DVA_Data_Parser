@@ -45,10 +45,12 @@ def _layout_to_rows(layout: Optional[List[Dict]]) -> List[dict]:
         return []
     rows = []
     for col in layout:
+        start = col.get("from", col.get("start", 0) + 1)
+        length = col.get("length", col.get("end", 0) - col.get("start", 0))
         rows.append({
             "field": col.get("field", ""),
-            "from": col.get("from", col.get("start", 0) + 1),
-            "length": col.get("length", col.get("end", 0) - col.get("start", 0)),
+            "from": start,
+            "length": length,
             "type": _normalize_type(col.get("type", "text")),
             "format": col.get("format", ""),
             "nullable": col.get("nullable", False),
@@ -140,6 +142,24 @@ def _check_overlaps(layout: List[Dict]) -> List[str]:
     return errors
 
 
+def _build_ruler(max_len: int) -> str:
+    """Build a character position ruler aligned with raw data.
+
+    Produces two lines:
+      0         1         2         3
+      0123456789012345678901234567890123456789
+    """
+    tens = []
+    digits = []
+    for i in range(max_len):
+        if i % 10 == 0:
+            tens.append(str((i // 10) % 10))
+        else:
+            tens.append(" ")
+        digits.append(str(i % 10))
+    return "".join(tens) + "\n" + "".join(digits)
+
+
 def _preview_extracted_columns(
     raw_lines: List[str],
     layout: List[Dict],
@@ -169,15 +189,23 @@ def render_layout_builder(
         st.session_state[SESSION_KEY] = {}
     state = st.session_state[SESSION_KEY]
 
-    st.markdown("#### Raw Preview")
+    # === RAW Preview with Character Ruler ===
+    st.markdown("#### RAW Preview (unparsed lines)")
+    st.caption("Character ruler above raw lines helps identify column boundaries.")
+
     raw_lines = preview_raw_lines(file_paths, n_rows=10, source=source)
     if raw_lines:
-        st.code("\n".join(raw_lines), language="text")
+        max_len = min(max(len(l) for l in raw_lines), 120)
+        ruler = _build_ruler(max_len)
+        preview_text = ruler + "\n" + "\n".join(raw_lines)
+        st.code(preview_text, language="text")
     else:
         st.info("No raw data available for preview.")
+        return None
 
+    # === Layout Builder ===
     st.markdown("#### Layout Builder")
-    st.caption("Define each column's position in the fixed-width record.")
+    st.caption("Define each column's position in the fixed-width record. End Position is calculated automatically.")
 
     if "layout_rows" not in state:
         rows = _layout_to_rows(existing_layout)
@@ -217,12 +245,16 @@ def render_layout_builder(
         except Exception as e:
             st.error(f"Failed to parse uploaded CSV: {e}")
 
+    # Build editor data with auto-calculated End Position
     edited_df_data = []
     for r in rows:
+        start = r.get("from", 1)
+        length = r.get("length", 1)
         edited_df_data.append({
             "Column Name": r.get("field", ""),
-            "Start": r.get("from", 1),
-            "Length": r.get("length", 1),
+            "Start": start,
+            "End": start + length - 1,
+            "Length": length,
             "Type": _normalize_type(r.get("type", "text")),
             "Format": r.get("format", ""),
             "Nullable": r.get("nullable", False),
@@ -230,15 +262,14 @@ def render_layout_builder(
         })
     if not edited_df_data:
         edited_df_data.append({
-            "Column Name": "", "Start": 1, "Length": 10,
+            "Column Name": "", "Start": 1, "End": 10, "Length": 10,
             "Type": "text", "Format": "", "Nullable": False, "Description": "",
         })
-
-    edited_df = pl.DataFrame(edited_df_data)
 
     column_config = {
         "Column Name": st.column_config.TextColumn("Column Name", width="medium", required=True),
         "Start": st.column_config.NumberColumn("Start", min_value=1, step=1, required=True),
+        "End": st.column_config.NumberColumn("End", disabled=True, width="small"),
         "Length": st.column_config.NumberColumn("Length", min_value=1, step=1, required=True),
         "Type": st.column_config.SelectColumn("Type", options=DEFAULT_TYPES, required=True),
         "Format": st.column_config.TextColumn("Format", width="small"),
@@ -247,19 +278,21 @@ def render_layout_builder(
     }
 
     edited = st.data_editor(
-        edited_df.to_pandas(),
+        edited_df_data,
         column_config=column_config,
         num_rows="dynamic",
         use_container_width=True,
         key=f"{key_prefix}_layout_editor",
     )
 
+    # Recalculate End Position from edited data
+    layout_preview = _rows_to_layout(edited.to_dict("records"))
+
     col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
 
     with col1:
         if st.button("Validate Layout", key=f"{key_prefix}_validate_btn", use_container_width=True):
-            layout = _rows_to_layout(edited.to_dict("records"))
-            errors = _validate_layout(layout)
+            errors = _validate_layout(layout_preview)
             if errors:
                 for err in errors:
                     st.error(err)
@@ -275,7 +308,7 @@ def render_layout_builder(
 
     with col3:
         csv_data = None
-        layout_for_export = _rows_to_layout(edited.to_dict("records"))
+        layout_for_export = layout_preview
         if layout_for_export:
             csv_data = _layout_to_csv(layout_for_export)
         st.download_button(
@@ -290,19 +323,36 @@ def render_layout_builder(
 
     with col4:
         if st.button("Preview Extracted Columns", key=f"{key_prefix}_preview_btn", use_container_width=True):
-            layout_for_preview = _rows_to_layout(edited.to_dict("records"))
-            if layout_for_preview and raw_lines:
-                preview_df = _preview_extracted_columns(raw_lines, layout_for_preview, max_rows=10)
+            if layout_preview and raw_lines:
+                preview_df = _preview_extracted_columns(raw_lines, layout_preview, max_rows=10)
                 if not preview_df.is_empty():
-                    st.dataframe(preview_df.to_pandas(), use_container_width=True)
+                    st.session_state[f"{key_prefix}_last_preview"] = preview_df.to_pandas()
                 else:
-                    st.info("No data could be extracted with current layout.")
-            else:
-                st.info("Define at least one column and ensure raw data is available.")
+                    st.session_state[f"{key_prefix}_last_preview"] = None
+
+    # Show last generated preview if available
+    last_pv = st.session_state.get(f"{key_prefix}_last_preview")
+    if last_pv is not None:
+        st.markdown("**Preview Extracted Columns**")
+        st.dataframe(last_pv, use_container_width=True)
+
+    # Auto-show preview when layout changes (always show if we have valid layout)
+    if layout_preview and raw_lines:
+        auto_preview = _preview_extracted_columns(raw_lines, layout_preview, max_rows=5)
+        if not auto_preview.is_empty():
+            st.markdown("**Live Preview** (top 5 rows)")
+            st.dataframe(auto_preview.to_pandas(), use_container_width=True)
 
     st.divider()
 
-    confirm_disabled = False
+    # Inline validation display
+    validation_errors = _validate_layout(layout_preview)
+    if validation_errors:
+        with st.expander(f"Validation Issues ({len(validation_errors)})", expanded=True):
+            for err in validation_errors:
+                st.error(err)
+
+    confirm_disabled = bool(validation_errors)
     layout_confirmed = st.button(
         "Confirm Layout \u2192",
         type="primary",
@@ -312,13 +362,17 @@ def render_layout_builder(
     )
 
     if layout_confirmed:
-        layout = _rows_to_layout(edited.to_dict("records"))
-        errors = _validate_layout(layout)
-        if errors:
-            for err in errors:
-                st.error(err)
-            return None
+        layout = layout_preview
         state["layout_rows"] = edited.to_dict("records")
         return layout
 
     return None
+
+
+def get_canonical_schema_from_layout(layout: List[Dict]) -> List[str]:
+    """Extract meaningful canonical column names from a confirmed layout.
+
+    Uses the field names defined by the user during layout building,
+    avoiding generic COL001/COL002 naming.
+    """
+    return [col["field"] for col in layout if col.get("field", "").strip()]

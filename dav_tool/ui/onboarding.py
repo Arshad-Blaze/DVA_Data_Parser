@@ -146,6 +146,8 @@ def _phase1_discovery(ctx):
             start_line = discovery.start_line
             record_type = discovery.record_type
             cols = discovery.columns or []
+            if file_type == "fixed" and layout_list and not cols:
+                cols = [c["field"] for c in layout_list]
             ctx.discovery = discovery
             log_phase("Discovery consumed from Connection Manager — no re-detection")
         elif prod_txt:
@@ -225,8 +227,11 @@ def _phase1_discovery(ctx):
                     log_phase("Detection Started")
                     discovery = detect_file(file_paths, source=_onb_source)
                     if discovery.error:
-                        st.error(f"Detection failed: {discovery.error}")
-                        st.stop()
+                        if discovery.file_type == "fixed":
+                            st.warning("Fixed-width file detected. Use the Layout Builder below to define column positions.")
+                        else:
+                            st.error(f"Detection failed: {discovery.error}")
+                            st.stop()
 
                     # Store discovery in session for downstream
                     ctx.discovery = discovery
@@ -283,6 +288,8 @@ def _phase1_discovery(ctx):
                             cols = discovery_cols
                         else:
                             cols = []
+                    elif file_type == "fixed" and layout_list:
+                        cols = [c["field"] for c in layout_list]
                     elif file_type and file_paths:
                         if discovery_cols:
                             cols = discovery_cols

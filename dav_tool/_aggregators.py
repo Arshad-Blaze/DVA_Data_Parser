@@ -10,7 +10,7 @@ No validation logic here. No UI rendering.
 """
 import gc
 import logging
-from typing import List, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import polars as pl
 
@@ -49,6 +49,7 @@ def aggregate(
     weight_col: Optional[str] = None,
     weight_uom: str = "lb",
     weight_uom_col: Optional[str] = None,
+    numeric_config: Any = None,
 ) -> pl.DataFrame:
     """Config-driven aggregation at one of three levels.
 
@@ -70,6 +71,7 @@ def aggregate(
         implied_units=implied_units, implied_dollars=implied_dollars,
         quantity_type=quantity_type, weight_col=weight_col,
         weight_uom=weight_uom, weight_uom_col=weight_uom_col,
+        numeric_config=numeric_config,
     )
 
     if level == "store":
@@ -119,6 +121,7 @@ def aggregate_with_options(
         weight_col=mapping.weight_col,
         weight_uom=mapping.weight_uom,
         weight_uom_col=mapping.weight_uom_col,
+        numeric_config=getattr(parse_opts, 'numeric_config', None),
     )
 
 
