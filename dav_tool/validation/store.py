@@ -9,7 +9,6 @@ This module only wires them together and accepts pre-computed summaries.
 import logging
 import time
 import polars as pl
-from dav_tool._aggregators import stream_store_aggregate
 from dav_tool.calculations import store_diffs
 from dav_tool.operations.aggregate import AggregateOperation, AggregateOptions
 
@@ -66,50 +65,31 @@ def storelevelvalidation(
 ):
     """Orchestrate store-level validation.
 
-    Accepts optional pre-computed summaries. When not provided,
-    delegates to the Aggregation Engine (``stream_store_aggregate``).
+    Requires pre-computed canonical summaries (``prod_summary``, ``test_summary``)
+    with canonical column names (``STORE_NUMBER``, ``Units``, ``Totalprice``).
+    The Operation Layer guarantees these are always provided — no fallback
+    aggregation is performed here.
+
+    Format-specific parameters (``prod_type``, ``prod_delim``, ``layout``, etc.)
+    are UNUSED when pre-computed summaries are provided.  They exist only for
+    backward compatibility with older callers and will be removed in a future
+    RC.  All comparison logic uses canonical column names only.
+
     The comparison is computed by the Calculation Engine (``store_diffs``).
     """
     start_time = time.time()
 
     if prod_summary is None:
-        from dav_tool._aggregators import stream_store_aggregate
-        prod_summary = stream_store_aggregate(
-            prod_paths, prod_type,
-            prod_store_col, prod_units_col, prod_price_col,
-            delimiter=prod_delim, layout=prod_layout,
-            price_type=price_type_bau,
-            implied_dollars=isimplied_dollars_prod,
-            implied_units=isimplied_units_prod,
-            start_line=start_line, record_type=record_type,
-            multiline_record_types=multiline_record_types,
-            multiline_delimiter=multiline_delimiter,
-            column_names=column_names,
-            header_prefix=header_prefix,
-            header_layout=header_layout,
-            trailer_prefix=trailer_prefix,
-            trailer_layout=trailer_layout,
-            source=aggregation_source,
+        raise ValueError(
+            "storelevelvalidation requires prod_summary — "
+            "pre-computed by the Operation Layer. "
+            "Validation must not perform aggregation."
         )
-
     if test_summary is None:
-        from dav_tool._aggregators import stream_store_aggregate
-        test_summary = stream_store_aggregate(
-            test_paths, test_type,
-            test_store_col, test_units_col, test_price_col,
-            delimiter=test_delim, layout=test_layout,
-            price_type=price_type_test,
-            implied_dollars=isimplied_dollars_test,
-            implied_units=isimplied_units_test,
-            start_line=start_line, record_type=record_type,
-            multiline_record_types=multiline_record_types,
-            multiline_delimiter=multiline_delimiter,
-            column_names=column_names,
-            header_prefix=header_prefix,
-            header_layout=header_layout,
-            trailer_prefix=trailer_prefix,
-            trailer_layout=trailer_layout,
-            source=aggregation_source,
+        raise ValueError(
+            "storelevelvalidation requires test_summary — "
+            "pre-computed by the Operation Layer. "
+            "Validation must not perform aggregation."
         )
 
     result = _compare_store_summaries(prod_summary, test_summary)

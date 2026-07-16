@@ -92,7 +92,17 @@ def run_single(size_mb: int, seed: int = 42):
     )
     results.append(r)
 
-    # --- Validation (same data for prod + test) ---
+    # --- Pre-compute summaries for validation (Operation Layer's job) ---
+    _prod_summary = stream_store_aggregate(
+        paths, "delimited", "Store", "Units", "Price",
+        delimiter=",", price_type="Total Price",
+    )
+    _test_summary = stream_store_aggregate(
+        paths, "delimited", "Store", "Units", "Price",
+        delimiter=",", price_type="Total Price",
+    )
+
+    # --- Validation (using pre-computed summaries only) ---
     r = benchmark(
         "storelevelvalidation",
         storelevelvalidation,
@@ -117,6 +127,8 @@ def run_single(size_mb: int, seed: int = 42):
         isimplied_units_prod=False,
         isimplied_dollars_test=False,
         isimplied_units_test=False,
+        prod_summary=_prod_summary,
+        test_summary=_test_summary,
     )
     results.append(r)
 

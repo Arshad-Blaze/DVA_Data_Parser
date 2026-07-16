@@ -7,7 +7,7 @@ from typing import List, Dict, Optional, Tuple
 import polars as pl
 import streamlit as st
 
-from dav_tool._parsers import preview_raw_lines
+from dav_tool.workflow.preview import preview_raw_lines
 from dav_tool.datasource.base import IDataSource
 
 logger = logging.getLogger(__name__)

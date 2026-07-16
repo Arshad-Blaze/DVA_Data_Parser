@@ -92,13 +92,15 @@ class ColumnMapping:
     Maps user-selected column names to the canonical roles
     used by the aggregation and calculation engines.
 
-    The ``quantity_type`` field selects the effective quantity mode:
-    - ``"units"`` (default): read quantity from ``units`` col
-    - ``"weight"``: read quantity from ``weight_col``, convert via UOM
-    - ``"mixed"``: coalesce ``weight_col`` and ``units_col``
+    ``quantity_strategy`` replaces the older ``quantity_type``:
+    - ``"auto"`` (default): weight takes precedence, units fallback
+    - ``"prefer_weight"``: same as auto (explicit)
+    - ``"prefer_units"``: units take precedence, weight fallback
+    - ``"weight_only"``: only weight, ignore units
+    - ``"units_only"``: only units, ignore weight
 
     When ``weight_uom_col`` is set, per-row UOM values are read from
-    that column and converted to a canonical UOM before aggregation.
+    that column and converted to pounds before aggregation.
     """
     store: str
     upc: str
@@ -112,10 +114,16 @@ class ColumnMapping:
     weight_col: Optional[str] = None
     weight_uom: str = "lb"
     weight_uom_col: Optional[str] = None
+    quantity_strategy: str = "auto"
+    weight_qty_col: Optional[str] = None
+    units_uom: Optional[str] = None
 
     @classmethod
     def from_context(cls, ctx) -> "ColumnMapping":
         """Build ColumnMapping from a ProcessingContext."""
+        strategy = getattr(ctx, "quantity_strategy", "auto")
+        weight_qty_col = getattr(ctx, "weight_qty_col", None) or getattr(ctx, "weight_col", None)
+        units_uom = getattr(ctx, "units_uom", None)
         return cls(
             store=ctx.store_col or "",
             upc=ctx.upc_col or "",
@@ -129,20 +137,20 @@ class ColumnMapping:
             weight_col=getattr(ctx, "weight_col", None),
             weight_uom=getattr(ctx, "weight_uom", "lb"),
             weight_uom_col=getattr(ctx, "weight_uom_col", None),
+            quantity_strategy=strategy,
+            weight_qty_col=weight_qty_col,
+            units_uom=units_uom,
         )
 
 
 @dataclass(frozen=True)
 class CanonicalContext:
-    """The single input contract for the Processing Layer.
+    """Internal construction contract — consolidated into ``CanonicalDataset``.
 
-    Bundles everything the processing layer needs:
-    - File parsing details (ParseOptions) — how to read the raw data
-    - Column mapping (ColumnMapping) — which columns map to business concepts
-    - Canonical schema (list of column names) — the canonical column names
-
-    The processing layer NEVER references physical schema names directly.
-    All column references use canonical schema names.
+    RC2: Downstream layers should prefer ``CanonicalDataset``
+    (``dav_tool.workflow.canonical``) as the single input contract.
+    This class remains as a construction helper for the Operation Layer
+    and is not consumed directly by Processing.
     """
     parse: ParseOptions
     mapping: ColumnMapping
@@ -162,6 +170,13 @@ class CanonicalContext:
             parse=parse,
             mapping=mapping,
             canonical_schema=list(schema),
+        )
+
+    def to_dataset(self, file_paths, level: str, source=None) -> "CanonicalDataset":
+        """Convert to a ``CanonicalDataset`` for Processing consumption."""
+        from dav_tool.workflow.canonical import CanonicalDataset
+        return CanonicalDataset.from_parse_options(
+            file_paths, self.parse, self.mapping, level, source=source,
         )
 
 

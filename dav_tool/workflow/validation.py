@@ -74,7 +74,10 @@ def run_onboarding_validation(
     if validation_opts.run_file_review:
         try:
             fr, elapsed = _generate_single_file_review(
-                file_paths, parse_opts, mapping, source=source,
+                file_paths, parse_opts, mapping,
+                precomputed_store_agg=store_agg,
+                precomputed_upc_summary=item_agg,
+                source=source,
             )
             result.file_review = fr
             metrics.record("report", "generate_file_review", elapsed)
@@ -279,8 +282,14 @@ def _run_item_validation(
 
 def _generate_single_file_review(
     file_paths, parse_opts, mapping, source=None,
+    precomputed_store_agg=None, precomputed_upc_summary=None,
 ):
-    """Generate file review for a single side."""
+    """Generate file review for a single side.
+
+    Accepts pre-computed summaries to avoid layer bypass (re-parsing at
+    the report layer).  The caller (``run_onboarding_validation``) already
+    has these from the Operation Layer.
+    """
     t0 = time.perf_counter()
     fr = generate_file_review(
         file_paths, parse_opts.file_type,
@@ -299,6 +308,8 @@ def _generate_single_file_review(
         header_layout=parse_opts.header_layout,
         trailer_prefix=parse_opts.trailer_prefix,
         trailer_layout=parse_opts.trailer_layout,
+        precomputed_store_agg=precomputed_store_agg,
+        precomputed_upc_summary=precomputed_upc_summary,
         source=source,
         quantity_type=mapping.quantity_type,
         weight_col=mapping.weight_col,

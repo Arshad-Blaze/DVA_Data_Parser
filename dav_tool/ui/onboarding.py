@@ -1,12 +1,10 @@
-import gc
 import logging
 import os
-import concurrent.futures
 import streamlit as st
 
 logger = logging.getLogger(__name__)
 from dav_tool.workflow.preview import (
-    preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
+    preview_flattened_multiline, preview_flattened_multiline_fixed,
     load_layout,
 )
 from dav_tool.ui.layout_builder import render_layout_builder
@@ -20,6 +18,7 @@ from dav_tool.ui.helpers import (
     display_execution_summary, display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
     render_phase_progress, validate_config_before_processing, cleanup_dataframes,
+    cached_preview_raw, cached_preview_raw_lines,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
@@ -47,14 +46,9 @@ def _get_validation_config(ctx):
 def _reset_phase():
     old = st.session_state.get("onb_ctx")
     if old is not None:
-        for attr_name in ["store_agg", "item_agg", "upc_summary", "file_review",
-                          "store_df", "comparison_df", "summary_df",
-                          "fr_prod", "fr_test"]:
-            df = getattr(old, attr_name, None)
-            if df is not None:
-                del df
+        from dav_tool.workflow.flush import flush
+        flush(metrics=old.metrics, clear_session=False, ctx_objects=[old])
         del old
-        gc.collect()
     st.session_state.onb_ctx = ProcessingContext()
     st.session_state.pop("onb_cfg_accepted", None)
     keys = list(st.session_state.keys())
@@ -217,12 +211,12 @@ def _phase1_discovery(ctx):
                                 source=_onb_source,
                             )
                             st.subheader("Data Preview")
-                            df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
+                            df_preview = cached_preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
                                                       n_rows=10, start_line=start_line, record_type=record_type,
                                                       source=_onb_source)
                             if not df_preview.is_empty():
                                 st.dataframe(df_preview.to_pandas().head(10))
-                else:
+                elif ctx.discovery is None or not ctx.discovery.file_type:
                     # Run detection once via the Discovery service
                     log_phase("Detection Started")
                     discovery = detect_file(file_paths, source=_onb_source)
@@ -231,7 +225,7 @@ def _phase1_discovery(ctx):
                             st.warning("Fixed-width file detected. Use the Layout Builder below to define column positions.")
                         else:
                             st.error(f"Detection failed: {discovery.error}")
-                            st.stop()
+                            return
 
                     # Store discovery in session for downstream
                     ctx.discovery = discovery
@@ -259,7 +253,7 @@ def _phase1_discovery(ctx):
                                 layout_list = fw_layout
                                 discovery.layout = layout_list
 
-                if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0], source=_onb_source):
+                if file_type == "fixed" and layout_list and file_paths:
                     st.subheader("Fixed Width Settings")
                     colA, colB = st.columns(2)
                     with colA:
@@ -269,10 +263,10 @@ def _phase1_discovery(ctx):
 
                 if file_type and file_type != "multiline" and file_paths and not getattr(ctx, '_config_applied', False):
                     st.subheader("Data Preview")
-                    df_preview = preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
+                    df_preview = cached_preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
                                               n_rows=10, start_line=start_line, record_type=record_type,
                                               source=_onb_source)
-                    if not df_preview.is_empty():
+                if not df_preview.is_empty():
                         st.dataframe(df_preview.to_pandas().head(10))
 
                 if file_type and not getattr(ctx, '_config_applied', False):
@@ -304,13 +298,13 @@ def _phase1_discovery(ctx):
         if not parsing_ready:
             if file_type is None and not cm_has_result:
                 st.info("File detection did not complete. Ensure a valid file path is selected.")
-                st.stop()
+                return
             elif file_type == "multiline" and not ctx.ml_flattened:
                 st.info("Multiline file detected. Complete flattening above to proceed.")
-                st.stop()
+                return
             elif not cm_has_result:
                 st.info("Column detection did not complete. Check file format and try again.")
-                st.stop()
+                return
 
         if parsing_ready and ctx.phase == 0:
             ctx.file_paths = file_paths
@@ -411,31 +405,31 @@ def _phase4_processing(ctx):
     rt = ctx.record_type
     cols = ctx.schema or ctx.columns
 
-    with st.expander("Store List (optional)", expanded=False):
-        storelist_path = st.text_input("Store List File Path")
-        storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"])
-
-    st.subheader("Column Selection")
-    smart_idx = smart_column_indices(cols)
-    prod_store_col = st.selectbox("Retailer Store Column", cols, index=smart_idx.get("store", (0,))[0])
-    prod_upc_col = st.selectbox("UPC Column", cols, index=smart_idx.get("upc", (0,))[0])
-    prod_desc_col = st.selectbox("Description Column", cols, index=smart_idx.get("description", (0,))[0])
-    prod_units_col = st.selectbox("Units Column", cols, index=smart_idx.get("units", (0,))[0])
-    prod_price_col = st.selectbox("Price Column", cols, index=smart_idx.get("price", (0,))[0])
-
-    storelist_store_col = None
-    if storelist_path:
-        storelist_df = load_storelist(storelist_path, storelist_delim)
-        ext = os.path.splitext(storelist_path)[-1].lower()
-        if ext not in [".xlsx", ".xls"]:
-            storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"],
-                                            key="storelist_delim_sel")
-            storelist_store_col = st.selectbox("Storelist Store Column", storelist_df.columns)
-        else:
-            st.dataframe(storelist_df.head(5))
-            storelist_store_col = st.selectbox("Storelist Store Column", storelist_df.columns)
-
     if not ctx.mapping_confirmed:
+        with st.expander("Store List (optional)", expanded=False):
+            storelist_path = st.text_input("Store List File Path")
+            storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"])
+
+        st.subheader("Column Selection")
+        smart_idx = smart_column_indices(cols)
+        prod_store_col = st.selectbox("Retailer Store Column", cols, key="onb_proc_store", index=smart_idx.get("store", (0,))[0])
+        prod_upc_col = st.selectbox("UPC Column", cols, key="onb_proc_upc", index=smart_idx.get("upc", (0,))[0])
+        prod_desc_col = st.selectbox("Description Column", cols, key="onb_proc_desc", index=smart_idx.get("description", (0,))[0])
+        prod_units_col = st.selectbox("Units Column", cols, key="onb_proc_units", index=smart_idx.get("units", (0,))[0])
+        prod_price_col = st.selectbox("Price Column", cols, key="onb_proc_price", index=smart_idx.get("price", (0,))[0])
+
+        storelist_store_col = None
+        if storelist_path:
+            storelist_df = load_storelist(storelist_path, storelist_delim)
+            ext = os.path.splitext(storelist_path)[-1].lower()
+            if ext not in [".xlsx", ".xls"]:
+                storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"],
+                                                key="storelist_delim_sel")
+                storelist_store_col = st.selectbox("Storelist Store Column", storelist_df.columns)
+            else:
+                st.dataframe(storelist_df.head(5))
+                storelist_store_col = st.selectbox("Storelist Store Column", storelist_df.columns)
+
         mapping_errors = validate_column_mapping(
             prod_store_col, prod_upc_col, prod_desc_col,
             prod_units_col, prod_price_col,
@@ -470,33 +464,18 @@ def _phase4_processing(ctx):
                 save_format_config(cfg, sp)
                 st.success(f"Config saved to {sp}")
         if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
+            if ctx.store_agg is not None and ctx.item_agg is not None:
+                ctx.phase = PHASE_VALIDATION
+                st.rerun()
             log_phase("Processing Started")
             cleanup_dataframes(ctx)
             print_memory_snapshot("BEFORE AGGREGATION")
             try:
-                from dav_tool.options import ParseOptions, ColumnMapping
-                from dav_tool.workflow.processing import run_store_aggregation, run_item_aggregation
-
-                parse_opts = ParseOptions.from_context(ctx)
-                mapping = ColumnMapping.from_context(ctx)
+                from dav_tool.workflow.orchestration import run_onboarding_processing
 
                 with st.spinner("Aggregating data (Store + Item in parallel)..."):
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-                        futs = [
-                            ex.submit(run_store_aggregation, fp, parse_opts, mapping, source=_onb_source),
-                            ex.submit(run_item_aggregation, fp, parse_opts, mapping, source=_onb_source),
-                        ]
-                        names = ["stream_store_aggregate", "stream_item_aggregate"]
-                        results = []
-                        for i, future in enumerate(futs):
-                            result, elapsed = future.result(timeout=600)
-                            ctx.metrics.record("aggregation", names[i], elapsed)
-                            results.append(result)
+                    run_onboarding_processing(ctx, source=_onb_source)
 
-                    store_agg, item_agg = results
-
-                ctx.store_agg = store_agg
-                ctx.item_agg = item_agg
                 print_memory_snapshot("AFTER AGGREGATION")
                 log_dataframe_summary()
                 cleanup_dataframes(ctx, keep_attrs=["store_agg", "item_agg"])
@@ -639,7 +618,7 @@ def _delimited_ml_flow(file_paths, source=None):
     ctx = st.session_state.onb_ctx
 
     st.subheader("Raw Preview (with record-type prefixes)")
-    raw_preview = preview_raw(file_paths, "multiline", n_rows=10, source=source)
+    raw_preview = cached_preview_raw(file_paths, "multiline", n_rows=10, source=source)
     if not raw_preview.is_empty():
         st.dataframe(raw_preview.to_pandas())
 
@@ -672,7 +651,7 @@ def _hdr_fixed_flow(file_paths, hdr_prefixes, source=None):
     st.warning(f"HDR fixed-width file detected (prefix: {prefix})")
 
     st.subheader("Raw Preview")
-    raw_preview = preview_raw(file_paths, "multiline", n_rows=10, source=source)
+    raw_preview = cached_preview_raw(file_paths, "multiline", n_rows=10, source=source)
     if not raw_preview.is_empty():
         st.dataframe(raw_preview.to_pandas())
 
@@ -791,63 +770,20 @@ def _run_validation(
             "**Options:** Compare Store List, Generate Unique UPC Summary, "
             "or File Review Report."
         )
-        st.stop()
+        return
 
-    from dav_tool.options import ParseOptions, ColumnMapping, ValidationOptions
-    from dav_tool.workflow.validation import run_onboarding_validation
+    from dav_tool.workflow.orchestration import run_onboarding_validation
 
-    parse_opts = ParseOptions(
-        file_type=file_type,
-        delimiter=prod_delim,
-        start_line=start_line,
-        record_type=record_type,
-        layout=layout_list,
-        column_names=ctx.schema,
-        header_prefix=header_prefix,
-        header_layout=header_layout,
-        trailer_prefix=trailer_prefix,
-        trailer_layout=trailer_layout,
-        multiline_record_types=ctx.ml_record_types,
-        multiline_delimiter=ctx.ml_delimiter,
-    )
-    mapping = ColumnMapping(
-        store=prod_store_col,
-        upc=prod_upc_col,
-        description=prod_desc_col,
-        units=prod_units_col,
-        price=prod_price_col,
-    )
-    val_opts = ValidationOptions(
-        run_store_validation=False,
-        run_item_validation=False,
-        run_compare_store_list=run_onb_compare,
-        run_summary=False,
-        run_file_review=run_onb_file_review,
-        store_list_path=storelist_path,
-        store_list_delimiter=storelist_delim,
-        store_list_store_col=storelist_store_col,
-    )
-
-    val_result = run_onboarding_validation(
-        file_paths, parse_opts, mapping,
-        store_agg=ctx.store_agg,
-        item_agg=ctx.item_agg,
-        validation_opts=val_opts,
-        metrics=ctx.metrics,
+    run_onboarding_validation(
+        ctx,
+        file_paths, file_type, prod_delim, layout_list, start_line, record_type,
+        prod_store_col, prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
+        storelist_path, storelist_delim, storelist_store_col,
+        run_onb_compare, run_upc_summary, run_onb_file_review,
+        header_prefix=header_prefix, header_layout=header_layout,
+        trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
         source=source,
     )
-
-    if run_onb_compare:
-        ctx.compare_result = val_result.store_list_result
-
-    if run_upc_summary:
-        upc_summary = ctx.item_agg
-        if upc_summary is not None:
-            ctx.upc_summary = upc_summary
-
-    if run_onb_file_review:
-        ctx.file_review = val_result.file_review
-        log_phase("Reports Generated")
 
     print_memory_snapshot("AFTER VALIDATION")
     log_dataframe_summary()
@@ -862,23 +798,26 @@ def _run_validation(
 
 
 def _display_results():
+    from dav_tool.workflow.output import generate_onboarding_output
+
     ctx = st.session_state.onb_ctx
+    output = generate_onboarding_output(ctx)
+
     with st.expander("Onboarding Validation Results", expanded=True):
-        if ctx.compare_result is not None:
-            res = ctx.compare_result
+        if output.compare_result is not None:
+            res = output.compare_result
             st.write(f"Missing in Storelist: {res['missing_in_test']}")
             st.write(f"Missing in Retailer: {res['missing_in_prod']}")
 
-        if ctx.upc_summary is not None:
-            df = ctx.upc_summary
-            st.dataframe(df.head(100).to_pandas())
-            st.download_button("Download UPC Summary", df.write_csv(), "upc_summary.csv")
+        if output.upc_summary_df is not None:
+            st.dataframe(output.upc_summary_df.head(100).to_pandas())
+            if output.upc_summary_csv:
+                st.download_button("Download UPC Summary", output.upc_summary_csv, "upc_summary.csv")
 
-        if ctx.file_review is not None:
+        if output.file_review_df is not None:
             st.subheader("File Review Report")
-            fr = ctx.file_review
-            if not fr.is_empty():
-                st.dataframe(fr.to_pandas())
-                st.download_button("Download File Review", fr.write_csv(), "file_review.csv")
+            st.dataframe(output.file_review_df.to_pandas())
+            if output.file_review_csv:
+                st.download_button("Download File Review", output.file_review_csv, "file_review.csv")
 
-    display_execution_summary(ctx.metrics)
+    display_execution_summary(output.metrics)

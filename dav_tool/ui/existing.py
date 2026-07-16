@@ -1,13 +1,11 @@
-import gc
 import logging
 import os
-import concurrent.futures
 import streamlit as st
 import polars as pl
 
 logger = logging.getLogger(__name__)
 from dav_tool.workflow.preview import (
-    preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
+    preview_flattened_multiline, preview_flattened_multiline_fixed,
 )
 from dav_tool._observability import (
     log_phase, setup_logging,
@@ -20,6 +18,7 @@ from dav_tool.ui.helpers import (
     clean_path, get_file_list, cached_get_column_names,
     display_execution_summary, display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
+    cached_preview_raw, cached_preview_raw_lines,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext, ExistingContext
@@ -55,22 +54,9 @@ def _get_ex_validation_config(ctx):
 def _reset_phase():
     old = st.session_state.get("ex_ctx")
     if old is not None:
-        for side_attr in ["prod", "test"]:
-            side = getattr(old, side_attr, None)
-            if side is not None:
-                for attr_name in ["store_agg", "item_agg", "upc_summary", "file_review",
-                                  "store_df", "comparison_df", "summary_df",
-                                  "fr_prod", "fr_test"]:
-                    df = getattr(side, attr_name, None)
-                    if df is not None:
-                        del df
-                del side
-        for attr_name in ["store_df", "comparison_df", "summary_df", "fr_prod", "fr_test"]:
-            df = getattr(old, attr_name, None)
-            if df is not None:
-                del df
+        from dav_tool.workflow.flush import flush
+        flush(metrics=old.metrics, clear_session=False, ctx_objects=[old, old.prod, old.test])
         del old
-        gc.collect()
     st.session_state.ex_ctx = ExistingContext()
     keys = list(st.session_state.keys())
     for k in keys:
@@ -541,10 +527,12 @@ def _phase3_config_validation(ctx):
 
     st.markdown("### Step 6: Validate Configuration")
 
+    from dav_tool.format_config import config_from_ctx
+
+    prod_cfg = config_from_ctx(ctx.prod)
+    test_cfg = config_from_ctx(ctx.test)
     prod_ok = True
     test_ok = True
-    prod_cfg = getattr(ctx, '_prod_cfg', None)
-    test_cfg = getattr(ctx, '_test_cfg', None)
 
     st.subheader("BAU Configuration")
     if prod_cfg is not None:
@@ -635,160 +623,114 @@ def _phase4_processing(ctx):
         source=_ex_source,
     )
 
-    st.subheader("Column Mapping")
-    prod_smart = smart_column_indices(prod_cols)
-    test_smart = smart_column_indices(test_cols)
-    c1, c2 = st.columns(2)
-    with c1:
-        prod_store_col = st.selectbox("Store (BAU)", prod_cols, key="store_prod", index=prod_smart.get("store", (0,))[0])
-        prod_units_col = st.selectbox("Units (BAU)", prod_cols, key="units_prod", index=prod_smart.get("units", (0,))[0])
-        prod_price_col = st.selectbox("Price (BAU)", prod_cols, key="price_prod", index=prod_smart.get("price", (0,))[0])
-        prod_upc_col = st.selectbox("UPC (BAU)", prod_cols, key="upc_prod", index=prod_smart.get("upc", (0,))[0])
-        prod_desc_col = st.selectbox("Description (BAU)", prod_cols, key="desc_prod", index=prod_smart.get("description", (0,))[0])
-        price_type_bau = st.radio("Price Type (BAU)", ["Total Price", "Unit Price"], key="price_bau")
-        st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
-        isimplied_dollars_prod = st.checkbox("Implied dollars (BAU)", key="imp_dol_prod")
-        isimplied_units_prod = st.checkbox("Implied units (BAU)", key="imp_unt_prod")
+    if not ctx.prod.mapping_confirmed:
+        st.subheader("Column Mapping")
+        prod_smart = smart_column_indices(prod_cols)
+        test_smart = smart_column_indices(test_cols)
+        c1, c2 = st.columns(2)
+        with c1:
+            prod_store_col = st.selectbox("Store (BAU)", prod_cols, key="store_prod", index=prod_smart.get("store", (0,))[0])
+            prod_units_col = st.selectbox("Units (BAU)", prod_cols, key="units_prod", index=prod_smart.get("units", (0,))[0])
+            prod_price_col = st.selectbox("Price (BAU)", prod_cols, key="price_prod", index=prod_smart.get("price", (0,))[0])
+            prod_upc_col = st.selectbox("UPC (BAU)", prod_cols, key="upc_prod", index=prod_smart.get("upc", (0,))[0])
+            prod_desc_col = st.selectbox("Description (BAU)", prod_cols, key="desc_prod", index=prod_smart.get("description", (0,))[0])
+            price_type_bau = st.radio("Price Type (BAU)", ["Total Price", "Unit Price"], key="price_bau")
+            st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
+            isimplied_dollars_prod = st.checkbox("Implied dollars (BAU)", key="imp_dol_prod")
+            isimplied_units_prod = st.checkbox("Implied units (BAU)", key="imp_unt_prod")
 
-    with c2:
-        test_store_col = st.selectbox("Store (Test)", test_cols, key="store_test", index=test_smart.get("store", (0,))[0])
-        test_units_col = st.selectbox("Units (Test)", test_cols, key="units_test", index=test_smart.get("units", (0,))[0])
-        test_price_col = st.selectbox("Price (Test)", test_cols, key="price_test", index=test_smart.get("price", (0,))[0])
-        test_upc_col = st.selectbox("UPC (Test)", test_cols, key="upc_test", index=test_smart.get("upc", (0,))[0])
-        test_desc_col = st.selectbox("Description (Test)", test_cols, key="desc_test", index=test_smart.get("description", (0,))[0])
-        price_type_test = st.radio("Price Type (Test)", ["Total Price", "Unit Price"], key="price_type_test")
-        st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
-        isimplied_dollars_test = st.checkbox("Implied dollars (Test)", key="imp_dol_test")
-        isimplied_units_test = st.checkbox("Implied units (Test)", key="imp_unt_test")
+        with c2:
+            test_store_col = st.selectbox("Store (Test)", test_cols, key="store_test", index=test_smart.get("store", (0,))[0])
+            test_units_col = st.selectbox("Units (Test)", test_cols, key="units_test", index=test_smart.get("units", (0,))[0])
+            test_price_col = st.selectbox("Price (Test)", test_cols, key="price_test", index=test_smart.get("price", (0,))[0])
+            test_upc_col = st.selectbox("UPC (Test)", test_cols, key="upc_test", index=test_smart.get("upc", (0,))[0])
+            test_desc_col = st.selectbox("Description (Test)", test_cols, key="desc_test", index=test_smart.get("description", (0,))[0])
+            price_type_test = st.radio("Price Type (Test)", ["Total Price", "Unit Price"], key="price_type_test")
+            st.markdown("<small>Implied Decimal</small>", unsafe_allow_html=True)
+            isimplied_dollars_test = st.checkbox("Implied dollars (Test)", key="imp_dol_test")
+            isimplied_units_test = st.checkbox("Implied units (Test)", key="imp_unt_test")
 
-    if ctx.phase == PHASE_PROCESSING:
-        if not ctx.prod.mapping_confirmed:
-            bau_errors = validate_column_mapping(
-                prod_store_col, prod_upc_col, prod_desc_col,
-                prod_units_col, prod_price_col,
+        bau_errors = validate_column_mapping(
+            prod_store_col, prod_upc_col, prod_desc_col,
+            prod_units_col, prod_price_col,
+        )
+        test_errors = validate_column_mapping(
+            test_store_col, test_upc_col, test_desc_col,
+            test_units_col, test_price_col,
+        )
+        all_errors = []
+        if bau_errors:
+            all_errors.append("**BAU side:**")
+            all_errors.extend(bau_errors)
+        if test_errors:
+            all_errors.append("**Test side:**")
+            all_errors.extend(test_errors)
+        if all_errors:
+            for err in all_errors:
+                st.error(err)
+            st.info(
+                "Please fix the column selections above before confirming. "
+                "Each of the 5 required columns must be unique and properly selected for both sides."
             )
-            test_errors = validate_column_mapping(
-                test_store_col, test_upc_col, test_desc_col,
-                test_units_col, test_price_col,
-            )
-            all_errors = []
-            if bau_errors:
-                all_errors.append("**BAU side:**")
-                all_errors.extend(bau_errors)
-            if test_errors:
-                all_errors.append("**Test side:**")
-                all_errors.extend(test_errors)
-            if all_errors:
-                for err in all_errors:
-                    st.error(err)
-                st.info(
-                    "Please fix the column selections above before confirming. "
-                    "Each of the 5 required columns must be unique and properly selected for both sides."
-                )
 
-            if st.button("Confirm Mapping", use_container_width=True, disabled=bool(all_errors)):
-                log_phase("Column Mapping Confirmed")
-                ctx.prod.store_col = prod_store_col
-                ctx.prod.units_col = prod_units_col
-                ctx.prod.price_col = prod_price_col
-                ctx.prod.upc_col = prod_upc_col
-                ctx.prod.desc_col = prod_desc_col
-                ctx.prod.price_type = price_type_bau
-                ctx.prod.implied_dollars = isimplied_dollars_prod
-                ctx.prod.implied_units = isimplied_units_prod
-                ctx.test.store_col = test_store_col
-                ctx.test.units_col = test_units_col
-                ctx.test.price_col = test_price_col
-                ctx.test.upc_col = test_upc_col
-                ctx.test.desc_col = test_desc_col
-                ctx.test.price_type = price_type_test
-                ctx.test.implied_dollars = isimplied_dollars_test
-                ctx.test.implied_units = isimplied_units_test
+        if st.button("Confirm Mapping", use_container_width=True, disabled=bool(all_errors)):
+            log_phase("Column Mapping Confirmed")
+            ctx.prod.store_col = prod_store_col
+            ctx.prod.units_col = prod_units_col
+            ctx.prod.price_col = prod_price_col
+            ctx.prod.upc_col = prod_upc_col
+            ctx.prod.desc_col = prod_desc_col
+            ctx.prod.price_type = price_type_bau
+            ctx.prod.implied_dollars = isimplied_dollars_prod
+            ctx.prod.implied_units = isimplied_units_prod
+            ctx.test.store_col = test_store_col
+            ctx.test.units_col = test_units_col
+            ctx.test.price_col = test_price_col
+            ctx.test.upc_col = test_upc_col
+            ctx.test.desc_col = test_desc_col
+            ctx.test.price_type = price_type_test
+            ctx.test.implied_dollars = isimplied_dollars_test
+            ctx.test.implied_units = isimplied_units_test
 
-                ctx.prod.eff_type = eff_prod_type
-                ctx.test.eff_type = eff_test_type
-                ctx.prod.eff_delimiter = eff_delim_prod
-                ctx.test.eff_delimiter = eff_delim_test
-                ctx.prod.eff_record_type = eff_rt_prod
-                ctx.test.eff_record_type = eff_rt_test
-                ctx.prod.header_prefix = hdr_prefix_prod
-                ctx.test.header_prefix = hdr_prefix_test
-                ctx.prod.header_layout = hdr_header_prod
-                ctx.test.header_layout = hdr_header_test
-                ctx.prod.trailer_prefix = trailer_prefix_prod
-                ctx.test.trailer_prefix = trailer_prefix_test
-                ctx.prod.trailer_layout = trailer_layout_prod
-                ctx.test.trailer_layout = trailer_layout_test
-                ctx.prod.eff_layout = eff_layout_prod_cols
-                ctx.test.eff_layout = eff_layout_test_cols
-                ctx.prod.mapping_confirmed = True
-                ctx.test.mapping_confirmed = True
-                st.rerun()
-        else:
-            st.success("Column mapping confirmed. Ready to process.")
-            if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
+            ctx.prod.eff_type = eff_prod_type
+            ctx.test.eff_type = eff_test_type
+            ctx.prod.eff_delimiter = eff_delim_prod
+            ctx.test.eff_delimiter = eff_delim_test
+            ctx.prod.eff_record_type = eff_rt_prod
+            ctx.test.eff_record_type = eff_rt_test
+            ctx.prod.header_prefix = hdr_prefix_prod
+            ctx.test.header_prefix = hdr_prefix_test
+            ctx.prod.header_layout = hdr_header_prod
+            ctx.test.header_layout = hdr_header_test
+            ctx.prod.trailer_prefix = trailer_prefix_prod
+            ctx.test.trailer_prefix = trailer_prefix_test
+            ctx.prod.trailer_layout = trailer_layout_prod
+            ctx.test.trailer_layout = trailer_layout_test
+            ctx.prod.eff_layout = eff_layout_prod_cols
+            ctx.test.eff_layout = eff_layout_test_cols
+            ctx.prod.mapping_confirmed = True
+            ctx.test.mapping_confirmed = True
+            st.rerun()
+    else:
+        st.success("Column mapping confirmed. Ready to process.")
+        if st.button("Proceed to Processing & Validation  ->", use_container_width=True):
+                if (ctx.prod.store_agg is not None and ctx.test.store_agg is not None
+                        and ctx.prod.item_agg is not None and ctx.test.item_agg is not None):
+                    ctx.phase = PHASE_VALIDATION
+                    st.rerun()
                 log_phase("Processing Started")
                 cleanup_dataframes(ctx)
                 print_memory_snapshot("BEFORE AGGREGATION (EXISTING)")
                 try:
-                    from dav_tool.options import ParseOptions, ColumnMapping
-                    from dav_tool.workflow.processing import run_store_aggregation, run_item_aggregation
+                    from dav_tool.workflow.orchestration import run_existing_processing
 
                     _ex_source = get_active_source()
 
-                    prod_parse = ParseOptions(
-                        file_type=prod_type, delimiter=prod_delim,
-                        start_line=prod_start_line, record_type=prod_record_type,
-                        layout=prod_layout_list, column_names=ctx.prod.schema,
-                        header_prefix=hdr_prefix_prod, header_layout=hdr_header_prod,
-                        detail_layout=hdr_detail_prod,
-                        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
-                        multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not hdr_prefix_prod else None,
-                        multiline_delimiter=ml_delim_val,
-                    )
-                    prod_mapping = ColumnMapping.from_context(ctx.prod)
-
-                    test_parse = ParseOptions(
-                        file_type=test_type, delimiter=test_delim,
-                        start_line=test_start_line, record_type=test_record_type,
-                        layout=test_layout_list, column_names=ctx.test.schema,
-                        header_prefix=hdr_prefix_test, header_layout=hdr_header_test,
-                        detail_layout=hdr_detail_test,
-                        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
-                        multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not hdr_prefix_test else None,
-                        multiline_delimiter=ml_delim_val,
-                    )
-                    test_mapping = ColumnMapping.from_context(ctx.test)
-
                     with st.spinner("Aggregating data (running BAU/Test, Store/Item in parallel)..."):
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
-                            futs = [
-                                ex.submit(run_store_aggregation, prod_paths, prod_parse, prod_mapping, source=_ex_source),
-                                ex.submit(run_store_aggregation, test_paths, test_parse, test_mapping, source=_ex_source),
-                                ex.submit(run_item_aggregation, prod_paths, prod_parse, prod_mapping, source=_ex_source),
-                                ex.submit(run_item_aggregation, test_paths, test_parse, test_mapping, source=_ex_source),
-                            ]
-                            names = ["BAU stream_store_aggregate", "Test stream_store_aggregate",
-                                     "BAU stream_item_aggregate", "Test stream_item_aggregate"]
-                            results = []
-                            for i, future in enumerate(futs):
-                                try:
-                                    result, elapsed = future.result(timeout=600)
-                                    ctx.metrics.record("aggregation", names[i], elapsed)
-                                    results.append(result)
-                                except Exception as e:
-                                    logger.error("%s failed: %s", names[i], str(e), exc_info=True)
-                                    raise
+                        run_existing_processing(ctx, source=_ex_source)
 
-                        prod_store_agg, test_store_agg, prod_item_agg, test_item_agg = results
-
-                    ctx.prod.store_agg = prod_store_agg
-                    ctx.test.store_agg = test_store_agg
-                    ctx.prod.item_agg = prod_item_agg
-                    ctx.test.item_agg = test_item_agg
                     print_memory_snapshot("AFTER AGGREGATION (EXISTING)")
                     log_dataframe_summary()
-                    cleanup_dataframes(ctx, keep_attrs=["prod.store_agg", "prod.item_agg", "test.store_agg", "test.item_agg"])
                     ctx.phase = PHASE_VALIDATION
                     st.rerun()
                 except Exception as e:
@@ -967,7 +909,10 @@ def _phase5_validation(ctx):
             )
 
     if ctx.validation_done:
-        cleanup_dataframes(ctx, keep_attrs=["prod.store_agg", "prod.item_agg", "test.store_agg", "test.item_agg"])
+        cleanup_dataframes(ctx, keep_attrs=[
+            "store_df", "comparison_df", "summary_df",
+            "fr_prod", "fr_test",
+        ])
         ctx.phase = PHASE_REPORTS
         st.rerun()
 
@@ -1064,7 +1009,7 @@ def _multiline_section(prod_paths, test_paths, source=None):
             if getattr(ctx.prod, '_config_applied', False) and ctx.prod.ml_flattened:
                 st.success("Config loaded (flattened)")
             else:
-                raw_p = preview_raw(prod_paths, "multiline", n_rows=5, source=source)
+                raw_p = cached_preview_raw(prod_paths, "multiline", n_rows=5, source=source)
                 if not raw_p.is_empty():
                     st.dataframe(raw_p.to_pandas(), height=150)
                 _multiline_side_inputs(prod_paths, ctx.prod, "BAU", "prod", source=source)
@@ -1075,7 +1020,7 @@ def _multiline_section(prod_paths, test_paths, source=None):
             if getattr(ctx.test, '_config_applied', False) and ctx.test.ml_flattened:
                 st.success("Config loaded (flattened)")
             else:
-                raw_t = preview_raw(test_paths, "multiline", n_rows=5, source=source)
+                raw_t = cached_preview_raw(test_paths, "multiline", n_rows=5, source=source)
                 if not raw_t.is_empty():
                     st.dataframe(raw_t.to_pandas(), height=150)
                 _multiline_side_inputs(test_paths, ctx.test, "Test", "test", source=source)
@@ -1256,14 +1201,14 @@ def _show_regular_previews(prod_paths, test_paths, prod_type, test_type,
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("BAU Preview")
-            pv = preview_raw(prod_paths, prod_type, prod_delim or ",", prod_layout_list,
+            pv = cached_preview_raw(prod_paths, prod_type, prod_delim or ",", prod_layout_list,
                               n_rows=10, start_line=prod_start_line, record_type=prod_record_type,
                               source=source)
             if not pv.is_empty():
                 st.table(pv.to_pandas().iloc[:10, :10].astype(str))
         with c2:
             st.subheader("Test Preview")
-            tv = preview_raw(test_paths, test_type, test_delim or ",", test_layout_list,
+            tv = cached_preview_raw(test_paths, test_type, test_delim or ",", test_layout_list,
                               n_rows=10, start_line=test_start_line, record_type=test_record_type,
                               source=source)
             if not tv.is_empty():
@@ -1298,82 +1243,28 @@ def _execute_validation(
             "**Options:** Store Level Validation, Item Level Validation, "
             "Compare Store List, Summary, or File Review Report."
         )
-        st.stop()
+        return
 
-    from dav_tool.options import ParseOptions, ColumnMapping, ValidationOptions
-    from dav_tool.workflow.validation import run_existing_validation
+    from dav_tool.workflow.orchestration import run_existing_validation
 
-    ctx.compare_result = None
-    ctx.store_df = None
-    ctx.comparison_df = None
-    ctx.summary_df = None
-
-    prod_parse = ParseOptions(
-        file_type=prod_type, delimiter=prod_delim,
-        start_line=prod_start_line, record_type=prod_record_type,
-        layout=ctx.prod.eff_layout or prod_layout_list, column_names=ctx.prod.schema,
-        header_prefix=ctx.prod.header_prefix, header_layout=ctx.prod.header_layout,
-        detail_layout=ctx.prod.detail_layout,
-        trailer_prefix=trailer_prefix_prod, trailer_layout=trailer_layout_prod,
-        multiline_record_types=ctx.prod.ml_record_types if prod_type == "multiline" and not ctx.prod.header_prefix else None,
-        multiline_delimiter=ctx.ml_delimiter,
-    )
-    test_parse = ParseOptions(
-        file_type=test_type, delimiter=test_delim,
-        start_line=test_start_line, record_type=test_record_type,
-        layout=ctx.test.eff_layout or test_layout_list, column_names=ctx.test.schema,
-        header_prefix=ctx.test.header_prefix, header_layout=ctx.test.header_layout,
-        detail_layout=ctx.test.detail_layout,
-        trailer_prefix=trailer_prefix_test, trailer_layout=trailer_layout_test,
-        multiline_record_types=ctx.test.ml_record_types if test_type == "multiline" and not ctx.test.header_prefix else None,
-        multiline_delimiter=ctx.ml_delimiter,
-    )
-    prod_mapping = ColumnMapping(
-        store=prod_store_col, upc=prod_upc_col, description=prod_desc_col,
-        units=prod_units_col, price=prod_price_col,
-        price_type=price_type_bau,
-        implied_dollars=isimplied_dollars_prod, implied_units=isimplied_units_prod,
-    )
-    test_mapping = ColumnMapping(
-        store=test_store_col, upc=test_upc_col, description=test_desc_col,
-        units=test_units_col, price=test_price_col,
-        price_type=price_type_test,
-        implied_dollars=isimplied_dollars_test, implied_units=isimplied_units_test,
-    )
-    val_opts = ValidationOptions(
-        run_store_validation=run_store,
-        run_item_validation=run_item,
-        run_compare_store_list=run_compare_existing,
-        run_summary=run_summary,
-        run_file_review=run_file_review_existing,
-    )
-
-    val_result = run_existing_validation(
+    run_existing_validation(
+        ctx,
         prod_paths, test_paths,
-        prod_parse, test_parse,
-        prod_mapping, test_mapping,
-        prod_store_agg=ctx.prod.store_agg, test_store_agg=ctx.test.store_agg,
-        prod_item_agg=ctx.prod.item_agg, test_item_agg=ctx.test.item_agg,
-        validation_opts=val_opts,
-        metrics=ctx.metrics,
+        prod_type, test_type,
+        prod_delim, test_delim,
+        prod_layout_list, test_layout_list,
+        prod_start_line, test_start_line,
+        prod_record_type, test_record_type,
+        prod_store_col, prod_units_col, prod_price_col, prod_upc_col, prod_desc_col,
+        test_store_col, test_units_col, test_price_col, test_upc_col, test_desc_col,
+        price_type_bau, price_type_test,
+        isimplied_dollars_prod, isimplied_units_prod,
+        isimplied_dollars_test, isimplied_units_test,
+        run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
+        trailer_prefix_prod=trailer_prefix_prod, trailer_layout_prod=trailer_layout_prod,
+        trailer_prefix_test=trailer_prefix_test, trailer_layout_test=trailer_layout_test,
         source=get_active_source(),
     )
-
-    if val_result.store_comparison is not None:
-        ctx.store_df = val_result.store_comparison
-    if val_result.item_comparison is not None:
-        ctx.comparison_df = val_result.item_comparison
-    if val_result.item_summary is not None:
-        ctx.summary_df = val_result.item_summary
-    if val_result.store_list_result is not None:
-        ctx.compare_result = val_result.store_list_result
-    if val_result.file_review is not None:
-        ctx.fr_prod = val_result.file_review
-    if val_result.file_review_test is not None:
-        ctx.fr_test = val_result.file_review_test
-
-    for err in val_result.errors:
-        ctx.metrics.errors.append(err)
 
     print_memory_snapshot("AFTER VALIDATION (EXISTING)")
     log_dataframe_summary()
@@ -1388,128 +1279,107 @@ def _execute_validation(
 
 
 def _display_results():
+    from dav_tool.workflow.output import generate_existing_output
+
     ctx = st.session_state.ex_ctx
+    output = generate_existing_output(ctx)
+
     with st.expander("Validation Results", expanded=True):
-        if ctx.compare_result is not None:
+        if output.compare_result is not None:
             st.subheader("Store Compare")
-            res = ctx.compare_result
+            res = output.compare_result
             st.write(f"Missing in Test: {res['missing_in_test']}")
             st.write(f"Missing in BAU: {res['missing_in_prod']}")
 
-        if ctx.summary_df is not None:
+        if output.summary_df is not None:
             st.subheader("Summary")
-            st.dataframe(ctx.summary_df.to_pandas())
+            st.dataframe(output.summary_df.to_pandas())
 
-        if ctx.store_df is not None:
+        if output.store_df is not None:
             st.subheader("Store Validation")
-            df = ctx.store_df
-            if df is not None and not df.is_empty():
-                st.dataframe(df.to_pandas().head(100))
-                st.download_button("Download Store Validation", df.write_csv(), "store_validation.csv")
+            st.dataframe(output.store_df.to_pandas().head(100))
+            if output.store_df_csv:
+                st.download_button("Download Store Validation", output.store_df_csv, "store_validation.csv")
 
-        if ctx.comparison_df is not None:
+        if output.comparison_df is not None:
             st.subheader("Item Validation")
-            df = ctx.comparison_df
-            if df is not None and not df.is_empty():
-                st.dataframe(df.to_pandas().head(100))
-                st.download_button("Download Item Validation", df.write_csv(), "item_validation.csv")
+            st.dataframe(output.comparison_df.to_pandas().head(100))
+            if output.comparison_df_csv:
+                st.download_button("Download Item Validation", output.comparison_df_csv, "item_validation.csv")
 
-        if ctx.fr_prod is not None or ctx.fr_test is not None:
+        if output.fr_prod is not None or output.fr_test is not None:
             st.subheader("File Review Report")
             cc = st.columns(2)
             with cc[0]:
-                fr = ctx.fr_prod
-                if fr is not None and not fr.is_empty():
+                if output.fr_prod is not None and not output.fr_prod.is_empty():
                     st.markdown("**BAU**")
-                    st.dataframe(fr.to_pandas())
-                    st.download_button("Download BAU File Review", fr.write_csv(), "bau_file_review.csv")
+                    st.dataframe(output.fr_prod.to_pandas())
+                    if output.fr_prod_csv:
+                        st.download_button("Download BAU File Review", output.fr_prod_csv, "bau_file_review.csv")
             with cc[1]:
-                fr = ctx.fr_test
-                if fr is not None and not fr.is_empty():
+                if output.fr_test is not None and not output.fr_test.is_empty():
                     st.markdown("**Test**")
-                    st.dataframe(fr.to_pandas())
-                    st.download_button("Download Test File Review", fr.write_csv(), "test_file_review.csv")
+                    st.dataframe(output.fr_test.to_pandas())
+                    if output.fr_test_csv:
+                        st.download_button("Download Test File Review", output.fr_test_csv, "test_file_review.csv")
 
-    display_execution_summary(ctx.metrics)
+    display_execution_summary(output.metrics)
 
 
 def _phase7_migration_report(ctx):
     st.markdown("### Step 10: Migration Report")
 
-    from dav_tool.workflow.schema_comparison import compare_schemas
-    from dav_tool.workflow.operation_comparison import compare_operations
-    from dav_tool.workflow.migration_report import generate_report
+    from dav_tool.workflow.output import generate_migration_report
 
-    prod_cols = ctx.prod.schema or ctx.prod.columns or []
-    test_cols = ctx.test.schema or ctx.test.columns or []
-    sd = compare_schemas(prod_cols, test_cols)
-    oc = compare_operations(
-        ctx.prod.store_agg, ctx.test.store_agg,
-        ctx.prod.item_agg, ctx.test.item_agg,
-    )
-
-    report = generate_report(
-        prod_file_type=ctx.prod.file_type,
-        test_file_type=ctx.test.file_type,
-        prod_delimiter=ctx.prod.delimiter,
-        test_delimiter=ctx.test.delimiter,
-        prod_columns=prod_cols,
-        test_columns=test_cols,
-        store_missing_in_test=(ctx.compare_result or {}).get("missing_in_test", ""),
-        store_missing_in_prod=(ctx.compare_result or {}).get("missing_in_prod", ""),
-        errors=ctx.metrics.errors,
-        warnings=ctx.metrics.warnings,
-        rows_processed=ctx.metrics.rows_processed,
-        total_execution_time=ctx.metrics.total_execution_time,
-        peak_memory=ctx.metrics.peak_memory,
-        operation_compare=oc,
-        schema_diff=sd,
-    )
+    output = generate_migration_report(ctx)
+    sd = output.schema_diff
+    oc = output.operation_compare
 
     st.subheader("Migration Summary")
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric("BAU Columns", sd.prod_count)
+        st.metric("BAU Columns", output.migration_metrics.get("prod_columns", 0))
     with c2:
-        st.metric("Test Columns", sd.test_count)
+        st.metric("Test Columns", output.migration_metrics.get("test_columns", 0))
     with c3:
-        st.metric("Common", len(sd.common))
+        st.metric("Common", output.migration_metrics.get("common_columns", 0))
     with c4:
-        st.metric("New in Test", len(sd.only_test))
+        st.metric("New in Test", output.migration_metrics.get("new_in_test", 0))
 
     st.subheader("Aggregation Comparison")
-    if oc.prod_store_count or oc.test_store_count:
+    if oc and (oc.prod_store_count or oc.test_store_count):
         st.info(f"**Store Count:** BAU={oc.prod_store_count}, Test={oc.test_store_count}")
     else:
         st.info("Store aggregation not available for both sides.")
 
-    if oc.prod_item_count or oc.test_item_count:
+    if oc and (oc.prod_item_count or oc.test_item_count):
         st.info(f"**Item Count:** BAU={oc.prod_item_count}, Test={oc.test_item_count}")
     else:
         st.info("Item aggregation not available for both sides.")
 
     st.subheader("Validation Results")
-    if ctx.compare_result is not None:
-        missing_test = len(ctx.compare_result.get("missing_in_test", "").split(",")) if ctx.compare_result.get("missing_in_test") else 0
-        missing_prod = len(ctx.compare_result.get("missing_in_prod", "").split(",")) if ctx.compare_result.get("missing_in_prod") else 0
+    if output.compare_result is not None:
+        missing_test = len(output.compare_result.get("missing_in_test", "").split(",")) if output.compare_result.get("missing_in_test") else 0
+        missing_prod = len(output.compare_result.get("missing_in_prod", "").split(",")) if output.compare_result.get("missing_in_prod") else 0
         st.markdown(f"- **Store Comparison:** {missing_test} stores missing in Test, {missing_prod} stores missing in BAU")
     else:
         st.info("Store list comparison not performed.")
 
     st.subheader("Recommendations")
-    for rec in report.recommendations:
+    for rec in output.migration_recommendations:
         st.markdown(f"- {rec}")
 
     with st.expander("Execution Metrics"):
-        display_execution_summary(ctx.metrics)
+        display_execution_summary(output.metrics)
 
-    st.download_button(
-        "Download Migration Report (JSON)",
-        report.to_json(),
-        file_name="migration_report.json",
-        use_container_width=True,
-    )
+    if output.migration_report_json:
+        st.download_button(
+            "Download Migration Report (JSON)",
+            output.migration_report_json,
+            file_name="migration_report.json",
+            use_container_width=True,
+        )
 
     if st.button("Start Over", use_container_width=True):
         _reset_phase()

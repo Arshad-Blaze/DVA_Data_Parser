@@ -1,11 +1,26 @@
 import os
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from dav_tool.config import DEFAULT_ENCODING
 from dav_tool.datasource.base import IDataSource
 
 logger = logging.getLogger(__name__)
+
+# Trailer prefixes in order of precedence for auto-detection
+TRAILER_PREFIX_CANDIDATES = ["TRL", "TR", "T", "TL", "TRAILER", "F"]
+
+
+def _has_trailer_candidate(lines: List[str], prefix: str) -> bool:
+    """Check if at least 2 lines start with *prefix* followed by digit/delimiter."""
+    count = 0
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            rest = stripped[len(prefix):]
+            if rest and (rest[0].isdigit() or rest[0] in ",|\t;"):
+                count += 1
+    return count >= 2
 
 
 def _read_sample_lines(
@@ -186,3 +201,215 @@ def has_header(file_path, delimiter=",", source: Optional[IDataSource] = None):
     except Exception as e:
         logger.warning("Could not detect header for %s: %s", file_path, e)
         return False
+
+
+def detect_trailer_prefix(file_path, sample_lines=50, source: Optional[IDataSource] = None):
+    """Auto-detect trailer prefix (e.g. TRL, T, TRAILER) in multiline files.
+
+    Checks common trailer prefix candidates against the last portion of the
+    sample — trailer records typically appear near the end.
+    Returns the first confirmed prefix or None.
+    Favours shorter, common prefixes over longer ones.
+    """
+    try:
+        lines = _read_sample_lines(file_path, sample_lines, source)
+        lines = [l.strip() for l in lines if l.strip()]
+        if not lines:
+            return None
+
+        for candidate in TRAILER_PREFIX_CANDIDATES:
+            if _has_trailer_candidate(lines, candidate):
+                return candidate
+
+        return None
+    except Exception as e:
+        logger.warning("Could not detect trailer prefix for %s: %s", file_path, e)
+        return None
+
+
+def compute_confidence_score(detection_result: Dict) -> float:
+    """Compute a confidence score (0.0–1.0) for a detection result dict.
+
+    Evaluates:
+    - File type detection certainty
+    - Delimiter consistency across sampled lines
+    - Multiline vs HDR classification ambiguity
+    - Header line confidence
+    - Trailer detection completeness
+    """
+    score = 1.0
+    file_type = detection_result.get("file_type")
+
+    if file_type is None:
+        return 0.0
+
+    if file_type == "fixed":
+        score -= 0.3  # fixed-width is the fallback — least confident
+
+    if file_type == "delimited":
+        delim = detection_result.get("delimiter")
+        scores = detection_result.get("_delimiter_scores", {})
+        if delim and scores:
+            best_score = scores.get(delim, 0)
+            next_best = sorted(scores.values(), reverse=True)
+            next_best = next_best[1] if len(next_best) > 1 else 0
+            if best_score == 0:
+                score -= 0.3
+            elif best_score < next_best * 2:
+                score -= 0.15  # ambiguous delimiter
+
+    if detection_result.get("is_multiline"):
+        if not detection_result.get("header_prefix") and not detection_result.get("ml_record_types"):
+            score -= 0.2
+
+    has_trailer = detection_result.get("trailer_prefix") is not None
+    is_multiline = detection_result.get("is_multiline", False)
+    if is_multiline and not has_trailer:
+        score -= 0.1  # possible missing trailer
+
+    header = detection_result.get("has_header", False)
+    if file_type == "delimited" and not header:
+        score -= 0.1  # no header row makes column naming harder
+
+    return max(0.0, round(score, 2))
+
+
+def generate_detection_summary(
+    file_path,
+    source: Optional[IDataSource] = None,
+) -> Dict:
+    """Run all detection heuristics and return a consolidated result dict.
+
+    This is the single detection entry point that fully describes a file.
+    Downstream layers MUST consume this dict instead of re-detecting.
+    """
+    file_type, delimiter = detect_file_type(file_path, source=source)
+    multiline = is_multiline_record(file_path, source=source) if file_type else False
+
+    result = {
+        "file_path": file_path,
+        "file_type": file_type,
+        "delimiter": delimiter,
+        "is_multiline": multiline,
+        "has_header": False,
+        "header_prefix": None,
+        "trailer_prefix": None,
+        "ml_record_types": None,
+        "columns": [],
+        "confidence": 0.0,
+        "warnings": [],
+        "recommendations": [],
+    }
+
+    if file_type is None:
+        result["warnings"].append("File type could not be determined")
+        result["recommendations"].append("Verify the file format is supported (delimited, fixed-width, multiline, or Excel)")
+        result["confidence"] = 0.0
+        return result
+
+    if file_type == "excel":
+        result["confidence"] = 1.0
+        return result
+
+    # Delimiter consistency check
+    if file_type == "delimited":
+        lines = _read_sample_lines(file_path, 5, source)
+        lines = [l for l in lines if l]
+        delimiters = [",", "|", "\t", ";"]
+        delim_scores = {d: sum(_count_delimiters_outside_quotes(line, d) for line in lines) for d in delimiters}
+        result["_delimiter_scores"] = delim_scores
+        if delim_scores.get(delimiter, 0) == 0:
+            result["warnings"].append(f"Delimiter '{delimiter}' found 0 times in sample")
+
+    # Multiline detection
+    if multiline:
+        hdr_prefixes = detect_hdr_prefix(file_path, source=source)
+        if hdr_prefixes:
+            result["header_prefix"] = hdr_prefixes[0]
+        record_types = detect_record_types(file_path, delimiter=delimiter, source=source)
+        if record_types:
+            result["ml_record_types"] = record_types
+        trailer = detect_trailer_prefix(file_path, source=source)
+        if trailer:
+            result["trailer_prefix"] = trailer
+        else:
+            result["warnings"].append("No trailer prefix detected — trailer may exist or file may lack trailers")
+            result["recommendations"].append("If the file has trailer records, set trailer_prefix manually")
+
+    # Header detection
+    if file_type == "delimited" and delimiter:
+        result["has_header"] = has_header(file_path, delimiter=delimiter, source=source)
+        if not result["has_header"]:
+            result["warnings"].append("No header row detected — columns will be auto-named")
+            result["recommendations"].append("Consider adding a header row or configuring column names")
+
+    # Columns
+    if file_type == "delimited" and delimiter:
+        from dav_tool.io import safe_read_csv
+        try:
+            df = safe_read_csv(file_path, separator=delimiter, n_rows=5, source=source)
+            result["columns"] = df.columns
+        except Exception as e:
+            result["warnings"].append(f"Could not read columns: {e}")
+
+    result["confidence"] = compute_confidence_score(result)
+    return result
+
+
+def detect_candidate_columns(columns: List[str]) -> Dict[str, Optional[str]]:
+    """Heuristically propose canonical column mappings from physical column names.
+
+    Returns a dict mapping canonical roles to candidate physical column names:
+    ``store``, ``upc``, ``description``, ``units``, ``price``, ``weight_qty``,
+    ``weight_uom``, ``units_uom``.
+    """
+    candidates: Dict[str, Optional[str]] = {
+        "store": None,
+        "upc": None,
+        "description": None,
+        "units": None,
+        "price": None,
+        "weight_qty": None,
+        "weight_uom": None,
+        "units_uom": None,
+    }
+
+    col_lower = {c: c.lower().strip() for c in columns}
+
+    for phys_col, name in col_lower.items():
+        # Store
+        if any(kw in name for kw in ["store", "store_nbr", "location", "site", "branch"]):
+            candidates["store"] = candidates["store"] or phys_col
+
+        # UPC
+        if any(kw in name for kw in ["upc", "sku", "item", "product_code", "plu", "barcode"]):
+            candidates["upc"] = candidates["upc"] or phys_col
+
+        # Description
+        if any(kw in name for kw in ["desc", "name", "product", "item_desc", "title", "label"]):
+            candidates["description"] = candidates["description"] or phys_col
+
+        # Units (quantity count)
+        if any(kw in name for kw in ["unit", "qty", "quantity", "count", "sold", "volume"]):
+            if "uom" not in name and "weight" not in name and "lb" not in name and "kg" not in name:
+                candidates["units"] = candidates["units"] or phys_col
+
+        # Price
+        if any(kw in name for kw in ["price", "amount", "total", "sales", "dollar", "revenue", "cost", "ext"]):
+            candidates["price"] = candidates["price"] or phys_col
+
+        # Weight quantity
+        if any(kw in name for kw in ["weight", "lb", "kg", "pound"]):
+            if "uom" not in name:
+                candidates["weight_qty"] = candidates["weight_qty"] or phys_col
+                if candidates["units"] == phys_col:
+                    candidates["units"] = None
+
+        # Weight UOM
+        if any(kw in name for kw in ["uom", "measure", "unit_of_measure"]):
+            if any(w in name for w in ["weight", "lb", "kg"]):
+                candidates["weight_uom"] = candidates["weight_uom"] or phys_col
+            else:
+                candidates["units_uom"] = candidates["units_uom"] or phys_col
+
+    return candidates

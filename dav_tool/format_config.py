@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 import polars as pl
 
 from dav_tool._numeric import NumericParsingConfig
-from dav_tool._parsers import load_layout, preview_flattened_multiline, preview_flattened_multiline_fixed
+from dav_tool.workflow.preview import load_layout, preview_flattened_multiline, preview_flattened_multiline_fixed
 from dav_tool.processing_context import ProcessingContext
 
 
@@ -154,11 +154,15 @@ class FormatConfig:
     start_line: int = 0
     record_type: Optional[str] = None
     layout_file: Optional[str] = None
+    layout: Optional[List[Dict]] = None
     header_prefix: Optional[str] = None
     header_layout_file: Optional[str] = None
+    header_layout: Optional[List[Dict]] = None
     detail_layout_file: Optional[str] = None
+    detail_layout: Optional[List[Dict]] = None
     trailer_prefix: Optional[str] = None
     trailer_layout_file: Optional[str] = None
+    trailer_layout: Optional[List[Dict]] = None
     ml_record_types: Optional[List[str]] = None
     ml_delimiter: str = "|"
 
@@ -326,21 +330,33 @@ def apply_format_config(
     elif config.canonical_schema:
         ctx.columns = config.canonical_schema
 
-    resolved_layout_file = _resolve(config.layout_file)
-    if resolved_layout_file and os.path.exists(resolved_layout_file):
-        ctx.layout = load_layout(resolved_layout_file)
+    if config.layout:
+        ctx.layout = config.layout
+    else:
+        resolved_layout_file = _resolve(config.layout_file)
+        if resolved_layout_file and os.path.exists(resolved_layout_file):
+            ctx.layout = load_layout(resolved_layout_file)
 
-    resolved_header = _resolve(config.header_layout_file)
-    if resolved_header and os.path.exists(resolved_header):
-        ctx.header_layout = load_layout(resolved_header)
+    if config.header_layout:
+        ctx.header_layout = config.header_layout
+    else:
+        resolved_header = _resolve(config.header_layout_file)
+        if resolved_header and os.path.exists(resolved_header):
+            ctx.header_layout = load_layout(resolved_header)
 
-    resolved_detail = _resolve(config.detail_layout_file)
-    if resolved_detail and os.path.exists(resolved_detail):
-        ctx.detail_layout = load_layout(resolved_detail)
+    if config.detail_layout:
+        ctx.detail_layout = config.detail_layout
+    else:
+        resolved_detail = _resolve(config.detail_layout_file)
+        if resolved_detail and os.path.exists(resolved_detail):
+            ctx.detail_layout = load_layout(resolved_detail)
 
-    resolved_trailer = _resolve(config.trailer_layout_file)
-    if resolved_trailer and os.path.exists(resolved_trailer):
-        ctx.trailer_layout = load_layout(resolved_trailer)
+    if config.trailer_layout:
+        ctx.trailer_layout = config.trailer_layout
+    else:
+        resolved_trailer = _resolve(config.trailer_layout_file)
+        if resolved_trailer and os.path.exists(resolved_trailer):
+            ctx.trailer_layout = load_layout(resolved_trailer)
 
     if ctx.file_type != "multiline":
         ctx.ml_flattened = False
@@ -424,6 +440,10 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
         weight_uom_col=getattr(ctx, 'weight_uom_col', None),
         resolution_rule=getattr(ctx, 'resolution_rule', 'units_preferred'),
         numeric_config=numeric_cfg,
+        layout=getattr(ctx, 'layout', None),
+        header_layout=getattr(ctx, 'header_layout', None),
+        detail_layout=getattr(ctx, 'detail_layout', None),
+        trailer_layout=getattr(ctx, 'trailer_layout', None),
     )
     cfg.suggested_mapping = mapping or None
     return cfg

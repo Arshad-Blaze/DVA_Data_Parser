@@ -93,14 +93,14 @@ def validate_config(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE) -
         errors.append(f"Invalid file type '{cfg.file_type}'. Must be: delimited, fixed, or multiline.")
 
     # FILE (always required for parsing)
-    if cfg.file_type == "fixed" and not cfg.layout_file:
-        errors.append("Fixed-width files require a layout CSV file path.")
+    if cfg.file_type == "fixed" and not cfg.layout_file and not cfg.layout:
+        errors.append("Fixed-width files require a layout definition (use Layout Builder or provide a layout CSV).")
     if cfg.file_type == "multiline":
         if cfg.header_prefix:
-            if not cfg.header_layout_file:
-                errors.append("HDR files require a header layout CSV.")
-            if not cfg.detail_layout_file:
-                errors.append("HDR files require a detail layout CSV.")
+            if not cfg.header_layout_file and not cfg.header_layout:
+                errors.append("HDR files require a header layout (use Layout Builder or layout CSV).")
+            if not cfg.detail_layout_file and not cfg.detail_layout:
+                errors.append("HDR files require a detail layout (use Layout Builder or layout CSV).")
         elif not cfg.ml_record_types:
             errors.append("Multiline files require record type prefixes (e.g. H,D).")
     if cfg.file_type == "delimited" and not cfg.delimiter:
@@ -182,8 +182,8 @@ def validate_section(cfg: FormatConfig, section: ConfigSection) -> List[str]:
     elif section == ConfigSection.FILE:
         if not cfg.file_type:
             errors.append("File type is required.")
-        if cfg.file_type == "fixed" and not cfg.layout_file:
-            errors.append("Fixed-width files need a layout CSV path (set in Stage B).")
+        if cfg.file_type == "fixed" and not cfg.layout_file and not cfg.layout:
+            errors.append("Fixed-width files need a layout definition (set in Stage B).")
         if cfg.file_type == "multiline":
             if not cfg.header_prefix and not cfg.ml_record_types:
                 errors.append("Multiline files need record types or HDR prefix.")

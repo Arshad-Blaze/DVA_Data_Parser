@@ -14,6 +14,7 @@ from dav_tool._parsers import (
     preview_flattened_multiline_fixed as _preview_flattened_multiline_fixed,
     load_layout as _load_layout,
     parse_fixed_width_chunks as _parse_fixed_width_chunks,
+    scan_delimited as _scan_delimited,
 )
 from dav_tool.datasource.base import IDataSource
 
@@ -78,6 +79,15 @@ def preview_flattened_multiline_fixed(
 
 def load_layout(layout_file: str) -> List[Dict[str, Any]]:
     return _load_layout(layout_file)
+
+
+def scan_delimited(
+    file_paths: Union[str, List[str]],
+    delimiter: str,
+    columns: Optional[List[str]] = None,
+) -> pl.LazyFrame:
+    """Scan delimited files lazily (thin delegation to ``_parsers.scan_delimited``)."""
+    return _scan_delimited(file_paths, delimiter=delimiter, columns=columns)
 
 
 def parse_fixed_width_chunks(

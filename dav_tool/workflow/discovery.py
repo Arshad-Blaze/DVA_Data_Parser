@@ -8,7 +8,8 @@ from typing import List, Dict, Optional
 
 from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
-    detect_hdr_prefix,
+    detect_hdr_prefix, detect_trailer_prefix, detect_candidate_columns,
+    generate_detection_summary,
 )
 from dav_tool.datasource.base import IDataSource
 
@@ -43,6 +44,10 @@ class DiscoveryResult:
         record_type: Optional[str] = None,
         layout: Optional[List[Dict]] = None,
         error: Optional[str] = None,
+        confidence: float = 0.0,
+        candidate_columns: Optional[Dict[str, Optional[str]]] = None,
+        warnings: Optional[List[str]] = None,
+        recommendations: Optional[List[str]] = None,
     ):
         self.file_paths = file_paths
         self.file_type = file_type
@@ -61,6 +66,10 @@ class DiscoveryResult:
         self.record_type = record_type
         self.layout = layout
         self.error = error
+        self.confidence = confidence
+        self.candidate_columns = candidate_columns or {}
+        self.warnings = warnings or []
+        self.recommendations = recommendations or []
 
     @classmethod
     def from_context(cls, ctx) -> "DiscoveryResult":
@@ -85,6 +94,10 @@ class DiscoveryResult:
             start_line=getattr(ctx, "start_line", 0),
             record_type=getattr(ctx, "record_type", None),
             layout=getattr(ctx, "layout", None),
+            confidence=getattr(ctx, "confidence", 0.0),
+            candidate_columns=getattr(ctx, "candidate_columns", {}),
+            warnings=getattr(ctx, "warnings", []),
+            recommendations=getattr(ctx, "recommendations", []),
         )
 
     def apply_to_context(self, ctx) -> None:
@@ -109,6 +122,10 @@ class DiscoveryResult:
         ctx.start_line = self.start_line
         ctx.record_type = self.record_type
         ctx.layout = self.layout
+        ctx.confidence = self.confidence
+        ctx.candidate_columns = self.candidate_columns
+        ctx.warnings = self.warnings
+        ctx.recommendations = self.recommendations
 
 
 def detect_file(
@@ -117,7 +134,8 @@ def detect_file(
 ) -> DiscoveryResult:
     """Detect file type and structure from the first file.
 
-    Returns a DiscoveryResult with detected metadata.
+    Returns a DiscoveryResult with detected metadata, confidence score,
+    candidate column mappings, warnings, and recommendations.
     This is the SINGLE detection entry point. Downstream phases
     must consume this result instead of re-detecting.
     No UI rendering. Pure detection logic.
@@ -128,62 +146,33 @@ def detect_file(
     fp = file_paths[0]
 
     try:
-        if is_multiline_record(fp, source=source):
-            result = _detect_multiline(file_paths, source=source)
-        else:
-            result = _detect_simple(file_paths, source=source)
+        summary = generate_detection_summary(fp, source=source)
+
+        result = DiscoveryResult(
+            file_paths=file_paths,
+            file_type=summary["file_type"],
+            delimiter=summary["delimiter"],
+            columns=summary["columns"] or [],
+            header_prefix=summary["header_prefix"],
+            trailer_prefix=summary["trailer_prefix"],
+            ml_record_types=summary["ml_record_types"],
+            confidence=summary["confidence"],
+            warnings=summary["warnings"],
+            recommendations=summary["recommendations"],
+        )
+
+        if summary["file_type"] == "fixed":
+            result.error = "Fixed-width files require a layout definition (use the Layout Builder)"
+
+        # Propose candidate column mappings
+        if result.columns:
+            result.candidate_columns = detect_candidate_columns(result.columns)
+
+        return result
+
     except Exception as e:
         logger.error("Detection failed: %s", str(e), exc_info=True)
         return DiscoveryResult(file_paths=file_paths, error=str(e))
-
-    result.file_paths = file_paths
-    return result
-
-
-def _detect_simple(
-    file_paths: List[str],
-    source: Optional[IDataSource] = None,
-) -> DiscoveryResult:
-    """Detect delimited or fixed-width files."""
-    fp = file_paths[0]
-    file_type, delimiter = detect_file_type(fp, source=source)
-
-    if file_type == "delimited":
-        columns = _get_delimited_columns(file_paths, delimiter, source=source)
-        return DiscoveryResult(
-            file_type="delimited",
-            delimiter=delimiter,
-            columns=columns,
-        )
-    elif file_type == "fixed":
-        return DiscoveryResult(
-            file_type="fixed",
-            error="Fixed-width files require a layout CSV",
-        )
-    else:
-        return DiscoveryResult(error=f"Unrecognized file type: {file_type}")
-
-
-def _detect_multiline(
-    file_paths: List[str],
-    source: Optional[IDataSource] = None,
-) -> DiscoveryResult:
-    """Detect multiline (HDR delimited or HDR fixed-width) files."""
-    fp = file_paths[0]
-    hdr_prefixes = detect_hdr_prefix(fp, source=source)
-
-    if hdr_prefixes:
-        return DiscoveryResult(
-            file_type="multiline",
-            header_prefix=hdr_prefixes[0],
-        )
-    else:
-        detected_types = detect_record_types(fp, source=source)
-        return DiscoveryResult(
-            file_type="multiline",
-            ml_record_types=detected_types or ["H", "D"],
-            ml_delimiter="|",
-        )
 
 
 def _get_delimited_columns(

@@ -1,6 +1,7 @@
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
 
 import polars as pl
 
@@ -56,3 +57,20 @@ class IDataOperation(ABC):
 
     def validate(self, df: pl.DataFrame, options: OperationOptions) -> List[str]:
         return []
+
+
+class WorkflowOperation(Protocol):
+    """Protocol for workflow-level operations.
+
+    Unlike ``IDataOperation`` (which operates on DataFrames),
+    ``WorkflowOperation`` operates on an ``OperationContext`` and
+    orchestrates calls to the Processing Layer.
+
+    Register instances via ``register_workflow_op()``.
+    Future operations require zero ``OperationExecutor`` changes.
+    """
+
+    operation_type: str
+
+    def execute(self, op_ctx: Any) -> None:
+        ...

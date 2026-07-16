@@ -5,37 +5,17 @@ from dav_tool._numeric import (
     NumericParsingConfig,
     numeric_parse_expr,
 )
+from dav_tool.quantity import (
+    QuantityStrategy,
+    map_quantity_type_to_strategy,
+    resolve_quantity,
+)
 
 
 def apply_column_names(df: pl.DataFrame, column_names: Optional[List[str]] = None) -> pl.DataFrame:
     if column_names and len(column_names) == len(df.columns):
         return df.rename(dict(zip(df.columns, column_names)))
     return df
-
-
-UOM_TO_LB = {
-    "lb": 1.0,
-    "oz": 1.0 / 16.0,
-    "kg": 2.20462,
-    "g": 0.00220462,
-}
-
-
-def _apply_uom_conversion(expr: pl.Expr, uom_col: Optional[str], default_uom: str) -> pl.Expr:
-    """Apply per-row or default UOM conversion to ``expr``, normalising to lb."""
-    if uom_col:
-        factor = (
-            pl.when(pl.col(uom_col).str.to_lowercase().str.strip_chars() == "lb").then(1.0)
-            .when(pl.col(uom_col).str.to_lowercase().str.strip_chars() == "oz").then(1.0 / 16.0)
-            .when(pl.col(uom_col).str.to_lowercase().str.strip_chars() == "kg").then(2.20462)
-            .when(pl.col(uom_col).str.to_lowercase().str.strip_chars() == "g").then(0.00220462)
-            .otherwise(UOM_TO_LB.get(default_uom, 1.0))
-        )
-        return expr * factor
-    factor = UOM_TO_LB.get(default_uom, 1.0)
-    if factor != 1.0:
-        return expr * factor
-    return expr
 
 
 def _effective_qty_expr(
@@ -45,19 +25,29 @@ def _effective_qty_expr(
     weight_uom_col: Optional[str] = None,
     weight_uom: str = "lb",
     numeric_config: Optional[NumericParsingConfig] = None,
+    quantity_strategy: Optional[str] = None,
+    weight_qty_col: Optional[str] = None,
+    units_uom: Optional[str] = None,
 ) -> pl.Expr:
-    """Return the effective quantity expression based on quantity type."""
-    if quantity_type == "weight" and weight_col:
-        qty = numeric_parse_expr(weight_col, numeric_config)
-        return _apply_uom_conversion(qty, weight_uom_col, weight_uom)
-    if quantity_type == "mixed":
-        units_expr = numeric_parse_expr(units_col, numeric_config)
-        if weight_col:
-            weight_expr = numeric_parse_expr(weight_col, numeric_config)
-            weight_expr = _apply_uom_conversion(weight_expr, weight_uom_col, weight_uom)
-            return pl.when(weight_expr.is_not_null() & (weight_expr != 0)).then(weight_expr).otherwise(units_expr)
-        return units_expr
-    return numeric_parse_expr(units_col, numeric_config)
+    """Resolve quantity using the configurable Quantity Resolver.
+
+    Backward-compatible: maps legacy ``quantity_type`` to ``QuantityStrategy``
+    when ``quantity_strategy`` is not set.
+    """
+    strategy = (
+        QuantityStrategy(quantity_strategy)
+        if quantity_strategy
+        else map_quantity_type_to_strategy(quantity_type)
+    )
+    return resolve_quantity(
+        units_col=units_col,
+        weight_qty_col=weight_qty_col or weight_col,
+        weight_uom_col=weight_uom_col,
+        weight_uom=weight_uom,
+        strategy=strategy,
+        units_uom=units_uom,
+        numeric_config=numeric_config,
+    )
 
 
 def store_normalize_exprs(

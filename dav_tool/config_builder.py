@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import polars as pl
 
-from dav_tool._parsers import (
+from dav_tool.workflow.preview import (
     preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
     load_layout, scan_delimited,
 )

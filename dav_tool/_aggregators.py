@@ -125,6 +125,26 @@ def aggregate_with_options(
     )
 
 
+def aggregate_dataset(dataset, source: Optional[IDataSource] = None) -> pl.DataFrame:
+    """Aggregate using a ``CanonicalDataset`` — format-agnostic path.
+
+    Processing never touches file-format details.  The dataset provides
+    pre-normalized canonical chunks; this function only groups and sums.
+    """
+    from dav_tool.workflow.canonical import CanonicalDataset
+    if not isinstance(dataset, CanonicalDataset):
+        raise TypeError("Expected a CanonicalDataset instance")
+    stream = dataset.iter_chunks()
+    level = dataset.level
+    if level == "store":
+        return _aggregate_store_stream(stream)
+    if level == "item":
+        return _aggregate_item_stream(stream)
+    if level == "upc":
+        return _aggregate_upc_stream(stream)
+    raise ValueError(f"Unknown aggregation level: {level}")
+
+
 def aggregate_with_config(
     file_paths: Union[str, List[str]],
     file_type: str,

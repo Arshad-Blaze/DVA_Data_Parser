@@ -63,6 +63,14 @@ class ProcessingContext:
     resolution_rule: str = "units_preferred"
     mapping_confirmed: bool = False
 
+    # === Quantity Resolution (RC2) ===
+    quantity_strategy: str = "auto"
+    """One of: auto, prefer_weight, prefer_units, weight_only, units_only."""
+    weight_qty_col: Optional[str] = None
+    """Explicit column for weighted quantity (same as weight_col by default)."""
+    units_uom: Optional[str] = None
+    """Unit of measure for the units column (e.g. 'each', 'case')."""
+
     # === Effective Config (frozen at Save Mapping) ===
     eff_type: Optional[str] = None
     eff_delimiter: Optional[str] = None

@@ -10,7 +10,7 @@ import streamlit as st
 import polars as pl
 from dav_tool.workflow.preview import (
     parse_fixed_width_chunks, preview_flattened_multiline,
-    preview_flattened_multiline_fixed,
+    preview_flattened_multiline_fixed, preview_raw, preview_raw_lines,
 )
 from dav_tool._observability import ProcessingRecord, MAX_HISTORY
 from dav_tool._column_utils import (
@@ -53,6 +53,45 @@ def cached_get_column_names(paths, file_type, delimiter=",", layout=None, start_
                             source=source)
     cache[key] = cols
     return cols
+
+
+_PREVIEW_CACHE_KEY = "_preview_cache"
+
+
+def _preview_cache_key(paths, file_type, delimiter, layout, n_rows, start_line, record_type) -> str:
+    layout_str = str(layout) if layout else ""
+    raw = f"{paths}|{file_type}|{delimiter}|{layout_str}|{n_rows}|{start_line}|{record_type}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _preview_lines_cache_key(paths, n_rows) -> str:
+    raw = f"{paths}|{n_rows}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def cached_preview_raw(paths, file_type="delimited", delimiter=",", layout=None,
+                        n_rows=10, start_line=0, record_type="", source=None):
+    if _PREVIEW_CACHE_KEY not in st.session_state:
+        st.session_state[_PREVIEW_CACHE_KEY] = {}
+    cache = st.session_state[_PREVIEW_CACHE_KEY]
+    key = _preview_cache_key(str(paths), file_type, delimiter, layout, n_rows, start_line, record_type)
+    if key in cache:
+        return cache[key]
+    result = preview_raw(paths, file_type, delimiter, layout, n_rows, start_line, record_type, source=source)
+    cache[key] = result
+    return result
+
+
+def cached_preview_raw_lines(paths, n_rows=10, source=None):
+    if _PREVIEW_CACHE_KEY not in st.session_state:
+        st.session_state[_PREVIEW_CACHE_KEY] = {}
+    cache = st.session_state[_PREVIEW_CACHE_KEY]
+    key = _preview_lines_cache_key(str(paths), n_rows)
+    if key in cache:
+        return cache[key]
+    result = preview_raw_lines(paths, n_rows=n_rows, source=source)
+    cache[key] = result
+    return result
 
 
 def display_execution_summary(metrics):
