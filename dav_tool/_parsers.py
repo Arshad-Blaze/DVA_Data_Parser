@@ -11,7 +11,6 @@ from dav_tool._numeric import (  # noqa: F401 — re-exported for backward compa
     NumericParsingConfig,
     numeric_parse_expr,
     safe_numeric,
-    _log_numeric_issue,
 )
 from dav_tool.config import DEFAULT_ENCODING, FALLBACK_ENCODING, DEFAULT_CHUNK_SIZE, DEFAULT_PREVIEW_ROWS
 from dav_tool.datasource.base import IDataSource

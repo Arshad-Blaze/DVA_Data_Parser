@@ -1,421 +1,512 @@
-# DVA Platform
-# RC2 Stabilization Sprint
-# Production Bug Fixes + UX Improvements + Code Quality
+# DVA Platform RC2.1
+# Fixed Width UX & Numeric Processing Stabilization Sprint
 
-The repository has reached RC1.
+Read the complete repository before making any changes.
 
-RC1 is now the stable baseline.
+Do NOT immediately start coding.
 
-This sprint is NOT about adding new features.
+First understand the current implementation of:
 
-This sprint focuses on:
+- Detection
+- Layout Builder
+- Canonical Layer
+- Processing
+- Aggregation
+- Numeric Parsing
 
-1. Production bug fixes
-2. Workflow improvements
-3. Code quality
-4. Documentation
-5. Developer experience
+Identify where the current implementation differs from the target workflow below.
 
-===========================================================
-GENERAL RULES
-===========================================================
+============================================================
+MISSION
+============================================================
 
-Before modifying any code:
+This sprint has TWO objectives only.
 
-- Understand the complete execution flow.
-- Identify impacted modules.
-- Trace all function calls.
-- Check for regressions.
-- Implement the smallest correct solution.
+1.
 
-Every change must be regression tested.
+Complete the Fixed Width onboarding experience.
 
-Do not introduce duplicate implementations.
+2.
 
-Update documentation whenever behaviour changes.
+Make numeric conversion robust enough for production retailer datasets.
 
-===========================================================
-SPRINT 1
-FIXED WIDTH LAYOUT BUILDER
-===========================================================
+Do NOT introduce unrelated features.
 
-Current Problem
+Do NOT redesign the architecture.
 
-Fixed-width datasets ask for a Layout CSV.
+Keep backward compatibility.
 
-However:
+============================================================
+PART 1
+FIXED WIDTH USER EXPERIENCE
+============================================================
 
-- There is no proper UI for creating layouts.
-- Users must already possess a layout file.
-- This makes onboarding difficult.
+Current implementation still assumes users already possess a Layout CSV.
 
-New Behaviour
+Although an interactive Layout Builder exists, the workflow is still centered around uploading layouts.
 
-When Detection identifies a Fixed Width dataset:
+The desired workflow is different.
 
-Step 1
+------------------------------------------------------------
 
-Display RAW Preview.
+TARGET WORKFLOW
 
-Do not parse.
+Connection
 
-Do not flatten.
+↓
 
-Display first N physical records exactly as stored.
+Detection
 
-Step 2
+↓
 
-If multiline fixed-width:
+RAW Preview
 
-Flatten records using detected record boundaries.
+↓
 
-Show Flattened Preview.
+(If multiline)
 
-Keep RAW Preview available inside an expander for reference.
+Flatten
 
-Step 3
+↓
 
-Instead of asking for Layout CSV immediately,
+Flattened Preview
 
-display an interactive Layout Builder.
+↓
 
-Layout Builder should contain:
+Interactive Layout Builder
+
+↓
+
+Canonical Schema
+
+↓
+
+Configuration
+
+↓
+
+Processing
+
+------------------------------------------------------------
+
+STEP 1
+
+Connection Layer
+
+Read only the first few records.
+
+Display RAW Preview exactly as stored.
+
+No parsing.
+
+No delimiter split.
+
+No layout.
+
+No canonicalization.
+
+RAW Preview exists only for understanding the incoming data.
+
+------------------------------------------------------------
+
+STEP 2
+
+Detection
+
+Detect
+
+- Fixed Width
+- Multiline
+- HDR
+- Record Types
+
+Build DiscoveryResult.
+
+Do not create DataFrames.
+
+------------------------------------------------------------
+
+STEP 3
+
+If the dataset is multiline fixed width
+
+Automatically flatten sample records.
+
+Display
+
+Flattened Preview
+
+while keeping
+
+RAW Preview
+
+inside an expandable section for reference.
+
+Users should always be able to compare
+
+Original
+
+↓
+
+Flattened
+
+------------------------------------------------------------
+
+STEP 4
+
+Layout Builder
+
+Do NOT immediately ask users for a Layout CSV.
+
+Instead present an interactive Layout Builder.
+
+Uploading an existing Layout CSV becomes OPTIONAL.
+
+The primary workflow is creating layouts inside the application.
+
+------------------------------------------------------------
+
+Layout Builder should support
 
 Column Name
 
 Start Position
 
-Length
+End Position
+
+Length (auto calculated)
 
 Data Type
 
-(optional)
-
-Format
-
-(optional)
-
 Nullable
-
-(optional)
 
 Description
 
-(optional)
+------------------------------------------------------------
 
-Users should be able to:
+BONUS (Preferred)
 
-Add rows
+Provide a character ruler above the preview.
 
-Delete rows
+Example
 
-Reorder rows
+123456789012345678901234567890
 
-Preview extracted columns immediately
+000012345ABCDE123456789XYZ
 
-Validate layout
+Selecting a character range should automatically populate
 
-Step 4
+Start Position
+
+End Position
+
+Length
+
+If Streamlit limitations prevent true drag-selection,
+
+provide
+
+Start Position
+
+End Position
+
+with live highlighting inside the preview.
+
+------------------------------------------------------------
+
+Layout validation
+
+Detect
+
+Overlapping columns
+
+Duplicate names
+
+Invalid ranges
+
+Missing names
+
+Zero lengths
+
+Show immediate feedback.
+
+------------------------------------------------------------
+
+STEP 5
 
 Generate Layout CSV automatically.
 
-Allow:
+Support
 
-Download Layout CSV
+Download
 
-Save Layout
+Save
 
-Reuse Layout
+Reuse
 
 Upload Existing Layout
 
-Both manual creation and uploaded layouts must be supported.
+Uploading should remain optional.
 
-After layout confirmation,
+------------------------------------------------------------
 
-continue with Canonical Configuration.
+STEP 6
 
-===========================================================
-SPRINT 2
-DELIMITED PROCESSING BUG
-===========================================================
+Generate Canonical Schema immediately after layout confirmation.
 
-Observed
+Do NOT continue using generic names such as
 
-Configuration validates successfully.
+COL001
 
-Processing begins.
+COL002
 
-Store aggregation fails.
+Instead create meaningful canonical names.
 
-Item aggregation fails.
+Business Mapping should consume Canonical Schema.
 
-Root Cause
+============================================================
+PART 2
+NUMERIC PROCESSING PIPELINE
+============================================================
 
-replace()
+Current implementation fixes strict float casting by using
 
-creates empty strings.
+strict=False
 
-Strict float casting fails.
+This solves the symptom but not the overall design.
 
-Fix
+Implement a reusable Numeric Processing Pipeline.
 
-Review aggregation pipeline.
+------------------------------------------------------------
 
-Never perform strict numeric casting directly on cleaned text.
+Pipeline
 
-Implement robust numeric conversion.
+Raw Text
 
-Handle:
+↓
 
-empty string
+Trim
 
-spaces
+↓
+
+Normalize Whitespace
+
+↓
+
+Handle NULL Patterns
+
+↓
+
+Remove Currency Symbols
+
+↓
+
+Remove Thousands Separators
+
+↓
+
+Normalize Decimal Separator
+
+↓
+
+Handle Scientific Notation
+
+↓
+
+Validate Numeric Pattern
+
+↓
+
+Convert
+
+↓
+
+Aggregation
+
+------------------------------------------------------------
+
+Support values such as
+
+100
+
+100.25
+
+1,234.56
+
+$100.50
+
+₹1000
 
 NULL
 
 N/A
 
+NA
+
+NaN
+
 -
 
-invalid values
+--
 
-Support configurable behaviour:
+(empty)
 
-Treat as NULL
+Scientific notation
 
-Treat as Zero
+2.5e3
 
-Reject Record
+------------------------------------------------------------
 
-Warn User
+Conversion must never crash aggregation.
 
-Log affected records.
+Behaviour should be configurable.
 
-Aggregation must continue whenever possible.
+AS_NULL
 
-No silent failures.
+AS_ZERO
 
-===========================================================
-SPRINT 3
-CODE QUALITY
-===========================================================
+REJECT
 
-Review the entire repository.
+Log invalid values.
 
-1.
+Continue processing whenever possible.
 
-Organize imports.
+============================================================
+CONFIGURATION
+============================================================
 
-Standardize import ordering.
+Allow Numeric Parsing configuration.
 
-Remove duplicates.
+Examples
 
-Remove unused imports.
+Decimal Separator
 
-2.
+Thousands Separator
 
-Function Validation
+Currency Symbols
 
-Verify every function call.
+Negative Format
 
-Detect:
+Locale (future)
 
-missing functions
+Default behaviour should continue working for current retailers.
 
-incorrect signatures
+============================================================
+TESTING
+============================================================
 
-renamed functions
+Test Fixed Width
 
-scope mismatch
-
-broken references
-
-Fix all.
-
-3.
-
-Dependency Management
-
-Detect Python version.
-
-Generate:
-
-requirements.txt
-
-Requirements must include:
-
-compatible versions
-
-minimum versions
-
-optional packages
-
-development packages
-
-test packages
-
-Verify installation inside a clean virtual environment.
-
-Document installation steps.
-
-===========================================================
-SPRINT 4
-DOCUMENTATION
-===========================================================
-
-Generate documentation for developers.
-
-Produce:
-
-Architecture.md
-
-PseudoCode.md
-
-ExecutionFlow.md
-
-ModuleGuide.md
-
-DeveloperGuide.md
-
-RequirementsGuide.md
-
-UserGuide.md
-
-Each module should include:
-
-Purpose
-
-Inputs
-
-Outputs
-
-Dependencies
-
-Execution Flow
-
-Sequence
-
-===========================================================
-SPRINT 5
-DIAGRAMS
-===========================================================
-
-Generate diagrams describing the project.
-
-Architecture Diagram
-
-Pipeline Diagram
-
-Workflow Diagram
-
-Onboarding Flow
-
-Format Change Flow
-
-Connection Layer
-
-Detection Layer
-
-Canonical Layer
-
-Requirement Layer
-
-Processing Layer
-
-Output Layer
-
-Flush Layer
-
-Configuration Builder
-
-Data Access Strategy
-
-Use Mermaid diagrams inside Markdown.
-
-Keep diagrams synchronized with implementation.
-
-===========================================================
-SPRINT 6
-REGRESSION TESTING
-===========================================================
-
-Run regression after every major change.
-
-Verify:
-
-Local datasource
-
-SSH datasource
-
-Delimited
-
-Fixed Width
+Single Line
 
 Multiline
 
 HDR
 
-Onboarding
+Large Layout
 
-Format Change
+Uploaded Layout
 
-Aggregate Only
+Generated Layout
 
-Aggregate + Calculate
+Mixed Record Types
 
-Validation
+------------------------------------------------------------
 
-Reports
+Test Numeric Parsing
 
-Connection Manager
+Integers
 
-Canonical Schema
+Decimals
+
+Currency
+
+Thousands
+
+Scientific
+
+NULL
+
+N/A
+
+Spaces
+
+Empty Strings
+
+Negative Numbers
+
+Invalid Text
+
+------------------------------------------------------------
+
+Run
+
+Regression
+
+Playwright
 
 Streaming
 
 Memory
 
-===========================================================
-DELIVERABLES
-===========================================================
+Onboarding
 
-Create:
+Format Change
 
-CHANGELOG_RC2.md
+============================================================
+DOCUMENTATION
+============================================================
 
-RC2_BugFix_Report.md
+Update
 
-Architecture.md
+Architecture
 
-PseudoCode.md
+Execution Flow
 
-ExecutionFlow.md
+Developer Guide
 
-DeveloperGuide.md
+User Guide
 
-RequirementsGuide.md
+Describe the new Layout Builder workflow.
 
-Updated_UserGuide.md
+Describe the Numeric Processing Pipeline.
 
-requirements.txt
+============================================================
+OUTPUT
+============================================================
 
-Architecture_Diagrams.md
+Generate
 
-Regression_Report.md
+RC2_1_Report.md
 
-===========================================================
-SUCCESS CRITERIA
-===========================================================
+Include
 
-The sprint is complete only if:
+Architecture Changes
 
-- Fixed-width onboarding works entirely through the UI without requiring a pre-existing layout file.
-- Multiline fixed-width datasets can be flattened and previewed before layout creation.
-- Delimited aggregation no longer fails due to numeric conversion issues.
-- Function references are fully validated.
-- Imports are standardized.
-- Dependencies install cleanly on the supported Python version.
-- Documentation matches the implementation.
-- All regression tests pass.
-- No existing workflows regress.
+Workflow Changes
+
+Fixed Width Improvements
+
+Numeric Pipeline
+
+Performance Impact
+
+Regression Results
+
+Known Limitations
+
+============================================================
+IMPORTANT
+============================================================
+
+Keep the solution simple.
+
+Do not over-engineer.
+
+Everything must remain configuration-driven.
+
+Everything downstream must continue consuming Canonical Data.
+
+Processing should never depend on retailer-specific parsing logic.
+
+The objective is to make onboarding intuitive for business users while making numeric processing resilient for real-world retailer datasets.

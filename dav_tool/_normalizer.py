@@ -4,7 +4,6 @@ from typing import List, Optional
 from dav_tool._numeric import (
     NumericParsingConfig,
     numeric_parse_expr,
-    safe_numeric,
 )
 
 

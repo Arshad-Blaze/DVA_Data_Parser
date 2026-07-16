@@ -368,11 +368,3 @@ def render_layout_builder(
 
     return None
 
-
-def get_canonical_schema_from_layout(layout: List[Dict]) -> List[str]:
-    """Extract meaningful canonical column names from a confirmed layout.
-
-    Uses the field names defined by the user during layout building,
-    avoiding generic COL001/COL002 naming.
-    """
-    return [col["field"] for col in layout if col.get("field", "").strip()]
