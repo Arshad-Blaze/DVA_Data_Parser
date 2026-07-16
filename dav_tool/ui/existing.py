@@ -8,7 +8,6 @@ import polars as pl
 logger = logging.getLogger(__name__)
 from dav_tool.workflow.preview import (
     preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
-    load_layout,
 )
 from dav_tool._observability import (
     log_phase, setup_logging,
@@ -26,10 +25,10 @@ from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext, ExistingContext
 from dav_tool.format_config import load_format_config, apply_format_config
 from dav_tool.workflow.discovery import detect_file
-from dav_tool.config_builder import build_config
 from dav_tool.ui.helpers import (
     render_phase_progress, validate_config_before_processing, cleanup_dataframes,
 )
+from dav_tool.ui.layout_builder import render_layout_builder
 
 PHASE_DISCOVERY = 1
 PHASE_DISCOVERY_COMPARE = 2
@@ -411,99 +410,72 @@ def _phase_discovery_compare(ctx):
         st.rerun()
 
 
+def _render_side_config(side_ctx, side_label, key_prefix, cols):
+    smart_idx = smart_column_indices(cols)
+    c1, c2 = st.columns(2)
+    with c1:
+        store_col = st.selectbox("Store Column", cols, index=smart_idx.get("store", (0,))[0], key=f"{key_prefix}_store")
+        upc_col = st.selectbox("UPC Column", cols, index=smart_idx.get("upc", (0,))[0], key=f"{key_prefix}_upc")
+        desc_col = st.selectbox("Description Column", cols, index=smart_idx.get("description", (0,))[0], key=f"{key_prefix}_desc")
+    with c2:
+        units_col = st.selectbox("Units Column", cols, index=smart_idx.get("units", (0,))[0], key=f"{key_prefix}_units")
+        price_col = st.selectbox("Price Column", cols, index=smart_idx.get("price", (0,))[0], key=f"{key_prefix}_price")
+
+    price_type = st.radio("Price Type", ["Total Price", "Unit Price"], horizontal=True, key=f"{key_prefix}_pt")
+    implied_dollars = st.checkbox("Implied Dollars", key=f"{key_prefix}_imp_dol")
+    implied_units = st.checkbox("Implied Units", key=f"{key_prefix}_imp_unt")
+
+    errors = validate_column_mapping(store_col, upc_col, desc_col, units_col, price_col)
+    if errors:
+        for err in errors:
+            st.error(err)
+
+    if st.button(f"Accept {side_label} Mapping", type="primary", use_container_width=True, disabled=bool(errors), key=f"{key_prefix}_accept"):
+        side_ctx.store_col = store_col
+        side_ctx.upc_col = upc_col
+        side_ctx.desc_col = desc_col
+        side_ctx.units_col = units_col
+        side_ctx.price_col = price_col
+        side_ctx.price_type = price_type
+        side_ctx.implied_dollars = implied_dollars
+        side_ctx.implied_units = implied_units
+        side_ctx.config_locked = True
+        st.rerun()
+
+
 def _phase2_configuration(ctx):
     if ctx.phase >= PHASE_CONFIG_VALIDATED:
         return
 
-    st.markdown("### Step 4: Configuration")
+    st.markdown("### Step 4: Column Mapping")
     _ex_source = get_active_source()
 
     if not ctx.prod.config_locked:
-        st.subheader("BAU Configuration")
-        prod_cfg = getattr(ctx, '_prod_cfg', None)
-        if prod_cfg is None:
-            prod_cfg = build_config(
-                ctx.prod.file_paths,
-                file_type=ctx.prod.file_type,
-                delimiter=ctx.prod.delimiter,
-                layout=ctx.prod.layout,
-                header_prefix=ctx.prod.header_prefix,
-                header_layout=ctx.prod.header_layout,
-                detail_layout=ctx.prod.detail_layout,
-                trailer_prefix=ctx.prod.trailer_prefix,
-                trailer_layout=ctx.prod.trailer_layout,
-                ml_record_types=ctx.prod.ml_record_types,
-                ml_delimiter=ctx.ml_delimiter,
-                source=_ex_source,
-                discovery=ctx.prod.discovery,
-            )
-            ctx._prod_cfg = prod_cfg
-        prod_cols = cached_get_column_names(
+        st.subheader("BAU Column Mapping")
+        prod_cols = ctx.prod.schema or cached_get_column_names(
             ctx.prod.file_paths, ctx.prod.file_type,
             ctx.prod.delimiter or ",", ctx.prod.layout,
             source=_ex_source,
         )
-        prod_done = render_all_config_sections(
-            prod_cfg, detected_columns=prod_cols,
-            key_prefix="ex_prod", file_paths=ctx.prod.file_paths,
-        )
-        if prod_done:
-            ctx._prod_cfg = prod_cfg
-            ctx.prod.config_locked = True
-            ctx.prod.store_col = prod_cfg.store_col
-            ctx.prod.upc_col = prod_cfg.upc_col
-            ctx.prod.desc_col = prod_cfg.desc_col
-            ctx.prod.units_col = prod_cfg.units_col
-            ctx.prod.price_col = prod_cfg.price_col
-            ctx.prod.price_type = prod_cfg.price_type
-            ctx.prod.implied_dollars = prod_cfg.implied_dollars
-            ctx.prod.implied_units = prod_cfg.implied_units
-            st.rerun()
+        if prod_cols:
+            _render_side_config(ctx.prod, "BAU", "ex_prod", prod_cols)
+        else:
+            st.warning("No columns detected for BAU.")
 
     elif not ctx.test.config_locked:
-        st.subheader("Test Configuration")
-        test_cfg = getattr(ctx, '_test_cfg', None)
-        if test_cfg is None:
-            test_cfg = build_config(
-                ctx.test.file_paths,
-                file_type=ctx.test.file_type,
-                delimiter=ctx.test.delimiter,
-                layout=ctx.test.layout,
-                header_prefix=ctx.test.header_prefix,
-                header_layout=ctx.test.header_layout,
-                detail_layout=ctx.test.detail_layout,
-                trailer_prefix=ctx.test.trailer_prefix,
-                trailer_layout=ctx.test.trailer_layout,
-                ml_record_types=ctx.test.ml_record_types,
-                ml_delimiter=ctx.ml_delimiter,
-                source=_ex_source,
-                discovery=ctx.test.discovery,
-            )
-            ctx._test_cfg = test_cfg
-        test_cols = cached_get_column_names(
+        st.subheader("Test Column Mapping")
+        test_cols = ctx.test.schema or cached_get_column_names(
             ctx.test.file_paths, ctx.test.file_type,
             ctx.test.delimiter or ",", ctx.test.layout,
             source=_ex_source,
         )
-        test_done = render_all_config_sections(
-            test_cfg, detected_columns=test_cols,
-            key_prefix="ex_test", file_paths=ctx.test.file_paths,
-        )
-        if test_done:
-            ctx._test_cfg = test_cfg
-            ctx.test.config_locked = True
-            ctx.test.store_col = test_cfg.store_col
-            ctx.test.upc_col = test_cfg.upc_col
-            ctx.test.desc_col = test_cfg.desc_col
-            ctx.test.units_col = test_cfg.units_col
-            ctx.test.price_col = test_cfg.price_col
-            ctx.test.price_type = test_cfg.price_type
-            ctx.test.implied_dollars = test_cfg.implied_dollars
-            ctx.test.implied_units = test_cfg.implied_units
-            st.rerun()
+        if test_cols:
+            _render_side_config(ctx.test, "Test", "ex_test", test_cols)
+        else:
+            st.warning("No columns detected for Test.")
 
     if ctx.prod.config_locked and ctx.test.config_locked:
-        st.success("Both configurations locked. Ready to compare schemas.")
+        st.success("Both mappings confirmed. Ready to compare schemas.")
         if st.button("Compare Schemas \u2192", use_container_width=True):
             ctx.phase = PHASE_SCHEMA_COMPARE
             st.rerun()
@@ -1049,17 +1021,17 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
         elif discovery.file_type == "fixed":
             st.warning("Fixed-width file")
             side_ctx.file_type = "fixed"
-            layout_file = st.text_input(f"{side_label} Layout CSV", key=f"{key_prefix}_layout")
-            if layout_file:
-                layout_file = clean_path(layout_file)
-                if os.path.exists(layout_file):
-                    side_ctx.layout = load_layout(layout_file)
-                    discovery.layout = side_ctx.layout
-                    st.success("Layout loaded")
-                    log_phase(f"Detection Completed — {side_label}: fixed-width with layout")
-                    return True
-                else:
-                    st.error(f"Layout file not found: {layout_file}")
+            fw_layout = render_layout_builder(
+                file_paths,
+                existing_layout=side_ctx.layout or getattr(discovery, 'layout', None),
+                source=source,
+                key_prefix=f"{key_prefix}_fw_layout",
+            )
+            if fw_layout is not None:
+                side_ctx.layout = fw_layout
+                discovery.layout = fw_layout
+                log_phase(f"Detection Completed — {side_label}: fixed-width with layout")
+                return True
         elif discovery.file_type == "excel":
             st.success(f"Excel file detected ({side_label})")
             side_ctx.file_type = "delimited"
@@ -1128,21 +1100,35 @@ def _multiline_side_inputs(file_paths, side_ctx: ProcessingContext, side_label: 
     if side_ctx.header_prefix:
         hp = side_ctx.header_prefix
         st.info(f"HDR prefix: **{hp}**")
-        hf = st.text_input(f"{side_label} Header Layout CSV", key=f"ex_hdr_header_file_{key_prefix}")
-        df = st.text_input(f"{side_label} Detail Layout CSV", key=f"ex_hdr_detail_file_{key_prefix}")
-        if hf and os.path.exists(clean_path(hf)):
-            side_ctx.header_layout = load_layout(clean_path(hf))
-            st.success("Header layout ready")
-        if df and os.path.exists(clean_path(df)):
-            side_ctx.detail_layout = load_layout(clean_path(df))
-            st.success("Detail layout ready")
-
-        tf = st.text_input(f"{side_label} Trailer Layout CSV (optional)", key=f"ex_hdr_trailer_file_{key_prefix}")
-        tr_prefix = st.text_input(f"{side_label} Trailer Prefix", value="TRL", key=f"ex_tr_prefix_{key_prefix}")
-        if tf and os.path.exists(clean_path(tf)):
-            side_ctx.trailer_layout = load_layout(clean_path(tf))
-            side_ctx.trailer_prefix = tr_prefix.strip() or None
-            st.success("Trailer layout ready")
+        with st.expander(f"{side_label} Header Layout", expanded=not bool(side_ctx.header_layout)):
+            hdr_header = render_layout_builder(
+                file_paths,
+                existing_layout=side_ctx.header_layout,
+                source=source,
+                key_prefix=f"ex_{key_prefix}_hdr_header",
+            )
+            if hdr_header is not None:
+                side_ctx.header_layout = hdr_header
+        with st.expander(f"{side_label} Detail Layout", expanded=not bool(side_ctx.detail_layout)):
+            hdr_detail = render_layout_builder(
+                file_paths,
+                existing_layout=side_ctx.detail_layout,
+                source=source,
+                key_prefix=f"ex_{key_prefix}_hdr_detail",
+            )
+            if hdr_detail is not None:
+                side_ctx.detail_layout = hdr_detail
+        with st.expander(f"{side_label} Trailer Layout (optional)", expanded=False):
+            tr_prefix = st.text_input(f"{side_label} Trailer Prefix", value=side_ctx.trailer_prefix or "TRL", key=f"ex_tr_prefix_{key_prefix}")
+            hdr_trailer = render_layout_builder(
+                file_paths,
+                existing_layout=side_ctx.trailer_layout,
+                source=source,
+                key_prefix=f"ex_{key_prefix}_hdr_trailer",
+            )
+            if hdr_trailer is not None:
+                side_ctx.trailer_layout = hdr_trailer
+                side_ctx.trailer_prefix = tr_prefix.strip() or None
     else:
         detected = detect_record_types(file_paths[0], source=source)
         rt_default = ",".join(detected) if detected else "H,D"

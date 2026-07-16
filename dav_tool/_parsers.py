@@ -2,8 +2,10 @@ import csv
 import io
 import logging
 import os
-import polars as pl
+from enum import Enum
 from typing import Iterator, List, Dict, Any, Optional, Union, BinaryIO
+
+import polars as pl
 
 from dav_tool.config import DEFAULT_ENCODING, FALLBACK_ENCODING, DEFAULT_CHUNK_SIZE, DEFAULT_PREVIEW_ROWS
 from dav_tool.datasource.base import IDataSource
@@ -11,14 +13,44 @@ from dav_tool.datasource.base import IDataSource
 logger = logging.getLogger(__name__)
 
 
-def safe_numeric(column: str) -> pl.Expr:
-    return (
+_NON_NUMERIC_PATTERNS = [
+    "NULL", "N/A", "NA", "NAN", "INF", "-", "--", ".",
+]
+
+
+class NumericHandling(Enum):
+    """Configurable behaviour for non-numeric values during conversion."""
+    AS_NULL = "as_null"
+    AS_ZERO = "as_zero"
+    REJECT = "reject"
+
+
+def _log_numeric_issue(column: str, original: str, reason: str):
+    logger.warning("Numeric conversion issue — col=%r value=%r reason=%s", column, original, reason)
+
+
+def safe_numeric(
+    column: str,
+    on_invalid: NumericHandling = NumericHandling.AS_NULL,
+) -> pl.Expr:
+    cleaned = (
         pl.col(column)
         .cast(pl.Utf8)
-        .str.replace_all(r"[^0-9.eE+\-]", "")
-        .cast(pl.Float64)
-        .fill_null(0.0)
+        .str.strip_chars()
     )
+    cleaned = pl.when(
+        cleaned.str.to_uppercase().is_in(_NON_NUMERIC_PATTERNS)
+    ).then(None).otherwise(cleaned)
+    cleaned = cleaned.str.replace_all(r"[^0-9.eE+\-]", "")
+    cleaned = pl.when(
+        (cleaned == "") | cleaned.is_null()
+    ).then(None).otherwise(cleaned)
+    result = cleaned.cast(pl.Float64, strict=False)
+    if on_invalid == NumericHandling.AS_ZERO:
+        return result.fill_null(0.0)
+    if on_invalid == NumericHandling.REJECT:
+        return result
+    return result
 
 
 def load_layout(layout_file: str) -> List[Dict[str, Any]]:

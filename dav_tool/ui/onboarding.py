@@ -9,6 +9,7 @@ from dav_tool.workflow.preview import (
     preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
     load_layout,
 )
+from dav_tool.ui.layout_builder import render_layout_builder
 from dav_tool._observability import (
     log_phase, setup_logging,
     print_memory_snapshot, log_dataframe_summary,
@@ -23,11 +24,7 @@ from dav_tool.ui.helpers import (
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
 from dav_tool.format_config import apply_format_config, load_format_config, save_format_config, config_from_ctx
-from dav_tool.config_builder import build_config
 from dav_tool.workflow.discovery import detect_file
-from dav_tool.ui.helpers import (
-    render_all_config_sections,
-)
 
 # Phase constants matching the 7-step workflow
 PHASE_DISCOVERY = 1
@@ -247,13 +244,15 @@ def _phase1_discovery(ctx):
                             st.success(f"Delimited ({prod_delim})")
                         elif file_type == "fixed":
                             st.warning("Fixed-width file")
-                            layout_file = st.text_input("Layout CSV")
-                            if layout_file:
-                                layout_file = clean_path(layout_file)
-                                if os.path.exists(layout_file):
-                                    layout_list = load_layout(layout_file)
-                                    st.success("Layout loaded")
-                                    discovery.layout = layout_list
+                            fw_layout = render_layout_builder(
+                                file_paths,
+                                existing_layout=layout_list or getattr(discovery, 'layout', None),
+                                source=_onb_source,
+                                key_prefix="onb_fw",
+                            )
+                            if fw_layout is not None:
+                                layout_list = fw_layout
+                                discovery.layout = layout_list
 
                 if file_type == "fixed" and layout_list and file_paths and not is_multiline_record(file_paths[0], source=_onb_source):
                     st.subheader("Fixed Width Settings")
@@ -323,53 +322,53 @@ def _phase2_configuration(ctx):
     if ctx.phase >= PHASE_CONFIG_VALIDATED:
         return
 
-    st.markdown("### Step 3: Configuration")
+    st.markdown("### Step 3: Column Mapping")
     _onb_source = get_active_source()
 
     if getattr(ctx, '_show_config', False) and not ctx.config_locked:
-        cfg = getattr(ctx, '_generated_config', None)
-        if cfg is None:
-            cfg = st.session_state.get("onb_cfg_saved")
-            if cfg is not None:
-                ctx._generated_config = cfg
-        if cfg is None:
-            cfg = build_config(
-                ctx.file_paths,
-                file_type=ctx.file_type,
-                delimiter=ctx.delimiter,
-                layout=ctx.layout,
-                header_prefix=ctx.header_prefix,
-                header_layout=ctx.header_layout,
-                detail_layout=ctx.detail_layout,
-                trailer_prefix=ctx.trailer_prefix,
-                trailer_layout=ctx.trailer_layout,
-                ml_record_types=ctx.ml_record_types,
-                ml_delimiter=ctx.ml_delimiter or "|",
-                source=_onb_source,
-                discovery=ctx.discovery,
-            )
-            ctx._generated_config = cfg
-        st.session_state["onb_cfg_saved"] = cfg
-        all_done = render_all_config_sections(
-            cfg, detected_columns=ctx.columns,
-            key_prefix="onb", file_paths=ctx.file_paths,
+        cols = ctx.schema or ctx.columns or []
+        if not cols:
+            st.warning("No columns detected. Complete discovery first.")
+            return
+
+        st.caption(f"Detected columns: {', '.join(cols)}")
+        smart_idx = smart_column_indices(cols)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            store_col = st.selectbox("Store Column", cols, index=smart_idx.get("store", (0,))[0], key="onb_cfg_store")
+            upc_col = st.selectbox("UPC Column", cols, index=smart_idx.get("upc", (0,))[0], key="onb_cfg_upc")
+            desc_col = st.selectbox("Description Column", cols, index=smart_idx.get("description", (0,))[0], key="onb_cfg_desc")
+        with c2:
+            units_col = st.selectbox("Units Column", cols, index=smart_idx.get("units", (0,))[0], key="onb_cfg_units")
+            price_col = st.selectbox("Price Column", cols, index=smart_idx.get("price", (0,))[0], key="onb_cfg_price")
+
+        price_type = st.radio("Price Type", ["Total Price", "Unit Price"], horizontal=True, key="onb_cfg_pt")
+        implied_dollars = st.checkbox("Implied Dollars (divide by 100)", key="onb_cfg_imp_dol")
+        implied_units = st.checkbox("Implied Units (divide by 100)", key="onb_cfg_imp_unt")
+
+        mapping_errors = validate_column_mapping(
+            store_col, upc_col, desc_col, units_col, price_col,
         )
-        if all_done:
-            ctx._generated_config = cfg
+        if mapping_errors:
+            for err in mapping_errors:
+                st.error(err)
+
+        if st.button("Accept Mapping \u2192", type="primary", use_container_width=True, disabled=bool(mapping_errors)):
+            ctx.store_col = store_col
+            ctx.upc_col = upc_col
+            ctx.desc_col = desc_col
+            ctx.units_col = units_col
+            ctx.price_col = price_col
+            ctx.price_type = price_type
+            ctx.implied_dollars = implied_dollars
+            ctx.implied_units = implied_units
             ctx.config_locked = True
             ctx._show_config = False
-            ctx.store_col = cfg.store_col
-            ctx.upc_col = cfg.upc_col
-            ctx.desc_col = cfg.desc_col
-            ctx.units_col = cfg.units_col
-            ctx.price_col = cfg.price_col
-            ctx.price_type = cfg.price_type
-            ctx.implied_dollars = cfg.implied_dollars
-            ctx.implied_units = cfg.implied_units
+            st.success("Column mapping confirmed. Proceed to validation.")
             st.rerun()
 
     if ctx.config_locked:
-        st.success("Configuration complete. Proceed to validation.")
         if st.button("Validate Configuration \u2192", use_container_width=True):
             ctx.phase = PHASE_CONFIG_VALIDATED
             st.rerun()
@@ -670,42 +669,44 @@ def _hdr_fixed_flow(file_paths, hdr_prefixes, source=None):
     if not raw_preview.is_empty():
         st.dataframe(raw_preview.to_pandas())
 
-    st.subheader("Header Layout CSV")
-    header_layout_file = st.text_input("Header Layout CSV Path", key="onb_hdr_header_layout")
-    hdr_header_layout = None
-    if header_layout_file:
-        hl = clean_path(header_layout_file)
-        if os.path.exists(hl):
-            hdr_header_layout = load_layout(hl)
-            st.success(f"Header layout loaded ({len(hdr_header_layout)} fields)")
+    with st.expander("Header Layout", expanded=not bool(ctx.header_layout)):
+        st.caption("Define fields for the header record lines.")
+        hdr_header_layout = render_layout_builder(
+            file_paths,
+            existing_layout=ctx.header_layout,
+            source=source,
+            key_prefix="onb_hdr_header",
+        )
+        if hdr_header_layout is not None:
+            ctx.header_layout = hdr_header_layout
 
-    st.subheader("Detail Layout CSV")
-    detail_layout_file = st.text_input("Detail Layout CSV Path", key="onb_hdr_detail_layout")
-    hdr_detail_layout = None
-    if detail_layout_file:
-        dl = clean_path(detail_layout_file)
-        if os.path.exists(dl):
-            hdr_detail_layout = load_layout(dl)
-            st.success(f"Detail layout loaded ({len(hdr_detail_layout)} fields)")
+    with st.expander("Detail Layout", expanded=not bool(ctx.detail_layout)):
+        st.caption("Define fields for the detail (data) record lines.")
+        hdr_detail_layout = render_layout_builder(
+            file_paths,
+            existing_layout=ctx.detail_layout,
+            source=source,
+            key_prefix="onb_hdr_detail",
+        )
+        if hdr_detail_layout is not None:
+            ctx.detail_layout = hdr_detail_layout
 
-    st.subheader("Trailer Layout CSV (optional)")
-    trailer_prefix_hint = ctx.trailer_prefix or "TRL"
-    trailer_prefix_val = st.text_input("Trailer Prefix", value=trailer_prefix_hint, key="onb_tr_prefix")
-    trailer_layout_file = st.text_input("Trailer Layout CSV Path (leave empty if no trailer)", key="onb_hdr_trailer_layout")
-    hdr_trailer_layout = None
-    if trailer_layout_file:
-        tl = clean_path(trailer_layout_file)
-        if os.path.exists(tl):
-            hdr_trailer_layout = load_layout(tl)
-            st.success(f"Trailer layout loaded ({len(hdr_trailer_layout)} fields)")
+    with st.expander("Trailer Layout (optional)", expanded=False):
+        trailer_prefix_hint = ctx.trailer_prefix or "TRL"
+        trailer_prefix_val = st.text_input("Trailer Prefix", value=trailer_prefix_hint, key="onb_tr_prefix")
+        hdr_trailer_layout = render_layout_builder(
+            file_paths,
+            existing_layout=ctx.trailer_layout,
+            source=source,
+            key_prefix="onb_hdr_trailer",
+        )
+        if hdr_trailer_layout is not None:
+            ctx.trailer_layout = hdr_trailer_layout
+            ctx.trailer_prefix = trailer_prefix_val.strip() or None
 
     if st.button("Flatten Records", key="onb_hdr_flatten"):
-        if hdr_header_layout and hdr_detail_layout:
+        if ctx.header_layout and ctx.detail_layout:
             ctx.header_prefix = prefix
-            ctx.header_layout = hdr_header_layout
-            ctx.detail_layout = hdr_detail_layout
-            ctx.trailer_prefix = trailer_prefix_val.strip() or None
-            ctx.trailer_layout = hdr_trailer_layout
             ctx.ml_flattened = True
             st.rerun()
 

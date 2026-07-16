@@ -1,195 +1,346 @@
-The current branch has been tagged as RC1.
+# DVA Platform
+# RC2 Stabilization Sprint
+# Production Bug Fixes + UX Improvements + Code Quality
 
-RC1 is now considered the stable baseline for the DVA Retailer Data Integration Platform.
+The repository has reached RC1.
 
-From this point onward, do NOT treat the repository as a prototype.
+RC1 is now the stable baseline.
 
-Treat it as a production software product entering Release Candidate stabilization.
+This sprint is NOT about adding new features.
 
---------------------------------------------------
-MISSION
---------------------------------------------------
+This sprint focuses on:
 
-From now on every change must satisfy at least one of these goals:
+1. Production bug fixes
+2. Workflow improvements
+3. Code quality
+4. Documentation
+5. Developer experience
 
-1. Improve Stability
-2. Improve Maintainability
-3. Improve Performance
-4. Improve User Experience
-5. Improve Production Readiness
+===========================================================
+GENERAL RULES
+===========================================================
 
-Avoid adding unnecessary features.
+Before modifying any code:
 
-Every new component must have a clear business justification.
+- Understand the complete execution flow.
+- Identify impacted modules.
+- Trace all function calls.
+- Check for regressions.
+- Implement the smallest correct solution.
 
-Whenever possible improve existing architecture instead of introducing parallel implementations.
+Every change must be regression tested.
 
---------------------------------------------------
-ARCHITECTURE
---------------------------------------------------
+Do not introduce duplicate implementations.
 
-The platform architecture is now considered:
+Update documentation whenever behaviour changes.
 
-Connection Layer
-        ↓
-Detection Layer
-        ↓
-Canonical Layer
-        ↓
-Requirement Layer
-        ↓
-Processing Layer
-        ↓
-Output Layer
-        ↓
-Flush Layer
+===========================================================
+SPRINT 1
+FIXED WIDTH LAYOUT BUILDER
+===========================================================
 
-This pipeline is the source of truth.
+Current Problem
 
-Do not bypass layers.
+Fixed-width datasets ask for a Layout CSV.
 
-Do not introduce shortcuts.
+However:
 
-Do not duplicate logic.
+- There is no proper UI for creating layouts.
+- Users must already possess a layout file.
+- This makes onboarding difficult.
 
---------------------------------------------------
-WORKFLOWS
---------------------------------------------------
+New Behaviour
 
-The platform supports two workflows only.
+When Detection identifies a Fixed Width dataset:
+
+Step 1
+
+Display RAW Preview.
+
+Do not parse.
+
+Do not flatten.
+
+Display first N physical records exactly as stored.
+
+Step 2
+
+If multiline fixed-width:
+
+Flatten records using detected record boundaries.
+
+Show Flattened Preview.
+
+Keep RAW Preview available inside an expander for reference.
+
+Step 3
+
+Instead of asking for Layout CSV immediately,
+
+display an interactive Layout Builder.
+
+Layout Builder should contain:
+
+Column Name
+
+Start Position
+
+Length
+
+Data Type
+
+(optional)
+
+Format
+
+(optional)
+
+Nullable
+
+(optional)
+
+Description
+
+(optional)
+
+Users should be able to:
+
+Add rows
+
+Delete rows
+
+Reorder rows
+
+Preview extracted columns immediately
+
+Validate layout
+
+Step 4
+
+Generate Layout CSV automatically.
+
+Allow:
+
+Download Layout CSV
+
+Save Layout
+
+Reuse Layout
+
+Upload Existing Layout
+
+Both manual creation and uploaded layouts must be supported.
+
+After layout confirmation,
+
+continue with Canonical Configuration.
+
+===========================================================
+SPRINT 2
+DELIMITED PROCESSING BUG
+===========================================================
+
+Observed
+
+Configuration validates successfully.
+
+Processing begins.
+
+Store aggregation fails.
+
+Item aggregation fails.
+
+Root Cause
+
+replace()
+
+creates empty strings.
+
+Strict float casting fails.
+
+Fix
+
+Review aggregation pipeline.
+
+Never perform strict numeric casting directly on cleaned text.
+
+Implement robust numeric conversion.
+
+Handle:
+
+empty string
+
+spaces
+
+NULL
+
+N/A
+
+-
+
+invalid values
+
+Support configurable behaviour:
+
+Treat as NULL
+
+Treat as Zero
+
+Reject Record
+
+Warn User
+
+Log affected records.
+
+Aggregation must continue whenever possible.
+
+No silent failures.
+
+===========================================================
+SPRINT 3
+CODE QUALITY
+===========================================================
+
+Review the entire repository.
 
 1.
 
-Onboarding
+Organize imports.
 
-Used when retailer data is received for the first time.
+Standardize import ordering.
+
+Remove duplicates.
+
+Remove unused imports.
 
 2.
 
-Format Change
+Function Validation
 
-Used when an existing retailer changes:
+Verify every function call.
 
-- POS
-- Delivery format
-- Layout
-- Schema
-- Delimiter
-- Record structure
-- Header
-- Fixed width layouts
-- Multiline layouts
+Detect:
 
-The workflow must determine differences between BAU and TEST datasets and generate reports explaining required configuration updates.
+missing functions
 
---------------------------------------------------
-DESIGN PRINCIPLES
---------------------------------------------------
+incorrect signatures
 
-Always prefer
+renamed functions
 
-small
-reusable
-testable
-stateless
-layered
-streaming-first
+scope mismatch
 
-modules.
+broken references
 
-Never place business logic inside Streamlit UI.
+Fix all.
 
-UI should orchestrate only.
+3.
 
-Workflow layer performs orchestration.
+Dependency Management
 
-Processing layer performs calculations.
+Detect Python version.
 
-Detection layer performs discovery.
+Generate:
 
-Connection layer performs connectivity.
+requirements.txt
 
---------------------------------------------------
-DATA PRINCIPLES
---------------------------------------------------
+Requirements must include:
 
-Processing must always operate on Canonical DataFrames.
+compatible versions
 
-No downstream module should require knowledge of:
+minimum versions
 
-delimiter
+optional packages
 
-fixed width
+development packages
 
-HDR
+test packages
 
-multiline
+Verify installation inside a clean virtual environment.
 
-encoding
+Document installation steps.
 
-header detection
+===========================================================
+SPRINT 4
+DOCUMENTATION
+===========================================================
 
-physical schema
+Generate documentation for developers.
 
-Those belong only to upstream layers.
+Produce:
 
---------------------------------------------------
-PERFORMANCE
---------------------------------------------------
+Architecture.md
 
-Streaming remains the default strategy.
+PseudoCode.md
 
-Never read large datasets entirely into memory unless explicitly required.
+ExecutionFlow.md
 
-Continue using automatic Data Access Strategy.
+ModuleGuide.md
 
-Continue chunked processing.
+DeveloperGuide.md
 
-Avoid duplicate reads.
+RequirementsGuide.md
 
-Avoid duplicate parsing.
+UserGuide.md
 
-Avoid duplicate aggregation.
+Each module should include:
 
-Avoid unnecessary DataFrame copies.
+Purpose
 
---------------------------------------------------
-CODE QUALITY
---------------------------------------------------
+Inputs
 
-Whenever modifying code:
+Outputs
 
-Remove dead code nearby.
+Dependencies
 
-Reduce duplication.
+Execution Flow
 
-Split large methods when practical.
+Sequence
 
-Replace generic exception handling with logged errors.
+===========================================================
+SPRINT 5
+DIAGRAMS
+===========================================================
 
-Improve naming where helpful.
+Generate diagrams describing the project.
 
-Keep modules cohesive.
+Architecture Diagram
 
-Do not increase technical debt.
+Pipeline Diagram
 
---------------------------------------------------
-TESTING
---------------------------------------------------
+Workflow Diagram
 
-Every change must include regression testing.
+Onboarding Flow
 
-Run affected unit tests.
+Format Change Flow
 
-Run golden dataset tests.
+Connection Layer
 
-Run workflow tests if impacted.
+Detection Layer
 
-Verify both:
+Canonical Layer
 
-Onboarding
+Requirement Layer
 
-Format Change
+Processing Layer
+
+Output Layer
+
+Flush Layer
+
+Configuration Builder
+
+Data Access Strategy
+
+Use Mermaid diagrams inside Markdown.
+
+Keep diagrams synchronized with implementation.
+
+===========================================================
+SPRINT 6
+REGRESSION TESTING
+===========================================================
+
+Run regression after every major change.
 
 Verify:
 
@@ -205,63 +356,66 @@ Multiline
 
 HDR
 
-Do not mark work complete until regression passes.
+Onboarding
 
---------------------------------------------------
-DOCUMENTATION
---------------------------------------------------
+Format Change
 
-Whenever architecture changes:
+Aggregate Only
 
-Update
+Aggregate + Calculate
 
-CHANGELOG
+Validation
 
-Architecture documentation
+Reports
 
-Workflow documentation
+Connection Manager
 
-User Guide
+Canonical Schema
 
-Developer Guide
+Streaming
 
-if impacted.
+Memory
 
---------------------------------------------------
-BEFORE IMPLEMENTING ANY CHANGE
---------------------------------------------------
+===========================================================
+DELIVERABLES
+===========================================================
 
-Always ask:
+Create:
 
-Is this solving a real production problem?
+CHANGELOG_RC2.md
 
-Can existing architecture solve this instead?
+RC2_BugFix_Report.md
 
-Will this simplify the platform?
+Architecture.md
 
-Will this reduce maintenance cost?
+PseudoCode.md
 
-Will this improve user experience?
+ExecutionFlow.md
 
-Will this improve production reliability?
+DeveloperGuide.md
 
-If the answer is "No", do not implement it.
+RequirementsGuide.md
 
---------------------------------------------------
-GOAL
---------------------------------------------------
+Updated_UserGuide.md
 
-The objective is no longer to build features.
+requirements.txt
 
-The objective is to build a robust, production-grade Retailer Data Integration Platform that can reliably ingest retailer data from multiple formats, normalize it into a canonical model, execute configurable business operations, generate validation and comparison reports, and remain maintainable over many years.
+Architecture_Diagrams.md
 
-Think like a Principal Software Engineer responsible for long-term ownership of the platform.
+Regression_Report.md
 
-When asked to implement work:
-1. Review the affected architecture.
-2. Identify impact across layers.
-3. Implement the smallest correct solution.
-4. Update tests.
-5. Update documentation.
-6. Verify no regressions.
-7. Summarize architectural impact before considering the task complete.
+===========================================================
+SUCCESS CRITERIA
+===========================================================
+
+The sprint is complete only if:
+
+- Fixed-width onboarding works entirely through the UI without requiring a pre-existing layout file.
+- Multiline fixed-width datasets can be flattened and previewed before layout creation.
+- Delimited aggregation no longer fails due to numeric conversion issues.
+- Function references are fully validated.
+- Imports are standardized.
+- Dependencies install cleanly on the supported Python version.
+- Documentation matches the implementation.
+- All regression tests pass.
+- No existing workflows regress.
