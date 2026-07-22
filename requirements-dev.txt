@@ -1,0 +1,12 @@
+# DVA Data Parser - Development Dependencies
+# Python >= 3.10
+# Generated: 2026-07-22
+
+# Testing
+pytest>=8.0
+pytest-html>=4.0
+pytest-playwright>=0.4
+playwright>=1.40
+
+# Test utilities
+requests>=2.31
