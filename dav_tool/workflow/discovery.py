@@ -55,6 +55,7 @@ class DiscoveryResult:
         candidate_columns: Optional[Dict[str, Optional[str]]] = None,
         warnings: Optional[List[str]] = None,
         recommendations: Optional[List[str]] = None,
+        confidence_breakdown: Optional[List[str]] = None,
     ):
         self.file_paths = file_paths
         self.file_type = file_type
@@ -83,6 +84,7 @@ class DiscoveryResult:
         self.candidate_columns = candidate_columns or {}
         self.warnings = warnings or []
         self.recommendations = recommendations or []
+        self.confidence_breakdown = confidence_breakdown or []
 
     @classmethod
     def from_context(cls, ctx) -> "DiscoveryResult":
@@ -117,6 +119,7 @@ class DiscoveryResult:
             candidate_columns=getattr(ctx, "candidate_columns", {}),
             warnings=getattr(ctx, "warnings", []),
             recommendations=getattr(ctx, "recommendations", []),
+            confidence_breakdown=getattr(ctx, "confidence_breakdown", []),
         )
 
     def apply_to_context(self, ctx) -> None:
@@ -148,6 +151,7 @@ class DiscoveryResult:
         ctx.candidate_keys = self.candidate_keys
         ctx.suggested_joins = self.suggested_joins
         ctx.confidence = self.confidence
+        ctx.confidence_breakdown = self.confidence_breakdown
         ctx.candidate_columns = self.candidate_columns
         ctx.warnings = self.warnings
         ctx.recommendations = self.recommendations
@@ -188,6 +192,7 @@ def detect_file(
             record_prefix=summary.get("record_prefix", []),
             candidate_keys=summary.get("candidate_keys", []),
             confidence=summary["confidence"],
+            confidence_breakdown=summary.get("confidence_breakdown", []),
             warnings=summary["warnings"],
             recommendations=summary["recommendations"],
         )

@@ -1016,3 +1016,27 @@ def cleanup_dataframes(ctx, keep_attrs=None):
                 setattr(ctx, attr, None)
             except Exception as e:
                 logger.debug("Could not clear context attr %s: %s", attr, e)
+
+
+def display_confidence_breakdown(discovery):
+    """Show a confidence breakdown expander with reasons behind the score.
+
+    Call this after detection results are available in the UI.
+    """
+    if discovery is None:
+        return
+    confidence = getattr(discovery, "confidence", None)
+    breakdown = getattr(discovery, "confidence_breakdown", None)
+    if confidence is None and not breakdown:
+        return
+    with st.expander(f"Detection Confidence: {confidence:.0%}", expanded=False):
+        if breakdown:
+            for reason in breakdown:
+                if "penalty:" in reason or "penalty —" in reason:
+                    st.caption(f":warning: {reason}")
+                elif "no penalty" in reason:
+                    st.caption(f":white_check_mark: {reason}")
+                else:
+                    st.caption(reason)
+        if not breakdown:
+            st.caption("No breakdown available")

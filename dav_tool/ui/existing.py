@@ -1,7 +1,9 @@
+import hashlib
 import logging
 import os
-import streamlit as st
+
 import polars as pl
+import streamlit as st
 
 logger = logging.getLogger(__name__)
 from dav_tool.workflow.preview import (
@@ -21,6 +23,7 @@ from dav_tool.ui.helpers import (
     display_processing_history, smart_column_indices, validate_column_mapping,
     cached_preview_raw, cached_preview_raw_lines,
     render_phase_progress, validate_config_before_processing, cleanup_dataframes,
+    display_confidence_breakdown,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext, ExistingContext
@@ -76,6 +79,8 @@ def run():
 
     if "ex_ctx" not in st.session_state:
         st.session_state.ex_ctx = ExistingContext()
+    if "_detection_cache" not in st.session_state:
+        st.session_state._detection_cache = {}
     ctx = st.session_state.ex_ctx
 
     render_phase_progress(ctx.phase)
@@ -277,11 +282,13 @@ def _phase1_discovery(ctx):
         with cr1:
             if st.button("Retry BAU Detection", key="ex_bau_retry", use_container_width=True):
                 st.session_state.pop("ex_bau_detection_failed", None)
+                _clear_detection_cache(prod_file_paths, "prod")
                 if _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod", source=_ex_source):
                     st.rerun()
         with cr2:
             if st.button("Start BAU Detection Manually", key="ex_bau_manual", use_container_width=True):
                 st.session_state.pop("ex_bau_detection_failed", None)
+                _clear_detection_cache(prod_file_paths, "prod")
                 if _detect_and_set(prod_file_paths, ctx.prod, "BAU", "prod", source=_ex_source):
                     st.rerun()
 
@@ -291,11 +298,13 @@ def _phase1_discovery(ctx):
         with cr1:
             if st.button("Retry Test Detection", key="ex_test_retry", use_container_width=True):
                 st.session_state.pop("ex_test_detection_failed", None)
+                _clear_detection_cache(test_file_paths, "test")
                 if _detect_and_set(test_file_paths, ctx.test, "Test", "test", source=_ex_source):
                     st.rerun()
         with cr2:
             if st.button("Start Test Detection Manually", key="ex_test_manual", use_container_width=True):
                 st.session_state.pop("ex_test_detection_failed", None)
+                _clear_detection_cache(test_file_paths, "test")
                 if _detect_and_set(test_file_paths, ctx.test, "Test", "test", source=_ex_source):
                     st.rerun()
 
@@ -336,6 +345,20 @@ def _phase1_discovery(ctx):
         ctx.prod.file_paths = prod_file_paths
         ctx.test.file_paths = test_file_paths
         ctx.ml_delimiter = ml_delim
+
+        redetect_c1, redetect_c2 = st.columns(2)
+        with redetect_c1:
+            if st.button("Re-detect BAU", key="ex_bau_redetect", use_container_width=True):
+                _clear_detection_cache(prod_file_paths, "prod")
+                ctx.prod.file_type = None
+                ctx.prod.discovery = None
+                st.rerun()
+        with redetect_c2:
+            if st.button("Re-detect Test", key="ex_test_redetect", use_container_width=True):
+                _clear_detection_cache(test_file_paths, "test")
+                ctx.test.file_type = None
+                ctx.test.discovery = None
+                st.rerun()
 
         if st.button("Compare Discovery Results \u2192", use_container_width=True):
             ctx.phase = PHASE_DISCOVERY_COMPARE
@@ -893,7 +916,8 @@ def _phase5_validation(ctx):
                 _execute_validation(
                     prod_paths, test_paths, prod_type, test_type,
                     prod_delim, test_delim,
-                    ctx.prod.eff_layout, ctx.test.eff_layout,
+                    getattr(ctx.prod, 'eff_layout', None) or prod_layout_list,
+                    getattr(ctx.test, 'eff_layout', None) or test_layout_list,
                     prod_start_line, test_start_line, prod_record_type, test_record_type,
                     prod_store_col, prod_units_col, prod_price_col, prod_upc_col, prod_desc_col,
                     test_store_col, test_units_col, test_price_col, test_upc_col, test_desc_col,
@@ -935,6 +959,12 @@ def _phase6_reports(ctx):
         st.rerun()
 
 
+def _clear_detection_cache(file_paths, side_label=""):
+    cache_key = hashlib.md5(str(sorted(file_paths)).encode()).hexdigest() + f"_{side_label}"
+    if "_detection_cache" in st.session_state:
+        st.session_state._detection_cache.pop(cache_key, None)
+
+
 def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = "", source=None):
     """Detect file type via Discovery service and set results on side_ctx.
 
@@ -944,13 +974,24 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
     log_phase(f"Detection Started — {side_label}")
 
     try:
-        discovery = detect_file(file_paths, source=source)
+        cache_key = hashlib.md5(str(sorted(file_paths)).encode()).hexdigest() + f"_{side_label}"
+        cached = st.session_state._detection_cache.get(cache_key)
+        if cached is not None:
+            logger.info("DETECTION CACHE HIT — %s (%s)", file_paths, side_label)
+            discovery = cached
+        else:
+            logger.info("DETECTION EXECUTED — %s (%s)", file_paths, side_label)
+            discovery = detect_file(file_paths, source=source)
+            st.session_state._detection_cache[cache_key] = discovery
         if discovery.error:
             if discovery.file_type == "fixed":
                 st.warning(f"Fixed-width file detected ({side_label}). Define column positions below.")
             else:
                 st.error(f"Detection failed for {side_label}: {discovery.error}")
                 return False
+
+        # Show confidence breakdown
+        display_confidence_breakdown(discovery)
 
         # Store discovery result on the side context
         side_ctx.discovery = discovery
@@ -988,6 +1029,7 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
                 side_ctx.schema = layout_fields
                 log_phase(f"Detection Completed — {side_label}: fixed-width with layout")
                 return True
+            logger.warning("Layout builder returned None for %s — user did not confirm layout", side_label)
         elif discovery.file_type == "excel":
             st.success(f"Excel file detected ({side_label})")
             side_ctx.file_type = "delimited"

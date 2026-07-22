@@ -827,6 +827,58 @@ def compute_confidence_score(detection_result: Dict) -> float:
     return max(0.0, round(score, 2))
 
 
+def compute_confidence_breakdown(detection_result: Dict) -> List[str]:
+    """Return a human-readable list of factors that affected confidence.
+
+    Each entry describes why a penalty was applied (or why no penalty).
+    """
+    reasons: List[str] = []
+    file_type = detection_result.get("file_type")
+
+    if file_type is None:
+        return ["File type could not be determined — confidence = 0.0"]
+
+    if file_type == "fixed":
+        reasons.append("Fixed-width format detected — base penalty: -0.30 (fallback format)")
+
+    if file_type == "delimited":
+        delim = detection_result.get("delimiter")
+        scores = detection_result.get("_delimiter_scores", {})
+        if delim and scores:
+            best_score = scores.get(delim, 0)
+            next_best = sorted(scores.values(), reverse=True)
+            next_best_val = next_best[1] if len(next_best) > 1 else 0
+            if best_score == 0:
+                reasons.append(f"Delimiter '{delim}' scored 0 in sample — penalty: -0.30")
+            elif best_score < next_best_val * 2:
+                reasons.append(f"Delimiter '{delim}' ambiguous (score {best_score} vs next {next_best_val}) — penalty: -0.15")
+            else:
+                reasons.append(f"Delimiter '{delim}' cleanly detected (score {best_score}) — no penalty")
+        else:
+            reasons.append("No delimiter scores available — partial penalty: -0.30")
+
+    if detection_result.get("is_multiline"):
+        if not detection_result.get("header_prefix") and not detection_result.get("ml_record_types"):
+            reasons.append("Multiline file with no header prefix or record types detected — penalty: -0.20")
+        else:
+            reasons.append("Multiline file with header/record types — no penalty")
+
+    is_multiline = detection_result.get("is_multiline", False)
+    has_trailer = detection_result.get("trailer_prefix") is not None
+    if is_multiline and not has_trailer:
+        reasons.append("Multiline file missing trailer prefix — penalty: -0.10")
+    elif is_multiline and has_trailer:
+        reasons.append("Multiline file with trailer prefix — no penalty")
+
+    header = detection_result.get("has_header", False)
+    if file_type == "delimited" and not header:
+        reasons.append("No header row detected — penalty: -0.10 (columns will be auto-named)")
+    elif file_type == "delimited":
+        reasons.append("Header row detected — no penalty")
+
+    return reasons
+
+
 def generate_detection_summary(
     file_path,
     source: Optional[IDataSource] = None,
@@ -836,6 +888,7 @@ def generate_detection_summary(
     This is the single detection entry point that fully describes a file.
     Downstream layers MUST consume this dict instead of re-detecting.
     """
+    logger.info("DETECTION EXECUTED — %s", file_path)
     log_phase(f"Detection — STARTED ({file_path})")
     t0 = time.time()
 
@@ -1011,7 +1064,9 @@ def generate_detection_summary(
             logger.warning("Could not detect quantity/weight/uom columns for %s: %s", file_path, e)
 
     result["confidence"] = compute_confidence_score(result)
+    result["confidence_breakdown"] = compute_confidence_breakdown(result)
     elapsed = time.time() - t0
+    logger.info("DETECTION COMPLETED — %s (%s, confidence=%s, %.2fs)", file_path, file_type, result['confidence'], elapsed)
     log_phase(f"Detection — COMPLETED ({file_type}, confidence={result['confidence']}, {elapsed:.2f}s)")
     return result
 

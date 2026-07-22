@@ -188,6 +188,14 @@ class FormatConfig:
     weight_uom_col: Optional[str] = None
     resolution_rule: str = "units_preferred"  # "units_preferred", "weight_preferred", "average"
 
+    # === Quantity Resolution (RC2) ===
+    weight_qty_col: Optional[str] = None
+    """Explicit column for weighted quantity (same as weight_col by default)."""
+    units_uom: Optional[str] = None
+    """Unit of measure for the units column (e.g. 'each', 'case')."""
+    quantity_strategy: str = "auto"
+    """One of: auto, prefer_weight, prefer_units, weight_only, units_only."""
+
     # === Backward-compat aliases ===
     @property
     def schema(self) -> Optional[List[str]]:
@@ -316,6 +324,20 @@ def apply_format_config(
     ctx.weight_uom = config.weight_uom
     ctx.weight_uom_col = config.weight_uom_col
     ctx.resolution_rule = config.resolution_rule
+    ctx.weight_qty_col = config.weight_qty_col
+    ctx.units_uom = config.units_uom
+    _rule_to_strategy = {
+        "units_preferred": "prefer_units",
+        "weight_preferred": "prefer_weight",
+        "average": "auto",
+    }
+    ctx.quantity_strategy = _rule_to_strategy.get(config.resolution_rule, config.quantity_strategy or "auto")
+
+    # Effective config (frozen state for processing)
+    ctx.eff_type = config.file_type
+    ctx.eff_delimiter = config.delimiter
+    ctx.eff_record_type = config.record_type
+    ctx.eff_layout = config.layout
 
     if config.numeric_config:
         try:
@@ -399,6 +421,13 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
 
     Used for saving the current configuration.
     """
+    _strat_to_rule = {
+        "prefer_units": "units_preferred",
+        "prefer_weight": "weight_preferred",
+        "auto": "auto",
+        "units_only": "units_preferred",
+        "weight_only": "weight_preferred",
+    }
     mapping = {}
     if ctx.store_col:
         mapping["store"] = ctx.store_col
@@ -418,6 +447,8 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
         name="",
         file_type=ctx.file_type,
         delimiter=ctx.delimiter,
+        encoding=getattr(ctx, 'encoding', 'cp1252'),
+        has_header=getattr(ctx, 'has_header', True),
         start_line=ctx.start_line,
         record_type=ctx.record_type,
         header_prefix=ctx.header_prefix,
@@ -438,7 +469,10 @@ def config_from_ctx(ctx: ProcessingContext) -> FormatConfig:
         weight_col=getattr(ctx, 'weight_col', None),
         weight_uom=getattr(ctx, 'weight_uom', 'lb'),
         weight_uom_col=getattr(ctx, 'weight_uom_col', None),
-        resolution_rule=getattr(ctx, 'resolution_rule', 'units_preferred'),
+        weight_qty_col=getattr(ctx, 'weight_qty_col', None),
+        units_uom=getattr(ctx, 'units_uom', None),
+        quantity_strategy=getattr(ctx, 'quantity_strategy', 'auto'),
+        resolution_rule=_strat_to_rule.get(getattr(ctx, 'quantity_strategy', 'auto'), getattr(ctx, 'resolution_rule', 'units_preferred')),
         numeric_config=numeric_cfg,
         layout=getattr(ctx, 'layout', None),
         header_layout=getattr(ctx, 'header_layout', None),

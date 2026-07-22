@@ -1,5 +1,8 @@
+import hashlib
 import logging
 import os
+
+import polars as pl
 import streamlit as st
 
 logger = logging.getLogger(__name__)
@@ -20,6 +23,7 @@ from dav_tool.ui.helpers import (
     display_processing_history, smart_column_indices, validate_column_mapping,
     render_phase_progress, validate_config_before_processing, cleanup_dataframes,
     cached_preview_raw, cached_preview_raw_lines,
+    display_confidence_breakdown,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
@@ -70,6 +74,8 @@ def run():
 
     if "onb_ctx" not in st.session_state:
         st.session_state.onb_ctx = ProcessingContext()
+    if "_detection_cache" not in st.session_state:
+        st.session_state._detection_cache = {}
     ctx = st.session_state.onb_ctx
 
     render_phase_progress(ctx.phase)
@@ -94,6 +100,127 @@ def run():
         _phase5_validation(ctx)
     if ctx.phase >= PHASE_REPORTS:
         _phase6_reports(ctx)
+
+
+# ── Preview Stage Helpers ──────────────────────────────────────────
+
+
+def _show_raw_preview(file_paths, source=None):
+    """Stage 1: Raw Preview — unparsed file content."""
+    st.subheader("Raw Preview (unparsed lines)")
+    raw = cached_preview_raw_lines(file_paths, n_rows=10, source=source)
+    if raw:
+        st.code("\n".join(raw[:10]), language="text")
+    else:
+        st.info("No raw data available.")
+
+
+def _show_detected_preview(file_paths, file_type, delimiter=",", layout=None,
+                           start_line=0, record_type="", source=None):
+    """Stage 2: Detected Preview — parsed per detection result."""
+    st.subheader("Detected Preview")
+    df = cached_preview_raw(file_paths, file_type, delimiter, layout,
+                            n_rows=10, start_line=start_line,
+                            record_type=record_type, source=source)
+    if not df.is_empty():
+        st.dataframe(df.to_pandas().head(10))
+    else:
+        st.info("No parsed data available at this stage.")
+
+
+def _show_flattened_preview(file_paths, header_prefix=None, header_layout=None,
+                            detail_layout=None, trailer_prefix=None,
+                            trailer_layout=None, record_types=None,
+                            ml_delimiter="|", source=None):
+    """Stage 2b: Flatten Preview (multiline only)."""
+    st.subheader("Flattened Preview")
+    from dav_tool.workflow.preview import (
+        preview_flattened_multiline, preview_flattened_multiline_fixed,
+    )
+    flat = pl.DataFrame()
+    if header_prefix and header_layout and detail_layout:
+        flat = preview_flattened_multiline_fixed(
+            file_paths, header_prefix, header_layout, detail_layout, n_rows=10,
+            trailer_prefix=trailer_prefix, trailer_layout=trailer_layout,
+            source=source,
+        )
+    elif record_types:
+        flat = preview_flattened_multiline(file_paths, record_types, ml_delimiter, n_rows=10, source=source)
+    if not flat.is_empty():
+        st.dataframe(flat.to_pandas())
+    else:
+        st.info("No flattened data — configure record types or HDR layout above.")
+
+
+def _show_parsed_preview(file_paths, file_type, layout, delimiter=",",
+                         start_line=0, record_type="", source=None):
+    """Stage 3: Parsed Preview — columns extracted per layout."""
+    if file_type != "fixed" or not layout:
+        return
+    st.subheader("Parsed Preview (by layout)")
+    df = cached_preview_raw(file_paths, file_type, delimiter, layout,
+                            n_rows=10, start_line=start_line,
+                            record_type=record_type, source=source)
+    if not df.is_empty():
+        st.dataframe(df.to_pandas().head(10))
+    else:
+        st.info("No parsed data — define column layout above.")
+
+
+def _show_canonical_preview(file_paths, file_type, delimiter, layout,
+                            start_line, record_type, cols, source=None):
+    """Stage 4: Canonical Preview — after column rename/mapping."""
+    if not cols:
+        return
+    st.subheader("Canonical Preview (mapped columns)")
+    df = cached_preview_raw(file_paths, file_type, delimiter, layout,
+                            n_rows=5, start_line=start_line,
+                            record_type=record_type, source=source)
+    if not df.is_empty():
+        try:
+            df = df.select([c for c in cols if c in df.columns])
+            st.dataframe(df.to_pandas().head(5))
+        except Exception:
+            st.dataframe(df.to_pandas().head(5))
+    else:
+        st.info("No canonical preview available.")
+
+
+def _fixed_width_workflow_staged(file_paths, discovery, source=None):
+    """Run the fixed-width workflow through its stages."""
+    ctx = st.session_state.onb_ctx
+
+    # Stage 1: Raw Preview
+    _show_raw_preview(file_paths, source=source)
+
+    # Stage 2: Detection info
+    st.subheader("Detection Results")
+    st.markdown(f"- **Record Length:** {discovery.record_length or 'auto-detected'}")
+    st.markdown(f"- **Candidate Columns:** {len(discovery.candidate_layout or [])}")
+    if discovery.candidate_layout:
+        st.markdown(f"- **Suggested:** {', '.join(c['field'] for c in discovery.candidate_layout[:10])}")
+
+    # Stage 3: Layout Builder OR Upload Layout
+    st.markdown("#### Column Layout Definition")
+    fw_layout = render_layout_builder(
+        file_paths,
+        existing_layout=ctx.layout or discovery.layout,
+        candidate_layout=discovery.candidate_layout,
+        source=source,
+        key_prefix="onb_fw",
+    )
+    if fw_layout is not None:
+        ctx.layout = fw_layout
+        discovery.layout = fw_layout
+
+    # Stage 4: Parsed Preview (only if layout is confirmed)
+    if ctx.layout:
+        _show_parsed_preview(file_paths, "fixed", ctx.layout, source=source)
+
+    # Stage 5: Return confirmed layout or None
+    if ctx.layout:
+        return ctx.layout
+    return None
 
 
 def _phase1_discovery(ctx):
@@ -221,10 +348,24 @@ def _phase1_discovery(ctx):
                                                       source=_onb_source)
                             if not df_preview.is_empty():
                                 st.dataframe(df_preview.to_pandas().head(10))
-                elif ctx.discovery is None or not ctx.discovery.file_type:
-                    # Run detection once via the Discovery service
-                    log_phase("Detection Started")
-                    discovery = detect_file(file_paths, source=_onb_source)
+                if ctx.discovery is not None and ctx.discovery.file_type:
+                    if st.button("Re-detect", key="onb_redetect", use_container_width=True):
+                        cache_key = hashlib.md5(str(sorted(file_paths)).encode()).hexdigest()
+                        st.session_state._detection_cache.pop(cache_key, None)
+                        ctx.discovery = None
+                        st.rerun()
+                if ctx.discovery is None or not ctx.discovery.file_type:
+                    # Detection cache key based on file paths
+                    cache_key = hashlib.md5(str(sorted(file_paths)).encode()).hexdigest()
+                    cached = st.session_state._detection_cache.get(cache_key)
+                    if cached is not None:
+                        logger.info("DETECTION CACHE HIT — %s", file_paths)
+                        discovery = cached
+                    else:
+                        logger.info("DETECTION EXECUTED — %s", file_paths)
+                        log_phase("Detection Started")
+                        discovery = detect_file(file_paths, source=_onb_source)
+                        st.session_state._detection_cache[cache_key] = discovery
                     if discovery.error:
                         if discovery.file_type == "fixed":
                             st.warning("Fixed-width file detected. Use the Layout Builder below to define column positions.")
@@ -242,31 +383,25 @@ def _phase1_discovery(ctx):
 
                     if file_type == "multiline":
                         st.warning("Multi-line structured file detected")
+                        _show_raw_preview(file_paths, source=_onb_source)
                         _multiline_flow(file_paths, source=_onb_source)
-                    else:
-                        if file_type == "delimited":
-                            st.success(f"Delimited ({prod_delim})")
-                        elif file_type == "fixed":
-                            st.warning("Fixed-width file")
-                            fw_layout = render_layout_builder(
-                                file_paths,
-                                existing_layout=layout_list or getattr(discovery, 'layout', None),
-                                candidate_layout=getattr(discovery, 'candidate_layout', None),
-                                source=_onb_source,
-                                key_prefix="onb_fw",
-                            )
-                            if fw_layout is not None:
-                                layout_list = fw_layout
-                                discovery.layout = layout_list
+                    elif file_type == "fixed":
+                        st.warning("Fixed-width file")
+                        # Show raw + detection info + layout builder + parsed preview
+                        fw_layout = _fixed_width_workflow_staged(file_paths, discovery, source=_onb_source)
+                        if fw_layout is not None:
+                            layout_list = fw_layout
+                            discovery.layout = fw_layout
+                            start_line = st.number_input("Start Line", min_value=0, value=start_line, key="onb_fw_start")
+                            record_type = st.text_input("Record Type (e.g., U)", value=record_type or "", key="onb_fw_rec")
+                    elif file_type == "delimited":
+                        st.success(f"Delimited ({prod_delim})")
+                        _show_raw_preview(file_paths, source=_onb_source)
+                        _show_detected_preview(file_paths, file_type, prod_delim, source=_onb_source)
 
-                if file_type == "fixed" and layout_list and file_paths:
-                    st.subheader("Fixed Width Settings")
-                    colA, colB = st.columns(2)
-                    with colA:
-                        start_line = st.number_input("Start Line", min_value=0, value=start_line)
-                    with colB:
-                        record_type = st.text_input("Record Type (e.g., U)", value=record_type or "")
+                    display_confidence_breakdown(discovery)
 
+                df_preview = pl.DataFrame()
                 if file_type and file_type != "multiline" and file_paths and not getattr(ctx, '_config_applied', False):
                     st.subheader("Data Preview")
                     df_preview = cached_preview_raw(file_paths, file_type, prod_delim or ",", layout_list,
@@ -413,8 +548,8 @@ def _phase4_processing(ctx):
 
     if not ctx.mapping_confirmed:
         with st.expander("Store List (optional)", expanded=False):
-            storelist_path = st.text_input("Store List File Path")
-            storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"])
+            storelist_path = st.text_input("Store List File Path", key="onb_storelist_path")
+            storelist_delim = st.selectbox("Store List Delimiter", [",", "|", "\t", ";"], key="onb_storelist_delim")
 
         st.subheader("Column Selection")
         smart_idx = smart_column_indices(cols)
@@ -723,6 +858,10 @@ def _show_ml_preview_and_schema(file_paths, source=None):
     if not flat_preview.is_empty():
         st.dataframe(flat_preview.to_pandas())
 
+    if flat_preview.is_empty():
+        st.info("Flattened preview is empty — cannot define schema. Check record types and delimiter.")
+        return
+
     st.subheader("Define Column Schema")
     default_cols = flat_preview.columns
     schema_names = {}
@@ -748,6 +887,10 @@ def _show_hdr_fixed_preview_and_schema(file_paths, prefix, source=None):
     )
     if not flat_preview.is_empty():
         st.dataframe(flat_preview.to_pandas())
+
+    if flat_preview.is_empty():
+        st.info("Flattened preview is empty — cannot define schema. Check header/detail layout.")
+        return
 
     st.subheader("Define Column Schema")
     default_cols = flat_preview.columns

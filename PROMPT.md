@@ -1,611 +1,424 @@
-MISSION: Improve the DVA Platform into a production-quality, retailer-agnostic data validation platform while preserving the existing layered architecture.
+Sprint: Core Stabilization & Canonical Schema Implementation
 
-The Architecture Bible remains the ONLY source of truth.
+This sprint is NOT about adding new features. It is about making the DVA Platform stable, predictable, retailer-agnostic and production ready.
 
-DO NOT introduce shortcuts.
-DO NOT bypass layers.
-DO NOT break existing functionality.
-Every change must improve architecture, maintainability and retailer coverage.
+=========================
+PRIMARY GOAL
+=========================
 
-===========================================================
-PHASE 1 - COMPLETE ENGINEERING AUDIT
-===========================================================
+The platform must have ONE internal schema.
 
-Perform a COMPLETE audit before making any code changes.
+Retailers may provide completely different column names, but after the Mapping phase every downstream layer must work ONLY on the canonical schema.
 
-Review:
+Example:
 
-• Architecture
-• Package structure
-• Module responsibilities
-• Import structure
-• Dependency versions
-• Preview pipeline
-• Detection pipeline
-• Parser pipeline
-• Canonical pipeline
-• Aggregation
-• Validation
-• Reports
-• Logging
-• Exception handling
-• Tests
-• Documentation
+store
+store_num
+location
+site
+store_id
 
-Generate reports for:
+must all become
 
-Architecture
+STORE_NUMBER
+
+Similarly,
+
+upc
+barcode
+sku
+item_code
+
+must become
+
+UPC_CODE
+
+sales
+net_sales
+sales_amt
+total_sales
+
+must become
+
+TOTAL_DOLLARS
+
+etc.
+
+No downstream code should ever know retailer-specific column names.
+
+After mapping there should only be canonical column names.
+
+Validation SHOULD continue using canonical names.
+
+DO NOT change validation to dynamically use retailer column names.
+
+Instead, fix the mapping layer so that every dataset entering Aggregation and Validation has already been renamed to the canonical schema.
+
+This architecture must be enforced everywhere.
+
+====================================================
+WORK ITEMS
+====================================================
+
+1. Review every pipeline layer.
+
 Detection
+↓
+
 Preview
-Canonical
-Processing
-Dependencies
-Documentation
-Business Logic
-Retailer Coverage
 
-List:
+↓
 
-- Dead code
-- Duplicate code
-- Circular imports
-- Unused imports
-- Local imports inside functions
-- Version incompatibilities
-- Deprecated APIs
-- Missing exception handling
-- Missing logging
-- Missing tests
-- Layer violations
-- Performance bottlenecks
+Parser
 
-DO NOT modify code yet.
+↓
 
-===========================================================
-PHASE 2 - DEPENDENCY & VERSION COMPATIBILITY
-===========================================================
+Column Mapping
 
-Verify every dependency.
+↓
 
-Requirements:
+Canonical Dataset
 
-• Verify Python version compatibility.
-• Recommend one supported Python version.
-• Every dependency must support that version.
-• Remove unnecessary libraries.
-• Remove duplicate packages.
-• Remove abandoned libraries.
-• Remove hidden dependencies.
+↓
 
-Investigate:
+Aggregation
 
-pyiceberg
+↓
 
-Determine:
+Validation
 
-- Why it is requested
-- Where it is imported
-- Whether it is actually required
-- Remove it if unused
+↓
 
-I cannot install Visual Studio Build Tools.
+Reports
 
-Avoid packages requiring native compilation whenever possible.
+Verify each layer has a single responsibility.
 
-Update:
+Remove duplicated logic.
 
-requirements.txt
-requirements-dev.txt
-pyproject.toml
+Remove unnecessary coupling.
 
-Pin compatible versions.
+Ensure each layer only communicates through defined contracts.
 
-===========================================================
-PHASE 3 - IMPORT CLEANUP
-===========================================================
+====================================================
 
-All imports must exist ONLY at module level.
+2. Detection Stability
 
-NO imports inside:
+Detection must execute ONLY once per dataset.
 
-functions
-methods
-loops
-conditions
-callbacks
+No repeated detection during Streamlit reruns.
 
-unless absolutely unavoidable.
+Cache DiscoveryResult correctly.
 
-Group imports:
+Invalidate cache ONLY when:
 
-1 Standard Library
+• files change
+• user clicks Re-detect
+• configuration changes
 
-2 Third Party
+Never rerun because a widget changed.
 
-3 Local Modules
+====================================================
 
-Remove:
+3. Preview Pipeline
 
-unused imports
-duplicate imports
-wildcard imports
-
-Run import validation.
-
-===========================================================
-PHASE 4 - DETECTION ENGINE REVIEW
-===========================================================
-
-Review the detection engine against every retailer scenario discussed.
-
-It must support:
-
-✓ Delimited
-
-✓ Fixed Width
-
-✓ Fixed Width Multiline
-
-✓ HDR
-
-✓ Disclaimer
-
-✓ Trailer
-
-✓ Header
-
-✓ No Header
-
-✓ Multiple Headers
-
-✓ Multiple Record Types
-
-✓ Record Type Selection
-
-✓ Multiple File Inputs
-
-✓ Sales + Product files
-
-✓ Start Line Detection
-
-✓ Record Length Detection
-
-✓ Candidate Layout Detection
-
-✓ Business Key Detection
-
-✓ Relationship Key Detection
-
-✓ Encoding Detection
-
-✓ Delimiter Detection
-
-✓ Date Detection
-
-✓ UPC Detection
-
-✓ Store Detection
-
-✓ Quantity Detection
-
-✓ Weight Detection
-
-✓ UOM Detection
-
-✓ Confidence Scoring
-
-The detection layer should automatically recommend:
-
-layout
-
-record types
-
-join keys
-
-quantity columns
-
-weight columns
-
-uom
-
-business keys
-
-header
-
-start line
-
-encoding
-
-delimiter
-
-Generate confidence scores.
-
-===========================================================
-PHASE 5 - PARSER REVIEW
-===========================================================
-
-Review every parser.
-
-Delimited
-
-Fixed Width
-
-Multiline
-
-HDR
-
-Flattening
-
-Streaming
-
-Chunking
-
-Validate against retailer scenarios.
-
-Retailer 1
-
-Retailer 2
-
-Retailer 3
-
-Retailer 4
-
-Sales + Product relationship
-
-No unnecessary rereads.
-
-No duplicate parsing.
-
-===========================================================
-PHASE 6 - PREVIEW REVIEW
-===========================================================
-
-Preview is critical.
-
-Review for bugs.
-
-Verify:
+Make preview stages explicit.
 
 Raw Preview
 
+↓
+
+Detected Preview
+
+↓
+
+Flattened Preview (multiline only)
+
+↓
+
 Parsed Preview
 
-Flattened Preview
+↓
 
 Canonical Preview
 
-Streaming Preview
+Each stage should clearly represent the output of the previous layer.
 
-Relationship Preview
+No mixed previews.
 
-Quantity Preview
+====================================================
 
-Very large files
+4. Fixed Width Workflow
 
-Cache invalidation
+Redesign the workflow as:
 
-Memory usage
+Raw Preview
 
-Source changes
+↓
 
-Preview should NEVER crash.
+Detection Summary
 
-Gracefully handle:
+↓
 
-None
+Layout Upload OR Layout Builder
 
-Empty DataFrame
+↓
 
-Missing Layout
+Parsed Preview
 
-Wrong Layout
+↓
 
-Unsupported Encoding
+Column Mapping
 
-Unexpected delimiter
+↓
 
-Preview must always display useful diagnostics.
+Canonical Preview
 
-===========================================================
-PHASE 7 - QUANTITY ENGINE
-===========================================================
+Simplify Layout Builder.
 
-Implement quantity resolution exactly as follows:
+Keep only:
 
-IF Weight > 0
+• Column Name
+• Start
+• Length
+• Type
 
-Use Weight
+End should be calculated automatically.
 
-ELSE IF Weight == 0 AND Units > 0
+Remove all unnecessary columns.
 
-Use Units
+Ensure uploaded layouts and manually created layouts produce identical LayoutDefinition objects.
 
-ELSE IF Weight is NULL
+====================================================
 
-Use Units
+5. Session State
 
-ELSE
+Audit every session state key.
 
-0
+Ensure:
 
-Carry through:
+• no duplicate initialization
+• no missing widget keys
+• no unnecessary reruns
+• no stale previews
+• proper cleanup
+• deterministic behavior
 
-QuantityType
+====================================================
 
-UOM
+6. Detection Audit
 
-PreferredQuantity
+Review every detection algorithm.
 
-Weight
+Delimiter detection
 
-Units
+Header detection
 
-through
+Record type detection
 
-Canonical
+Fixed width detection
 
-Aggregation
+Multiline detection
+
+Date detection
+
+Quantity detection
+
+Weight detection
+
+UOM detection
+
+Ensure every retailer sample works.
+
+====================================================
+
+7. Retailer Compatibility
+
+Validate against every retailer sample collected.
+
+Delimited
+
+Quoted CSV
+
+Pipe-delimited
+
+Fixed Width
+
+HDR
+
+Multiline
+
+Header/Trailer
+
+Sales + Product Master
+
+Mixed Units + Weight
+
+No retailer should require code changes.
+
+Only configuration should differ.
+
+====================================================
+
+8. Quantity Resolution
+
+Implement and verify the rule:
+
+IF Weight Quantity exists
+
+AND Weight Quantity > 0
+
+Use Weight Quantity.
+
+Else
+
+If Weight Quantity is blank or zero
+
+Use Units.
+
+Weight takes priority.
+
+Units are fallback only.
+
+Carry Weight UOM through aggregation.
+
+Support mixed retailers correctly.
+
+====================================================
+
+9. Logging
+
+Replace print() with structured logging.
+
+Every major phase should log:
+
+START
+
+COMPLETE
+
+WARN
+
+ERROR
+
+Include timing.
+
+Include row counts.
+
+Include detection confidence.
+
+====================================================
+
+10. Exception Handling
+
+Every workflow should fail gracefully.
+
+Never expose Python tracebacks in the UI.
+
+Display meaningful user messages.
+
+Write detailed diagnostics to logs.
+
+====================================================
+
+11. Imports
+
+Audit the entire repository.
+
+Imports only at module level.
+
+No local imports unless absolutely required to break circular dependencies.
+
+Remove unused imports.
+
+Verify package compatibility.
+
+Remove unnecessary dependencies.
+
+Investigate pyiceberg dependency and ensure optional packages degrade gracefully if unavailable (no admin-only installation requirements).
+
+====================================================
+
+12. UI Audit
+
+Perform complete UI testing.
+
+Execute:
+
+Onboarding
+
+Existing Validation
+
+Format Change
+
+Detection
+
+Layout Builder
+
+Mapping
+
+Processing
 
 Validation
 
 Reports
 
-Do NOT lose metadata.
+No broken navigation.
 
-===========================================================
-PHASE 8 - AGGREGATION REVIEW
-===========================================================
+No dead buttons.
 
-Review aggregation.
+No repeated execution.
 
-Store
+No hidden crashes.
 
-UPC
+====================================================
 
-Item
+13. Detection Confidence
 
-Category
+Show WHY a file was detected.
 
-Brand
+Example:
 
-Support future configurable aggregation.
+Detected Fixed Width
 
-Generate summaries:
+Confidence: 97%
 
-Top 5 Stores
+Reason:
 
-Bottom 5 Stores
+✓ Constant record length
 
-Top Categories
+✓ Character boundaries detected
 
-Top Brands
+✓ No delimiter pattern
 
-Top UPCs
+✓ Fixed-width score exceeded threshold
 
-Largest Sales
+Do similar reasoning for all file types.
 
-Largest Quantity
+====================================================
 
-Validation Summary
+14. Documentation Cleanup
 
-Business KPIs
+Move ALL developer markdowns, review reports and architecture notes into a dedicated docs/developer/ folder.
 
-Each validation output should contain an additional Summary worksheet.
+Delete obsolete documentation.
 
-DO NOT break current outputs.
+Remove duplicate markdowns.
 
-===========================================================
-PHASE 9 - EXCEPTION HANDLING
-===========================================================
+Keep only user-facing documentation in the root.
 
-Every module must have robust exception handling.
+====================================================
 
-No raw tracebacks should reach the UI.
+SUCCESS CRITERIA
 
-Catch:
-
-File errors
-
-Permission errors
-
-Encoding errors
-
-Missing layout
-
-Parser errors
-
-Type conversion
-
-Invalid mapping
-
-Missing columns
-
-SSH failures
-
-Memory issues
-
-Network failures
-
-Return meaningful messages.
-
-===========================================================
-PHASE 10 - LOGGING
-===========================================================
-
-Implement structured logging.
-
-Every major stage should log:
-
-Detection
-
-Discovery
-
-Preview
-
-Parser
-
-Canonical
-
-Aggregation
-
-Validation
-
-Output
-
-Flush
-
-Log:
-
-execution time
-
-memory
-
-warnings
-
-errors
-
-selected options
-
-retailer profile
-
-Never spam logs.
-
-===========================================================
-PHASE 11 - DOCUMENTATION CLEANUP
-===========================================================
-
-Review every markdown.
-
-Move documentation into:
-
-docs/
-
-architecture/
-
-developer/
-
-user/
-
-audit/
-
-release/
-
-historical/
-
-Archive obsolete OpenCode reports.
-
-Keep only necessary root files.
-
-Update architecture diagrams.
-
-Update developer guide.
-
-Update user guide.
-
-===========================================================
-PHASE 12 - TESTING
-===========================================================
-
-Create tests for:
-
-Retailer 1
-
-Retailer 2
-
-Retailer 3
-
-Retailer 4
-
-Sales + Product
-
-Mixed Weight
-
-Mixed Units
-
-HDR
-
-Multiline
-
-Disclaimer
-
-Large Files
-
-Streaming
-
-Relationship Join
-
-Preview
-
-Canonical
-
-Aggregation
-
-Validation
-
-Regression
-
-No existing tests may fail.
-
-===========================================================
-FINAL VALIDATION
-===========================================================
-
-Before any commit:
-
-Run:
-
-Architecture Audit
-
-Dependency Audit
-
-Import Audit
-
-Detection Audit
-
-Preview Audit
-
-Canonical Audit
-
-Processing Audit
-
-Retailer Coverage Audit
-
-Documentation Audit
-
-Business Logic Audit
-
-Regression Tests
-
-Performance Tests
-
-Memory Tests
-
-Provide a final report containing:
-
-Architecture Score
-
-Retailer Coverage Score
-
-Detection Score
-
-Preview Score
-
-Engineering Score
-
-Production Readiness Score
-
-Remaining Risks
-
-Recommended Next Sprint
-
-Only after every validation passes:
-
-Commit
-
-Push
-
-Prepare next sprint plan.
-
-The objective is not simply to make the code work.
-
-The objective is to produce a clean, maintainable, extensible, production-quality DVA Platform capable of handling diverse retailer data feeds with strong architecture, robust detection, reliable previews, clean engineering practices, and comprehensive reporting.
+• One canonical schema after mapping.
+• Validation uses ONLY canonical column names.
+• Detection runs once.
+• No unnecessary reruns.
+• Stable UI.
+• All retailer samples supported.
+• Fixed-width workflow simplified.
+• Preview pipeline clearly staged.
+• Proper logging.
+• Graceful exception handling.
+• Global imports only.
+• Clean documentation.
+• Platform ready for the next feature sprint.

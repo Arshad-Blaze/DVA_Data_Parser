@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Any
 
 import polars as pl
 
-from dav_tool._observability import log_phase, print_memory_snapshot
+from dav_tool._observability import log_phase
 from dav_tool._reports import generate_summary_analytics
 
 logger = logging.getLogger(__name__)

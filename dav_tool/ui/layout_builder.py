@@ -12,7 +12,7 @@ from dav_tool.datasource.base import IDataSource
 
 logger = logging.getLogger(__name__)
 
-LAYOUT_COLUMNS = ["field", "from", "length", "type", "format", "nullable", "description"]
+LAYOUT_COLUMNS = ["field", "from", "length", "type"]
 DEFAULT_TYPES = ["text", "numeric", "date"]
 SESSION_KEY = "_layout_builder_state"
 
@@ -52,9 +52,6 @@ def _layout_to_rows(layout: Optional[List[Dict]]) -> List[dict]:
             "from": start,
             "length": length,
             "type": _normalize_type(col.get("type", "text")),
-            "format": col.get("format", ""),
-            "nullable": col.get("nullable", False),
-            "description": col.get("description", ""),
         })
     return rows
 
@@ -74,9 +71,6 @@ def _rows_to_layout(rows: List[dict]) -> List[Dict]:
             "from": start + 1,
             "length": length,
             "type": _normalize_type(row.get("type", "text")),
-            "format": str(row.get("format", "")),
-            "nullable": bool(row.get("nullable", False)),
-            "description": str(row.get("description", "")),
         })
     return layout
 
@@ -84,16 +78,13 @@ def _rows_to_layout(rows: List[dict]) -> List[Dict]:
 def _layout_to_csv(layout: List[Dict]) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["field", "from", "length", "type", "format", "nullable", "description"])
+    writer.writerow(["field", "from", "length", "type"])
     for col in layout:
         writer.writerow([
             col["field"],
             col.get("from", col["start"] + 1),
             col.get("length", col["end"] - col["start"]),
             col.get("type", "text"),
-            col.get("format", ""),
-            col.get("nullable", ""),
-            col.get("description", ""),
         ])
     return buf.getvalue()
 
@@ -211,7 +202,7 @@ def render_layout_builder(
     if "layout_rows" not in state:
         rows = _layout_to_rows(existing_layout or candidate_layout)
         state["layout_rows"] = rows if rows else [
-            {"field": "", "from": 1, "length": 10, "type": "text", "format": "", "nullable": False, "description": ""},
+            {"field": "", "from": 1, "length": 10, "type": "text"},
         ]
 
     rows = state["layout_rows"]
@@ -234,9 +225,6 @@ def render_layout_builder(
                         "from": int(row.get("from", 1)),
                         "length": int(row.get("length", 1)),
                         "type": _normalize_type(str(row.get("type", "text"))),
-                        "format": str(row.get("format", "")),
-                        "nullable": bool(row.get("nullable", False)),
-                        "description": str(row.get("description", "")),
                     })
                 state["layout_rows"] = uploaded_rows
                 st.success(f"Loaded {len(uploaded_rows)} columns from uploaded CSV.")
@@ -257,14 +245,10 @@ def render_layout_builder(
             "End": start + length - 1,
             "Length": length,
             "Type": _normalize_type(r.get("type", "text")),
-            "Format": r.get("format", ""),
-            "Nullable": r.get("nullable", False),
-            "Description": r.get("description", ""),
         })
     if not edited_df_data:
         edited_df_data.append({
-            "Column Name": "", "Start": 1, "End": 10, "Length": 10,
-            "Type": "text", "Format": "", "Nullable": False, "Description": "",
+            "Column Name": "", "Start": 1, "End": 10, "Length": 10, "Type": "text",
         })
 
     column_config = {
@@ -273,9 +257,6 @@ def render_layout_builder(
         "End": st.column_config.NumberColumn("End", disabled=True, width="small"),
         "Length": st.column_config.NumberColumn("Length", min_value=1, step=1, required=True),
         "Type": st.column_config.SelectboxColumn("Type", options=DEFAULT_TYPES, required=True),
-        "Format": st.column_config.TextColumn("Format", width="small"),
-        "Nullable": st.column_config.CheckboxColumn("Nullable"),
-        "Description": st.column_config.TextColumn("Description", width="medium"),
     }
 
     edited = st.data_editor(
@@ -303,7 +284,7 @@ def render_layout_builder(
     with col2:
         if st.button("Clear All", key=f"{key_prefix}_clear_btn", use_container_width=True):
             state["layout_rows"] = [
-                {"field": "", "from": 1, "length": 10, "type": "text", "format": "", "nullable": False, "description": ""},
+                {"field": "", "from": 1, "length": 10, "type": "text"},
             ]
             st.rerun()
 

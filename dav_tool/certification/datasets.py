@@ -5,8 +5,11 @@ Each dataset includes: BAU/, TEST/, Config/, expected/, Layout/ (if needed).
 """
 import csv
 import json
+import logging
 import os
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 ROWS = [
     ("S001", "100001", "Widget A", "10", "99.90"),
@@ -358,7 +361,7 @@ def generate_all(root: Optional[str] = None):
     generate_retailer_global(root)
     generate_retailer_legacy(root)
     generate_retailer_fixedwidth(root)
-    print(f"Datasets generated under {root}")
+    logger.info("Datasets generated under %s", root)
 
 
 if __name__ == "__main__":

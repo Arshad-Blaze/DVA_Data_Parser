@@ -74,20 +74,19 @@ def _estimate_df_mb(df: pl.DataFrame) -> float:
 
 
 def log_dataframe_summary():
-    """Print a snapshot of all registered DataFrames to stdout."""
+    """Log a snapshot of all registered DataFrames."""
     with _registry_lock:
         if not _df_registry:
-            print("[MEM] No DataFrames tracked.")
+            _LOG.info("[MEM] No DataFrames tracked.")
             return
         total_mb = 0.0
-        print(f"{'[MEM] DataFrame':<30} {'Rows':>10} {'Cols':>5} {'MB':>10} {'Owner':<15} {'Phase':<10}")
-        print("-" * 90)
+        _LOG.info("[MEM] DataFrame summary:")
+        _LOG.info("[MEM] %-30s %10s %5s %10s %-15s %-10s", "Name", "Rows", "Cols", "MB", "Owner", "Phase")
         for e in _df_registry:
             mb = e["estimated_mb"]
             total_mb += mb
-            print(f"{'[MEM] ' + e['name']:<30} {e['rows']:>10} {e['cols']:>5} {mb:>10.2f} {e['owner']:<15} {e['phase']:<10}")
-        print("-" * 90)
-        print(f"{'[MEM] TOTAL':<30} {'':>10} {'':>5} {total_mb:>10.2f} {'':<15} {'':<10}")
+            _LOG.info("[MEM] %-30s %10s %5s %10.2f %-15s %-10s", e['name'], e['rows'], e['cols'], mb, e['owner'], e['phase'])
+        _LOG.info("[MEM] %-30s %10s %5s %10.2f %-15s %-10s", "TOTAL", "", "", total_mb, "", "")
 
 
 def _mem_mb() -> float:
@@ -96,9 +95,9 @@ def _mem_mb() -> float:
 
 
 def print_memory_snapshot(label: str = ""):
-    """Print memory snapshot with current/peak."""
+    """Log memory snapshot with current RSS."""
     current = _mem_mb()
-    print(f"[MEM] {label} — RSS: {current:.1f} MB")
+    _LOG.info("[MEM] %s — RSS: %.1f MB", label, current)
 
 
 # ── End DataFrame Registry ──────────────────────────────────────────
