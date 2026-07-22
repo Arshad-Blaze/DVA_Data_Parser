@@ -20,14 +20,12 @@ from dav_tool.ui.helpers import (
     display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
     cached_preview_raw, cached_preview_raw_lines,
+    render_phase_progress, validate_config_before_processing, cleanup_dataframes,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext, ExistingContext
 from dav_tool.format_config import load_format_config, apply_format_config
 from dav_tool.workflow.discovery import detect_file
-from dav_tool.ui.helpers import (
-    render_phase_progress, validate_config_before_processing, cleanup_dataframes,
-)
 from dav_tool.ui.layout_builder import render_layout_builder
 from dav_tool.format_config import ValidationConfig, config_from_ctx
 from dav_tool.ui.certification_suite import render_certification_suite
@@ -891,20 +889,24 @@ def _phase5_validation(ctx):
 
     if st.button("Validate", use_container_width=True, type="primary"):
         with st.spinner("Running validations..."):
-            _execute_validation(
-                prod_paths, test_paths, prod_type, test_type,
-                prod_delim, test_delim,
-                ctx.prod.eff_layout, ctx.test.eff_layout,
-                prod_start_line, test_start_line, prod_record_type, test_record_type,
-                prod_store_col, prod_units_col, prod_price_col, prod_upc_col, prod_desc_col,
-                test_store_col, test_units_col, test_price_col, test_upc_col, test_desc_col,
-                ctx.prod.price_type, ctx.test.price_type,
-                ctx.prod.implied_dollars, ctx.prod.implied_units,
-                ctx.test.implied_dollars, ctx.test.implied_units,
-                run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
-                trailer_prefix_prod=trailer_prefix_prod, trailer_layout_prod=trailer_layout_prod,
-                trailer_prefix_test=trailer_prefix_test, trailer_layout_test=trailer_layout_test,
-            )
+            try:
+                _execute_validation(
+                    prod_paths, test_paths, prod_type, test_type,
+                    prod_delim, test_delim,
+                    ctx.prod.eff_layout, ctx.test.eff_layout,
+                    prod_start_line, test_start_line, prod_record_type, test_record_type,
+                    prod_store_col, prod_units_col, prod_price_col, prod_upc_col, prod_desc_col,
+                    test_store_col, test_units_col, test_price_col, test_upc_col, test_desc_col,
+                    ctx.prod.price_type, ctx.test.price_type,
+                    ctx.prod.implied_dollars, ctx.prod.implied_units,
+                    ctx.test.implied_dollars, ctx.test.implied_units,
+                    run_store, run_item, run_compare_existing, run_summary, run_file_review_existing,
+                    trailer_prefix_prod=trailer_prefix_prod, trailer_layout_prod=trailer_layout_prod,
+                    trailer_prefix_test=trailer_prefix_test, trailer_layout_test=trailer_layout_test,
+                )
+            except Exception as e:
+                st.error(f"Validation failed: {e}")
+                logger.error("Existing validation error: %s", e, exc_info=True)
 
     if ctx.validation_done:
         cleanup_dataframes(ctx, keep_attrs=[
@@ -917,8 +919,11 @@ def _phase5_validation(ctx):
 
 def _phase6_reports(ctx):
     st.markdown("### Step 9: Reports")
-
-    _display_results()
+    try:
+        _display_results()
+    except Exception as e:
+        st.error(f"Report generation failed: {e}")
+        logger.error("Existing report error: %s", e, exc_info=True)
     display_processing_history()
 
     if st.button("Generate Migration Report \u2192", use_container_width=True, type="primary"):
@@ -1325,8 +1330,12 @@ def _display_results():
 
 def _phase7_migration_report(ctx):
     st.markdown("### Step 10: Migration Report")
-
-    output = generate_migration_report(ctx)
+    try:
+        output = generate_migration_report(ctx)
+    except Exception as e:
+        st.error(f"Migration report failed: {e}")
+        logger.error("Migration report error: %s", e, exc_info=True)
+        return
     sd = output.schema_diff
     oc = output.operation_compare
 

@@ -14,7 +14,7 @@ from dav_tool._observability import (
 )
 from dav_tool.detection import is_multiline_record, detect_record_types, detect_hdr_prefix
 from dav_tool.ui.helpers import (
-    clean_path, get_file_list, load_storelist,
+    clean_path, get_file_list, load_storelist, get_column_names,
     display_execution_summary, _display_summary_sheets,
     display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
@@ -575,17 +575,21 @@ def _phase5_validation(ctx):
 
     if st.button("Validate Onboarding", use_container_width=True, type="primary"):
         with st.spinner("Running validations..."):
-            _run_validation(
-                fp, ft, pd, ll, sl, rt, cols,
-                storelist_path, storelist_delim, storelist_store_col,
-                run_onb_compare, run_upc_summary, run_onb_file_review,
-                prod_store_col, prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
-                header_prefix=ctx.header_prefix,
-                header_layout=ctx.header_layout,
-                trailer_prefix=ctx.trailer_prefix,
-                trailer_layout=ctx.trailer_layout,
-                source=_onb_source,
-            )
+            try:
+                _run_validation(
+                    fp, ft, pd, ll, sl, rt, cols,
+                    storelist_path, storelist_delim, storelist_store_col,
+                    run_onb_compare, run_upc_summary, run_onb_file_review,
+                    prod_store_col, prod_upc_col, prod_desc_col, prod_units_col, prod_price_col,
+                    header_prefix=ctx.header_prefix,
+                    header_layout=ctx.header_layout,
+                    trailer_prefix=ctx.trailer_prefix,
+                    trailer_layout=ctx.trailer_layout,
+                    source=_onb_source,
+                )
+            except Exception as e:
+                st.error(f"Validation failed: {e}")
+                logger.error("Onboarding validation error: %s", e, exc_info=True)
 
     if ctx.done:
         cleanup_dataframes(ctx, keep_attrs=["store_agg", "item_agg"])
@@ -595,7 +599,11 @@ def _phase5_validation(ctx):
 
 def _phase6_reports(ctx):
     st.markdown("### Step 7: Reports")
-    _display_results()
+    try:
+        _display_results()
+    except Exception as e:
+        st.error(f"Report generation failed: {e}")
+        logger.error("Onboarding report error: %s", e, exc_info=True)
     display_processing_history()
 
     if st.button("Start Over", use_container_width=True):

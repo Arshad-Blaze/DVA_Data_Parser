@@ -5,7 +5,7 @@ description = "Data Analysis & Validation Tool for Retail/POS data"
 requires-python = ">=3.10"
 dependencies = [
     "polars>=1.0,<2.0",
-    "streamlit>=1.28",
+    "streamlit>=1.36",
     "psutil>=5.9",
     "openpyxl>=3.1",
     "paramiko>=3.0",

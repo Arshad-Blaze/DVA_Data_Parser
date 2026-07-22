@@ -27,6 +27,7 @@ from dav_tool._column_utils import (
 )
 from dav_tool.io import safe_read_csv
 from dav_tool.datasource.base import IDataSource
+from dav_tool.workflow import PHASE_LABELS, PHASE_ICONS
 
 logger = logging.getLogger(__name__)
 
@@ -914,8 +915,6 @@ def render_all_config_sections(cfg, detected_columns=None, key_prefix="", file_p
 
 # ── Phase 8-9: UI Steps + Memory ──────────────────────────────────
 
-
-from dav_tool.workflow import PHASE_LABELS, PHASE_ICONS
 
 
 def render_phase_progress(current_phase: int, max_phase: int = 6):

@@ -272,7 +272,7 @@ def render_layout_builder(
         "Start": st.column_config.NumberColumn("Start", min_value=1, step=1, required=True),
         "End": st.column_config.NumberColumn("End", disabled=True, width="small"),
         "Length": st.column_config.NumberColumn("Length", min_value=1, step=1, required=True),
-        "Type": st.column_config.SelectColumn("Type", options=DEFAULT_TYPES, required=True),
+        "Type": st.column_config.SelectboxColumn("Type", options=DEFAULT_TYPES, required=True),
         "Format": st.column_config.TextColumn("Format", width="small"),
         "Nullable": st.column_config.CheckboxColumn("Nullable"),
         "Description": st.column_config.TextColumn("Description", width="medium"),
