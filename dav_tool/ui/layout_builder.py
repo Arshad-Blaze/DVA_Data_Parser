@@ -182,6 +182,7 @@ def _preview_extracted_columns(
 def render_layout_builder(
     file_paths: List[str],
     existing_layout: Optional[List[Dict]] = None,
+    candidate_layout: Optional[List[Dict]] = None,
     source: Optional[IDataSource] = None,
     key_prefix: str = "fw",
 ) -> Optional[List[Dict]]:
@@ -208,7 +209,7 @@ def render_layout_builder(
     st.caption("Define each column's position in the fixed-width record. End Position is calculated automatically.")
 
     if "layout_rows" not in state:
-        rows = _layout_to_rows(existing_layout)
+        rows = _layout_to_rows(existing_layout or candidate_layout)
         state["layout_rows"] = rows if rows else [
             {"field": "", "from": 1, "length": 10, "type": "text", "format": "", "nullable": False, "description": ""},
         ]

@@ -15,15 +15,22 @@ from dav_tool._observability import (
 from dav_tool.detection import is_multiline_record, detect_record_types, detect_hdr_prefix
 from dav_tool.ui.helpers import (
     clean_path, get_file_list, load_storelist,
-    display_execution_summary, display_dev_diagnostics, record_execution,
+    display_execution_summary, _display_summary_sheets,
+    display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
     render_phase_progress, validate_config_before_processing, cleanup_dataframes,
     cached_preview_raw, cached_preview_raw_lines,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
-from dav_tool.format_config import apply_format_config, load_format_config, save_format_config, config_from_ctx
+from dav_tool.format_config import (
+    ValidationConfig, apply_format_config, load_format_config,
+    save_format_config, config_from_ctx,
+)
 from dav_tool.workflow.discovery import detect_file
+from dav_tool.workflow.flush import flush
+from dav_tool.workflow.orchestration import run_onboarding_processing, run_onboarding_validation
+from dav_tool.workflow.output import generate_onboarding_output
 
 # Phase constants matching the 7-step workflow
 PHASE_DISCOVERY = 1
@@ -39,14 +46,12 @@ def _get_validation_config(ctx):
     cfg = getattr(ctx, '_generated_config', None)
     if cfg is not None and hasattr(cfg, 'validation_config'):
         return cfg.validation_config
-    from dav_tool.format_config import ValidationConfig
     return ValidationConfig()
 
 
 def _reset_phase():
     old = st.session_state.get("onb_ctx")
     if old is not None:
-        from dav_tool.workflow.flush import flush
         flush(metrics=old.metrics, clear_session=False, ctx_objects=[old])
         del old
     st.session_state.onb_ctx = ProcessingContext()
@@ -246,6 +251,7 @@ def _phase1_discovery(ctx):
                             fw_layout = render_layout_builder(
                                 file_paths,
                                 existing_layout=layout_list or getattr(discovery, 'layout', None),
+                                candidate_layout=getattr(discovery, 'candidate_layout', None),
                                 source=_onb_source,
                                 key_prefix="onb_fw",
                             )
@@ -471,8 +477,6 @@ def _phase4_processing(ctx):
             cleanup_dataframes(ctx)
             print_memory_snapshot("BEFORE AGGREGATION")
             try:
-                from dav_tool.workflow.orchestration import run_onboarding_processing
-
                 with st.spinner("Aggregating data (Store + Item in parallel)..."):
                     run_onboarding_processing(ctx, source=_onb_source)
 
@@ -772,8 +776,6 @@ def _run_validation(
         )
         return
 
-    from dav_tool.workflow.orchestration import run_onboarding_validation
-
     run_onboarding_validation(
         ctx,
         file_paths, file_type, prod_delim, layout_list, start_line, record_type,
@@ -798,8 +800,6 @@ def _run_validation(
 
 
 def _display_results():
-    from dav_tool.workflow.output import generate_onboarding_output
-
     ctx = st.session_state.onb_ctx
     output = generate_onboarding_output(ctx)
 
@@ -819,5 +819,7 @@ def _display_results():
             st.dataframe(output.file_review_df.to_pandas())
             if output.file_review_csv:
                 st.download_button("Download File Review", output.file_review_csv, "file_review.csv")
+
+    _display_summary_sheets(output, "Retailer")
 
     display_execution_summary(output.metrics)

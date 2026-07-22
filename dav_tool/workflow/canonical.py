@@ -17,6 +17,8 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Set
 
 import polars as pl
 
+from dav_tool._observability import log_phase
+from dav_tool._parsers import canonical_chunk_stream
 from dav_tool.workflow.discovery import DiscoveryResult
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,25 @@ class CanonicalDataset:
         """
         yield from self._stream_factory()
 
+    def enrich(
+        self,
+        target: "CanonicalDataset",
+        join_mapping: Dict[str, str],
+        attributes: Optional[List[str]] = None,
+    ) -> Optional["CanonicalDataset"]:
+        """Enrich this dataset with attributes from *target* (e.g., product master).
+
+        Args:
+            target: Secondary dataset providing additional attributes.
+            join_mapping: Maps a column in this dataset → column in *target*.
+            attributes: Target columns to include.  All non-key columns if None.
+
+        Returns:
+            A new CanonicalDataset with merged schema, or None on failure.
+        """
+        from dav_tool.workflow.relationship import RelationshipEngine
+        return RelationshipEngine.enrich_dataset(self, target, join_mapping, attributes=attributes)
+
     # ── Factories ───────────────────────────────────────────────────
 
     @classmethod
@@ -161,6 +182,7 @@ class CanonicalDataset:
         mapping: "ColumnMapping",
         level: str,
         source: Optional[Any] = None,
+        schema_template: str = "minimal",
     ) -> "CanonicalDataset":
         """Build a dataset from ``ParseOptions`` + ``ColumnMapping``.
 
@@ -168,8 +190,12 @@ class CanonicalDataset:
         creates ``CanonicalContext`` (parse + mapping) first, then uses
         this factory.
         """
-        from dav_tool._parsers import canonical_chunk_stream
-
+        log_phase(f"Canonical Dataset — building ({level}, template={schema_template})")
+        logger.info(
+            "Canonical: level=%s template=%s file_count=%d file_type=%s",
+            level, schema_template, len(file_paths) if file_paths else 0,
+            getattr(parse_opts, "file_type", "?"),
+        )
         if level == "store":
             col_args = dict(
                 store_col=mapping.store,
@@ -218,10 +244,14 @@ class CanonicalDataset:
                 weight_uom=mapping.weight_uom,
                 weight_uom_col=mapping.weight_uom_col,
                 numeric_config=getattr(parse_opts, "numeric_config", None),
+                date_col=mapping.date_col,
+                weight_qty_col=mapping.weight_qty_col,
+                quantity_strategy=mapping.quantity_strategy,
+                units_uom=mapping.units_uom,
                 **col_args,
             )
 
-        schema = _build_schema_for_level(level)
+        schema = _build_schema_for_level(level, template=schema_template)
         return cls(
             schema=schema,
             level=level,
@@ -240,6 +270,7 @@ class CanonicalDataset:
         ctx: Any,
         level: str,
         source: Optional[Any] = None,
+        schema_template: str = "minimal",
     ) -> "CanonicalDataset":
         """Build from a ``ProcessingContext`` using ``ParseOptions.from_context``."""
         from dav_tool.options import ParseOptions, ColumnMapping
@@ -247,15 +278,44 @@ class CanonicalDataset:
         parse_opts = ParseOptions.from_context(ctx)
         mapping = ColumnMapping.from_context(ctx)
         file_paths = list(ctx.file_paths or [])
-        return cls.from_parse_options(file_paths, parse_opts, mapping, level, source=source)
+        return cls.from_parse_options(
+            file_paths, parse_opts, mapping, level,
+            source=source, schema_template=schema_template,
+        )
 
 
-def _build_schema_for_level(level: str) -> List[str]:
-    """Return the expected canonical column names for *level*."""
-    if level == "store":
-        return ["STORE_NUMBER", "Units", "Totalprice"]
-    if level == "item":
-        return ["UPC_CODE", "PRODUCT_DESCRIPTION", "UNITS_SOLD", "TOTAL_DOLLARS"]
-    if level == "upc":
-        return ["UPC", "UNITS_SOLD", "TOTAL_DOLLARS"]
-    return []
+# Schema templates for the canonical output.
+# "minimal" matches the pre-RC2 schema (3-4 columns).
+# "standard" adds QuantityType, UOM, Date.
+# "enriched" adds Brand, Category (populated via enrichment).
+CANONICAL_SCHEMA_TEMPLATES = {
+    "minimal": {
+        "store": ["STORE_NUMBER", "Units", "Totalprice"],
+        "item": ["UPC_CODE", "PRODUCT_DESCRIPTION", "UNITS_SOLD", "TOTAL_DOLLARS"],
+        "upc": ["UPC", "UNITS_SOLD", "TOTAL_DOLLARS"],
+    },
+    "standard": {
+        "store": ["STORE_NUMBER", "Units", "Totalprice", "QuantityType", "UOM", "Date"],
+        "item": ["UPC_CODE", "PRODUCT_DESCRIPTION", "UNITS_SOLD", "TOTAL_DOLLARS", "QuantityType", "UOM", "Date"],
+        "upc": ["UPC", "UNITS_SOLD", "TOTAL_DOLLARS", "QuantityType", "UOM", "Date"],
+    },
+    "enriched": {
+        "store": ["STORE_NUMBER", "Units", "Totalprice", "QuantityType", "UOM", "Date", "Brand", "Category"],
+        "item": ["UPC_CODE", "PRODUCT_DESCRIPTION", "UNITS_SOLD", "TOTAL_DOLLARS", "QuantityType", "UOM", "Date", "Brand", "Category"],
+        "upc": ["UPC", "UNITS_SOLD", "TOTAL_DOLLARS", "QuantityType", "UOM", "Date", "Brand", "Category"],
+    },
+}
+
+
+def _build_schema_for_level(level: str, template: str = "minimal") -> List[str]:
+    """Return the expected canonical column names for *level*.
+
+    *template* selects a predefined schema:
+    - ``"minimal"`` — current schema (3-4 columns)
+    - ``"standard"`` — adds QuantityType, UOM, Date
+    - ``"enriched"`` — adds Brand, Category
+
+    Falls back to minimal if template is unknown.
+    """
+    tpl = CANONICAL_SCHEMA_TEMPLATES.get(template, CANONICAL_SCHEMA_TEMPLATES["minimal"])
+    return list(tpl.get(level, []))

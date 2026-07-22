@@ -8,29 +8,52 @@ from typing import Optional
 
 import streamlit as st
 import polars as pl
+from dav_tool._observability import ProcessingRecord, MAX_HISTORY, release_df
+from dav_tool.config_builder import config_to_summary_dict
+from dav_tool.config_validator import validate_config, validate_section
+from dav_tool.datasource.manager import is_connected, get_active_source
+from dav_tool.format_config import (
+    ConfigSection, get_section_fields, OutputConfig,
+    asdict, iter_sections,
+)
+from dav_tool.options import OutputMode
 from dav_tool.workflow.preview import (
     parse_fixed_width_chunks, preview_flattened_multiline,
     preview_flattened_multiline_fixed, preview_raw, preview_raw_lines,
 )
-from dav_tool._observability import ProcessingRecord, MAX_HISTORY
 from dav_tool._column_utils import (
     find_best_column_index as _find_best_column_index,
     smart_column_indices as _smart_column_indices,
 )
 from dav_tool.io import safe_read_csv
 from dav_tool.datasource.base import IDataSource
-from dav_tool.datasource.manager import get_active_source
 
 logger = logging.getLogger(__name__)
 
 _COLUMN_CACHE_KEY = "_column_name_cache"
 
 
+MAX_CACHE_ENTRIES = 50
+
+
+def _cache_put(cache, key, value):
+    if len(cache) >= MAX_CACHE_ENTRIES:
+        cache.pop(next(iter(cache)))
+    cache[key] = value
+
+
+def _source_id(source) -> str:
+    return str(id(source)) if source else ""
+
+
 def _cache_key(paths, file_type, delimiter, record_type, layout=None,
-               start_line=0, header_prefix=None) -> str:
-    """Deterministic cache key from input parameters."""
+               start_line=0, header_prefix=None, header_layout=None,
+               trailer_prefix=None, trailer_layout=None,
+               source=None) -> str:
     layout_str = str(layout) if layout else ""
-    raw = f"{paths}|{file_type}|{delimiter}|{record_type}|{layout_str}|{start_line}|{header_prefix}"
+    rt = record_type or ""
+    hp = header_prefix or ""
+    raw = f"{paths}|{file_type}|{delimiter}|{rt}|{layout_str}|{start_line}|{hp}|{header_layout}|{trailer_prefix}|{trailer_layout}|{_source_id(source)}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -38,34 +61,38 @@ def cached_get_column_names(paths, file_type, delimiter=",", layout=None, start_
                              record_type=None, header_prefix=None, header_layout=None,
                              trailer_prefix=None, trailer_layout=None,
                              source=None):
-    """get_column_names with a session-state cache to avoid re-reading on reruns."""
     if _COLUMN_CACHE_KEY not in st.session_state:
         st.session_state[_COLUMN_CACHE_KEY] = {}
     cache = st.session_state[_COLUMN_CACHE_KEY]
     key = _cache_key(str(paths), file_type, delimiter, record_type,
                       layout=layout, start_line=start_line,
-                      header_prefix=header_prefix)
+                      header_prefix=header_prefix,
+                      header_layout=header_layout,
+                      trailer_prefix=trailer_prefix,
+                      trailer_layout=trailer_layout,
+                      source=source)
     if key in cache:
         return cache[key]
     cols = get_column_names(paths, file_type, delimiter, layout, start_line,
                             record_type, header_prefix, header_layout,
                             trailer_prefix, trailer_layout,
                             source=source)
-    cache[key] = cols
+    _cache_put(cache, key, cols)
     return cols
 
 
 _PREVIEW_CACHE_KEY = "_preview_cache"
 
 
-def _preview_cache_key(paths, file_type, delimiter, layout, n_rows, start_line, record_type) -> str:
+def _preview_cache_key(paths, file_type, delimiter, layout, n_rows, start_line, record_type, source=None) -> str:
     layout_str = str(layout) if layout else ""
-    raw = f"{paths}|{file_type}|{delimiter}|{layout_str}|{n_rows}|{start_line}|{record_type}"
+    rt = record_type or ""
+    raw = f"{paths}|{file_type}|{delimiter}|{layout_str}|{n_rows}|{start_line}|{rt}|{_source_id(source)}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
-def _preview_lines_cache_key(paths, n_rows) -> str:
-    raw = f"{paths}|{n_rows}"
+def _preview_lines_cache_key(paths, n_rows, source=None) -> str:
+    raw = f"{paths}|{n_rows}|{_source_id(source)}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -74,11 +101,11 @@ def cached_preview_raw(paths, file_type="delimited", delimiter=",", layout=None,
     if _PREVIEW_CACHE_KEY not in st.session_state:
         st.session_state[_PREVIEW_CACHE_KEY] = {}
     cache = st.session_state[_PREVIEW_CACHE_KEY]
-    key = _preview_cache_key(str(paths), file_type, delimiter, layout, n_rows, start_line, record_type)
+    key = _preview_cache_key(str(paths), file_type, delimiter, layout, n_rows, start_line, record_type, source=source)
     if key in cache:
         return cache[key]
     result = preview_raw(paths, file_type, delimiter, layout, n_rows, start_line, record_type, source=source)
-    cache[key] = result
+    _cache_put(cache, key, result)
     return result
 
 
@@ -86,12 +113,86 @@ def cached_preview_raw_lines(paths, n_rows=10, source=None):
     if _PREVIEW_CACHE_KEY not in st.session_state:
         st.session_state[_PREVIEW_CACHE_KEY] = {}
     cache = st.session_state[_PREVIEW_CACHE_KEY]
-    key = _preview_lines_cache_key(str(paths), n_rows)
+    key = _preview_lines_cache_key(str(paths), n_rows, source=source)
     if key in cache:
         return cache[key]
     result = preview_raw_lines(paths, n_rows=n_rows, source=source)
-    cache[key] = result
+    _cache_put(cache, key, result)
     return result
+
+
+def invalidate_preview_caches():
+    st.session_state.pop(_COLUMN_CACHE_KEY, None)
+    st.session_state.pop(_PREVIEW_CACHE_KEY, None)
+
+
+def _display_summary_sheets(output, side_label: str = "BAU"):
+    """Render summary worksheets from OutputResult."""
+    has_any = any([
+        output.summary_kpis is not None,
+        output.top_stores is not None,
+        output.bottom_stores is not None,
+        output.top_upcs is not None,
+        output.bottom_upcs is not None,
+        output.top_upcs_by_qty is not None,
+        output.top_brands is not None,
+        output.category_summary is not None,
+        output.store_validation_summary is not None,
+    ])
+    if not has_any:
+        return
+
+    with st.expander("Summary Worksheets", expanded=True):
+        if output.summary_kpis is not None:
+            st.subheader("Key Performance Indicators")
+            kpi = output.summary_kpis.to_pandas().iloc[0].to_dict()
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("Stores", kpi.get(f"Store Count ({side_label})", 0))
+                st.metric("UPCs", kpi.get(f"UPC Count ({side_label})", 0))
+            with c2:
+                st.metric("Total Quantity", f"{kpi.get(f'Total Quantity ({side_label})', 0):,.2f}")
+                st.metric("Total Sales", f"${kpi.get(f'Total Sales ({side_label})', 0):,.2f}")
+            with c3:
+                st.metric("Avg Basket", f"${kpi.get(f'Average Basket (UPC — {side_label})', 0):,.2f}")
+                st.metric("Avg Price", f"${kpi.get(f'Average Price (UPC — {side_label})', 0):,.2f}")
+            with c4:
+                for ek in ["Rows Processed", "Files Processed", "Peak Memory", "Total Time"]:
+                    val = kpi.get(ek)
+                    if val is not None:
+                        st.metric(ek, val)
+
+        if output.top_stores is not None:
+            st.subheader("Top Stores")
+            st.dataframe(output.top_stores.to_pandas(), use_container_width=True)
+
+        if output.bottom_stores is not None:
+            st.subheader("Bottom Stores")
+            st.dataframe(output.bottom_stores.to_pandas(), use_container_width=True)
+
+        if output.top_upcs is not None:
+            st.subheader("Top UPCs by Sales")
+            st.dataframe(output.top_upcs.to_pandas(), use_container_width=True)
+
+        if output.bottom_upcs is not None:
+            st.subheader("Bottom UPCs by Sales")
+            st.dataframe(output.bottom_upcs.to_pandas(), use_container_width=True)
+
+        if output.top_upcs_by_qty is not None:
+            st.subheader("Top UPCs by Quantity")
+            st.dataframe(output.top_upcs_by_qty.to_pandas(), use_container_width=True)
+
+        if output.top_brands is not None:
+            st.subheader("Top Brands")
+            st.dataframe(output.top_brands.to_pandas(), use_container_width=True)
+
+        if output.category_summary is not None:
+            st.subheader("Category Summary")
+            st.dataframe(output.category_summary.to_pandas(), use_container_width=True)
+
+        if output.store_validation_summary is not None:
+            st.subheader("Store Validation Summary")
+            st.dataframe(output.store_validation_summary.to_pandas(), use_container_width=True)
 
 
 def display_execution_summary(metrics):
@@ -123,9 +224,6 @@ def display_execution_summary(metrics):
 def display_dev_diagnostics(ctx):
     st.sidebar.divider()
     with st.sidebar.expander("Developer Diagnostics", expanded=False):
-        from dav_tool.options import OutputMode
-        from dav_tool.datasource.manager import is_connected, get_active_source
-
         m = ctx.metrics
 
         output_mode = getattr(ctx, 'output_mode', OutputMode.VALIDATE)
@@ -326,8 +424,6 @@ def display_processing_history():
 
 def display_config_review(cfg):
     """Render a read-only configuration summary in the UI."""
-    from dav_tool.config_builder import config_to_summary_dict
-
     sections = config_to_summary_dict(cfg)
 
     editable = not cfg.locked
@@ -362,8 +458,6 @@ def edit_and_accept_config(cfg, key_prefix=""):
     User can edit column mapping, price settings, and validation toggles
     directly in the UI. Returns True when the user accepts.
     """
-    from dav_tool.format_config import asdict
-
     changed = False
 
     with st.expander("Column Mapping", expanded=True):
@@ -476,11 +570,6 @@ def _render_section_fields(
     file_paths=None,
 ):
     """Render editable fields for one config section. Returns section errors."""
-    from dav_tool.format_config import (
-        ConfigSection, get_section_fields, OutputConfig,
-    )
-    from dav_tool.config_validator import validate_section
-
     fields = get_section_fields(section)
     changed = False
 
@@ -762,8 +851,6 @@ def progressive_config_wizard(cfg, detected_columns=None, key_prefix="", file_pa
 
     Returns True when all stages are complete.
     """
-    from dav_tool.format_config import iter_sections
-
     for section in iter_sections():
         if cfg.section_complete(section):
             continue
@@ -790,8 +877,6 @@ def render_all_config_sections(cfg, detected_columns=None, key_prefix="", file_p
 
     Returns True when the user accepts the configuration.
     """
-    from dav_tool.format_config import iter_sections
-
     all_errors = {}
 
     for section in iter_sections():
@@ -894,8 +979,6 @@ def validate_config_before_processing(cfg, key_prefix=""):
 
     Returns True if config is valid and user clicks proceed.
     """
-    from dav_tool.config_validator import validate_config
-
     errors = validate_config(cfg)
     if errors:
         st.error("**Configuration has errors — fix before proceeding:**")
@@ -916,8 +999,6 @@ def cleanup_dataframes(ctx, keep_attrs=None):
 
     Preserves attributes listed in *keep_attrs* (default: None = clear all).
     """
-    from dav_tool._observability import release_df
-
     df_attrs = [
         "store_agg", "item_agg", "upc_summary", "file_review",
         "store_df", "comparison_df", "summary_df",

@@ -1,6 +1,7 @@
 import glob
 import logging
 import os
+import platform
 from typing import List, BinaryIO
 
 from dav_tool.datasource.base import IDataSource, DataSourceEntry, DataSourceError
@@ -34,7 +35,8 @@ class LocalDataSource(IDataSource):
                 full = os.path.join(path, name)
                 try:
                     st = os.stat(full)
-                except OSError:
+                except OSError as e:
+                    logger.debug("Could not stat %s: %s", full, e)
                     st = None
                 entries.append(DataSourceEntry(
                     name=name,
@@ -96,7 +98,6 @@ class LocalDataSource(IDataSource):
             raise DataSourceError(f"Cannot stat {path}: {e}")
 
     def get_server_info(self) -> dict:
-        import platform
         return {
             "type": "local",
             "platform": platform.system(),

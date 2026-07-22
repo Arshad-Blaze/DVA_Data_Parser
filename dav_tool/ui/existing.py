@@ -16,7 +16,8 @@ from dav_tool.detection import (
 )
 from dav_tool.ui.helpers import (
     clean_path, get_file_list, cached_get_column_names,
-    display_execution_summary, display_dev_diagnostics, record_execution,
+    display_execution_summary, _display_summary_sheets,
+    display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
     cached_preview_raw, cached_preview_raw_lines,
 )
@@ -28,6 +29,13 @@ from dav_tool.ui.helpers import (
     render_phase_progress, validate_config_before_processing, cleanup_dataframes,
 )
 from dav_tool.ui.layout_builder import render_layout_builder
+from dav_tool.format_config import ValidationConfig, config_from_ctx
+from dav_tool.ui.certification_suite import render_certification_suite
+from dav_tool.workflow.flush import flush
+from dav_tool.workflow.discovery_compare import compare_discovery
+from dav_tool.workflow.schema_comparison import compare_schemas
+from dav_tool.workflow.orchestration import run_existing_processing, run_existing_validation
+from dav_tool.workflow.output import generate_existing_output, generate_migration_report
 
 PHASE_DISCOVERY = 1
 PHASE_DISCOVERY_COMPARE = 2
@@ -47,14 +55,12 @@ def _get_ex_validation_config(ctx):
         cfg = getattr(side, '_generated_config', None)
         if cfg is not None and hasattr(cfg, 'validation_config'):
             return cfg.validation_config
-    from dav_tool.format_config import ValidationConfig
     return ValidationConfig()
 
 
 def _reset_phase():
     old = st.session_state.get("ex_ctx")
     if old is not None:
-        from dav_tool.workflow.flush import flush
         flush(metrics=old.metrics, clear_session=False, ctx_objects=[old, old.prod, old.test])
         del old
     st.session_state.ex_ctx = ExistingContext()
@@ -79,7 +85,6 @@ def run():
     dev_mode = st.sidebar.checkbox("Developer Mode", key="ex_dev_mode")
     if dev_mode:
         display_dev_diagnostics(ctx)
-        from dav_tool.ui.certification_suite import render_certification_suite
         render_certification_suite()
 
     _phase1_discovery(ctx)
@@ -354,7 +359,6 @@ def _phase_discovery_compare(ctx):
 
     _ex_source = get_active_source()
 
-    from dav_tool.workflow.discovery_compare import compare_discovery
     dc = compare_discovery(ctx.prod, ctx.test)
 
     c1, c2 = st.columns(2)
@@ -473,7 +477,6 @@ def _phase_schema_compare(ctx):
 
     st.markdown("### Step 5: Schema Comparison")
 
-    from dav_tool.workflow.schema_comparison import compare_schemas
     sd = compare_schemas(
         ctx.prod.schema or ctx.prod.columns,
         ctx.test.schema or ctx.test.columns,
@@ -505,7 +508,6 @@ def _phase_schema_compare(ctx):
         st.success("Schemas match exactly — no new or removed columns detected.")
 
     with st.expander("Full Schema Comparison"):
-        import polars as pl
         all_cols = sorted(sd.common | sd.only_prod | sd.only_test)
         rows = []
         for col in all_cols:
@@ -526,8 +528,6 @@ def _phase3_config_validation(ctx):
         return
 
     st.markdown("### Step 6: Validate Configuration")
-
-    from dav_tool.format_config import config_from_ctx
 
     prod_cfg = config_from_ctx(ctx.prod)
     test_cfg = config_from_ctx(ctx.test)
@@ -722,8 +722,6 @@ def _phase4_processing(ctx):
                 cleanup_dataframes(ctx)
                 print_memory_snapshot("BEFORE AGGREGATION (EXISTING)")
                 try:
-                    from dav_tool.workflow.orchestration import run_existing_processing
-
                     _ex_source = get_active_source()
 
                     with st.spinner("Aggregating data (running BAU/Test, Store/Item in parallel)..."):
@@ -972,6 +970,7 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
             fw_layout = render_layout_builder(
                 file_paths,
                 existing_layout=side_ctx.layout or getattr(discovery, 'layout', None),
+                candidate_layout=getattr(discovery, 'candidate_layout', None),
                 source=source,
                 key_prefix=f"{key_prefix}_fw_layout",
             )
@@ -1245,8 +1244,6 @@ def _execute_validation(
         )
         return
 
-    from dav_tool.workflow.orchestration import run_existing_validation
-
     run_existing_validation(
         ctx,
         prod_paths, test_paths,
@@ -1279,8 +1276,6 @@ def _execute_validation(
 
 
 def _display_results():
-    from dav_tool.workflow.output import generate_existing_output
-
     ctx = st.session_state.ex_ctx
     output = generate_existing_output(ctx)
 
@@ -1323,13 +1318,13 @@ def _display_results():
                     if output.fr_test_csv:
                         st.download_button("Download Test File Review", output.fr_test_csv, "test_file_review.csv")
 
+    _display_summary_sheets(output, "BAU")
+
     display_execution_summary(output.metrics)
 
 
 def _phase7_migration_report(ctx):
     st.markdown("### Step 10: Migration Report")
-
-    from dav_tool.workflow.output import generate_migration_report
 
     output = generate_migration_report(ctx)
     sd = output.schema_diff

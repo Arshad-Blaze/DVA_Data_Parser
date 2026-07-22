@@ -15,10 +15,13 @@ from dav_tool.workflow.preview import (
     preview_raw, preview_flattened_multiline, preview_flattened_multiline_fixed,
     load_layout, scan_delimited,
 )
+import tempfile
+
+from dav_tool._column_utils import smart_column_indices
 from dav_tool.config import DEFAULT_ENCODING, FALLBACK_ENCODING, DEFAULT_PREVIEW_ROWS, DELIMITERS
 from dav_tool.detection import (
     is_multiline_record, detect_file_type, detect_record_types,
-    detect_hdr_prefix, has_header,
+    detect_hdr_prefix, has_header, detect_encoding,
 )
 from dav_tool.format_config import (
     FormatConfig, ValidationConfig, ValidationRule, ConfigSection,
@@ -39,37 +42,6 @@ def _infer_data_types(df: pl.DataFrame) -> Dict[str, str]:
         dtype = df[col].dtype
         types[col] = str(dtype)
     return types
-
-
-def _detect_encoding(
-    file_path: str,
-    source: Optional[IDataSource] = None,
-) -> str:
-    """Quick encoding detection by trying common encodings."""
-    if source is not None:
-        try:
-            stream = source.open_stream(file_path)
-            raw_bytes = stream.read(1024)
-            stream.close()
-        except Exception as e:
-            logger.warning("Failed to open stream for encoding detection: %s", e)
-            raw_bytes = None
-        if raw_bytes:
-            for enc in ["cp1252", "utf-8", "utf8-lossy", "latin-1"]:
-                try:
-                    raw_bytes.decode(enc)
-                    return enc
-                except (UnicodeDecodeError, UnicodeError):
-                    continue
-            return "utf8-lossy"
-    for enc in ["cp1252", "utf-8", "utf8-lossy", "latin-1"]:
-        try:
-            with open(file_path, "r", encoding=enc) as f:
-                f.read(1024)
-            return enc
-        except (UnicodeDecodeError, UnicodeError):
-            continue
-    return "utf8-lossy"
 
 
 def build_config(
@@ -125,7 +97,6 @@ def build_config(
 
     if source is not None:
         sample_text = source.read_sample(fp, n=SAMPLE_SIZE) if fp else ""
-        import tempfile
         _tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sample", mode="w")
         _tmp.write(sample_text)
         _tmp.close()
@@ -136,7 +107,7 @@ def build_config(
         fp_local = fp
         file_paths_local = file_paths
 
-    encoding = _detect_encoding(fp_local) if fp_local else DEFAULT_ENCODING
+    encoding = detect_encoding(fp_local) if fp_local else DEFAULT_ENCODING
 
     try:
         if not file_type:
@@ -212,7 +183,6 @@ def build_config(
             cfg.canonical_schema = list(cols)
             cfg.detected_data_types = _infer_data_types(sample)
 
-            from dav_tool._column_utils import smart_column_indices
             indices = smart_column_indices(cols)
             mapping = {}
             for role, (idx, col) in indices.items():
@@ -325,7 +295,7 @@ def build_file_info_section(
 
     cfg.file_type = file_type
     cfg.delimiter = delimiter
-    cfg.encoding = _detect_encoding(local_fp, source)
+    cfg.encoding = detect_encoding(local_fp, source)
     cfg.has_header = has_header(local_fp, delimiter or ",") if file_type != "multiline" else False
 
     _cleanup_sample(fp, local_fp, source)
@@ -394,7 +364,6 @@ def build_schema_section(
         cfg.canonical_schema = list(cols)
         cfg.detected_data_types = _infer_data_types(sample)
 
-        from dav_tool._column_utils import smart_column_indices
         indices = smart_column_indices(cols)
         mapping = {}
         for role, (idx, col) in indices.items():
@@ -447,7 +416,6 @@ def _resolve_sample(fp: str, source: Optional[IDataSource]) -> str:
     if source is not None:
         try:
             text = source.read_sample(fp, n=SAMPLE_SIZE)
-            import tempfile
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".sample", mode="w")
             tmp.write(text)
             tmp.close()
@@ -506,7 +474,6 @@ def _load_sample(
 
     if file_type == "delimited":
         try:
-            from dav_tool.config import FALLBACK_ENCODING
             return pl.read_csv(
                 fp, separator=delimiter,
                 n_rows=SAMPLE_SIZE, encoding=FALLBACK_ENCODING,

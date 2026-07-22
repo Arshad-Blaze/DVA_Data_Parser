@@ -68,7 +68,8 @@ def _estimate_df_mb(df: pl.DataFrame) -> float:
     """Rough estimate of DataFrame memory in MB."""
     try:
         return df.estimated_size("mb")
-    except Exception:
+    except Exception as e:
+        _LOG.warning("Could not estimate DataFrame size: %s", e)
         return 0.0
 
 

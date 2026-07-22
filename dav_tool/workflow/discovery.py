@@ -12,6 +12,7 @@ from dav_tool.detection import (
     generate_detection_summary,
 )
 from dav_tool.datasource.base import IDataSource
+from dav_tool.io import safe_read_csv
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,12 @@ class DiscoveryResult:
         start_line: int = 0,
         record_type: Optional[str] = None,
         layout: Optional[List[Dict]] = None,
+        record_length: Optional[int] = None,
+        candidate_layout: Optional[List[Dict]] = None,
+        disclaimer_lines: Optional[List[int]] = None,
+        record_prefix: Optional[List[str]] = None,
+        candidate_keys: Optional[List[Dict]] = None,
+        suggested_joins: Optional[List[Dict]] = None,
         error: Optional[str] = None,
         confidence: float = 0.0,
         candidate_columns: Optional[Dict[str, Optional[str]]] = None,
@@ -65,6 +72,12 @@ class DiscoveryResult:
         self.start_line = start_line
         self.record_type = record_type
         self.layout = layout
+        self.record_length = record_length
+        self.candidate_layout = candidate_layout or []
+        self.disclaimer_lines = disclaimer_lines or []
+        self.record_prefix = record_prefix or []
+        self.candidate_keys = candidate_keys or []
+        self.suggested_joins = suggested_joins or []
         self.error = error
         self.confidence = confidence
         self.candidate_columns = candidate_columns or {}
@@ -94,6 +107,12 @@ class DiscoveryResult:
             start_line=getattr(ctx, "start_line", 0),
             record_type=getattr(ctx, "record_type", None),
             layout=getattr(ctx, "layout", None),
+            record_length=getattr(ctx, "record_length", None),
+            candidate_layout=getattr(ctx, "candidate_layout", []),
+            disclaimer_lines=getattr(ctx, "disclaimer_lines", []),
+            record_prefix=getattr(ctx, "record_prefix", []),
+            candidate_keys=getattr(ctx, "candidate_keys", []),
+            suggested_joins=getattr(ctx, "suggested_joins", []),
             confidence=getattr(ctx, "confidence", 0.0),
             candidate_columns=getattr(ctx, "candidate_columns", {}),
             warnings=getattr(ctx, "warnings", []),
@@ -122,6 +141,12 @@ class DiscoveryResult:
         ctx.start_line = self.start_line
         ctx.record_type = self.record_type
         ctx.layout = self.layout
+        ctx.record_length = self.record_length
+        ctx.candidate_layout = self.candidate_layout
+        ctx.disclaimer_lines = self.disclaimer_lines
+        ctx.record_prefix = self.record_prefix
+        ctx.candidate_keys = self.candidate_keys
+        ctx.suggested_joins = self.suggested_joins
         ctx.confidence = self.confidence
         ctx.candidate_columns = self.candidate_columns
         ctx.warnings = self.warnings
@@ -156,12 +181,18 @@ def detect_file(
             header_prefix=summary["header_prefix"],
             trailer_prefix=summary["trailer_prefix"],
             ml_record_types=summary["ml_record_types"],
+            record_length=summary.get("record_length"),
+            candidate_layout=summary.get("candidate_layout", []),
+            start_line=summary.get("start_line", 0),
+            disclaimer_lines=summary.get("disclaimer_lines", []),
+            record_prefix=summary.get("record_prefix", []),
+            candidate_keys=summary.get("candidate_keys", []),
             confidence=summary["confidence"],
             warnings=summary["warnings"],
             recommendations=summary["recommendations"],
         )
 
-        if summary["file_type"] == "fixed":
+        if summary["file_type"] == "fixed" and not summary.get("candidate_layout"):
             result.error = "Fixed-width files require a layout definition (use the Layout Builder)"
 
         # Propose candidate column mappings
@@ -181,7 +212,6 @@ def _get_delimited_columns(
     source: Optional[IDataSource] = None,
 ) -> List[str]:
     """Get column names from a delimited file."""
-    from dav_tool.io import safe_read_csv
     try:
         df = safe_read_csv(file_paths[0], separator=delimiter or ",", n_rows=5, source=source)
         return df.columns

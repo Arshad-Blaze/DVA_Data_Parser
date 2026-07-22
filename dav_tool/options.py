@@ -117,6 +117,8 @@ class ColumnMapping:
     quantity_strategy: str = "auto"
     weight_qty_col: Optional[str] = None
     units_uom: Optional[str] = None
+    date_col: Optional[str] = None
+    schema_template: str = "minimal"
 
     @classmethod
     def from_context(cls, ctx) -> "ColumnMapping":
@@ -140,6 +142,8 @@ class ColumnMapping:
             quantity_strategy=strategy,
             weight_qty_col=weight_qty_col,
             units_uom=units_uom,
+            date_col=getattr(ctx, "date_col", None),
+            schema_template=getattr(ctx, "schema_template", "minimal"),
         )
 
 
@@ -177,6 +181,7 @@ class CanonicalContext:
         from dav_tool.workflow.canonical import CanonicalDataset
         return CanonicalDataset.from_parse_options(
             file_paths, self.parse, self.mapping, level, source=source,
+            schema_template=self.mapping.schema_template,
         )
 
 

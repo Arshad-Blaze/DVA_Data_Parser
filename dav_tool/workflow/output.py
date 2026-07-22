@@ -3,11 +3,30 @@
 Produces OutputResult from context data.
 UI receives OutputResult and renders it — no report logic in the UI.
 """
-
+import logging
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
 import polars as pl
+
+from dav_tool._observability import log_phase, print_memory_snapshot
+from dav_tool._reports import generate_summary_analytics
+
+logger = logging.getLogger(__name__)
+
+
+def _metrics_dict(metrics) -> Optional[Dict[str, Any]]:
+    """Convert a metrics object to a plain dict if it exists."""
+    if metrics is None:
+        return None
+    return {
+        "rows_processed": getattr(metrics, "rows_processed", 0),
+        "total_execution_time": getattr(metrics, "total_execution_time", 0.0),
+        "peak_memory": getattr(metrics, "peak_memory", 0.0),
+        "peak_cpu": getattr(metrics, "peak_cpu", 0.0),
+        "files_processed": getattr(metrics, "files_processed", 0),
+    }
 
 
 @dataclass
@@ -39,6 +58,17 @@ class OutputResult:
     fr_test: Optional[pl.DataFrame] = None
     fr_test_csv: Optional[str] = None
 
+    # ── Summary Worksheets ──
+    summary_kpis: Optional[pl.DataFrame] = None
+    top_stores: Optional[pl.DataFrame] = None
+    bottom_stores: Optional[pl.DataFrame] = None
+    top_upcs: Optional[pl.DataFrame] = None
+    bottom_upcs: Optional[pl.DataFrame] = None
+    top_upcs_by_qty: Optional[pl.DataFrame] = None
+    top_brands: Optional[pl.DataFrame] = None
+    category_summary: Optional[pl.DataFrame] = None
+    store_validation_summary: Optional[pl.DataFrame] = None
+
     # ── Migration Report ──
     migration_metrics: Dict[str, Any] = field(default_factory=dict)
     schema_diff: Optional[Any] = None
@@ -49,6 +79,8 @@ class OutputResult:
 
 def generate_onboarding_output(ctx) -> OutputResult:
     """Build OutputResult from an onboarding ProcessingContext."""
+    log_phase("Output (Onboarding) — STARTED")
+    t0 = time.time()
     result = OutputResult(metrics=ctx.metrics)
 
     if ctx.compare_result is not None:
@@ -62,11 +94,42 @@ def generate_onboarding_output(ctx) -> OutputResult:
         result.file_review_df = ctx.file_review
         result.file_review_csv = ctx.file_review.write_csv()
 
+    # Summary worksheets
+    sheets = generate_summary_sheets(
+        store_agg=ctx.store_agg,
+        upc_summary=ctx.item_agg,
+        item_comparison=None,
+        store_diff=None,
+        execution_metrics=_metrics_dict(ctx.metrics),
+        prod_label="Retailer",
+        test_label="Storelist",
+    )
+    if sheets:
+        result.summary_kpis = sheets.get("summary_kpis")
+        result.top_stores = sheets.get("top_stores")
+        result.bottom_stores = sheets.get("bottom_stores")
+        result.top_upcs = sheets.get("top_upcs")
+        result.bottom_upcs = sheets.get("bottom_upcs")
+        result.top_upcs_by_qty = sheets.get("top_upcs_by_qty")
+        result.top_brands = sheets.get("top_brands")
+        result.category_summary = sheets.get("category_summary")
+        result.store_validation_summary = sheets.get("store_validation_summary")
+
+    elapsed = time.time() - t0
+    log_phase(f"Output (Onboarding) — COMPLETED in {elapsed:.2f}s")
+    logger.info(
+        "Output: upc_summary=%s file_review=%s sheets=%s",
+        result.upc_summary_df is not None,
+        result.file_review_df is not None,
+        sheets is not None,
+    )
     return result
 
 
 def generate_existing_output(ctx) -> OutputResult:
     """Build OutputResult from an existing-flow ExistingContext."""
+    log_phase("Output (Existing) — STARTED")
+    t0 = time.time()
     result = OutputResult(metrics=ctx.metrics)
 
     if ctx.store_df is not None and not ctx.store_df.is_empty():
@@ -91,7 +154,131 @@ def generate_existing_output(ctx) -> OutputResult:
         result.fr_test = ctx.fr_test
         result.fr_test_csv = ctx.fr_test.write_csv()
 
+    # Summary worksheets
+    sheets = generate_summary_sheets(
+        store_agg=ctx.prod.store_agg,
+        upc_summary=ctx.prod.item_agg,
+        item_comparison=ctx.comparison_df,
+        store_diff=ctx.store_df,
+        execution_metrics=_metrics_dict(ctx.metrics),
+        prod_label="BAU",
+        test_label="TEST",
+    )
+    if sheets:
+        result.summary_kpis = sheets.get("summary_kpis")
+        result.top_stores = sheets.get("top_stores")
+        result.bottom_stores = sheets.get("bottom_stores")
+        result.top_upcs = sheets.get("top_upcs")
+        result.bottom_upcs = sheets.get("bottom_upcs")
+        result.top_upcs_by_qty = sheets.get("top_upcs_by_qty")
+        result.top_brands = sheets.get("top_brands")
+        result.category_summary = sheets.get("category_summary")
+        result.store_validation_summary = sheets.get("store_validation_summary")
+
+    elapsed = time.time() - t0
+    log_phase(f"Output (Existing) — COMPLETED in {elapsed:.2f}s")
+    logger.info(
+        "Output: store_diff=%s comparison=%s sheets=%s",
+        result.store_df is not None,
+        result.comparison_df is not None,
+        sheets is not None,
+    )
     return result
+
+
+def generate_summary_sheets(
+    store_agg: Optional[pl.DataFrame] = None,
+    upc_summary: Optional[pl.DataFrame] = None,
+    item_comparison: Optional[pl.DataFrame] = None,
+    store_diff: Optional[pl.DataFrame] = None,
+    execution_metrics: Optional[Dict[str, Any]] = None,
+    prod_label: str = "BAU",
+    test_label: str = "TEST",
+) -> Optional[Dict[str, pl.DataFrame]]:
+    """Generate summary worksheets from pre-computed aggregation results.
+
+    Returns a dict with keys ``summary_kpis``, ``top_stores``, ``bottom_stores``,
+    ``top_upcs``, ``bottom_upcs``, ``top_brands``, ``category_summary``,
+    ``    store_validation_summary``, or None if no data.
+    """
+    kpis = generate_summary_analytics(
+        prod_store_agg=store_agg,
+        test_store_agg=None,
+        prod_upc_summary=upc_summary,
+        test_upc_summary=None,
+        prod_item_comparison=item_comparison,
+        store_diff=store_diff,
+        execution_metrics=execution_metrics,
+        prod_label=prod_label,
+        test_label=test_label,
+    )
+    if kpis.is_empty():
+        return None
+
+    sheets: Dict[str, pl.DataFrame] = {"summary_kpis": kpis}
+
+    # Top/bottom stores
+    if store_agg is not None and not store_agg.is_empty():
+        sf = store_agg.filter(pl.col("Units").is_not_null())
+        if "Totalprice" in sf.columns and "Units" in sf.columns:
+            sheets["top_stores"] = pl.concat([
+                sf.top_k(10, by="Totalprice").with_columns(pl.lit("Sales").alias("rank_by")),
+                sf.top_k(10, by="Units").with_columns(pl.lit("Quantity").alias("rank_by")),
+            ])
+            sheets["bottom_stores"] = pl.concat([
+                sf.bottom_k(10, by="Totalprice").with_columns(pl.lit("Sales").alias("rank_by")),
+                sf.bottom_k(10, by="Units").with_columns(pl.lit("Quantity").alias("rank_by")),
+            ])
+
+    # Top/bottom UPCs
+    if upc_summary is not None and not upc_summary.is_empty():
+        if "TOTAL_DOLLARS" in upc_summary.columns:
+            sheets["top_upcs"] = upc_summary.top_k(10, by="TOTAL_DOLLARS").with_columns(
+                pl.lit("Top").alias("rank")
+            )
+            sheets["bottom_upcs"] = upc_summary.bottom_k(10, by="TOTAL_DOLLARS").with_columns(
+                pl.lit("Bottom").alias("rank")
+            )
+        if "UNITS_SOLD" in upc_summary.columns:
+            sheets["top_upcs_by_qty"] = upc_summary.top_k(10, by="UNITS_SOLD").with_columns(
+                pl.lit("Top Qty").alias("rank")
+            )
+
+    # Top brands (when enriched schema provides Brand column)
+    if upc_summary is not None and not upc_summary.is_empty():
+        if "Brand" in upc_summary.columns:
+            brands = upc_summary.group_by("Brand").agg([
+                pl.sum("UNITS_SOLD").alias("Total Units"),
+                pl.sum("TOTAL_DOLLARS").alias("Total Sales"),
+                pl.count().alias("UPC Count"),
+            ]).sort("Total Sales", descending=True)
+            sheets["top_brands"] = brands
+
+    # Category summary (grouped by description)
+    if upc_summary is not None and not upc_summary.is_empty():
+        if "PRODUCT_DESCRIPTION" in upc_summary.columns:
+            cat = upc_summary.group_by("PRODUCT_DESCRIPTION").agg([
+                pl.sum("UNITS_SOLD").alias("Total Units"),
+                pl.sum("TOTAL_DOLLARS").alias("Total Sales"),
+                pl.count().alias("UPC Count"),
+            ]).sort("Total Sales", descending=True)
+            sheets["category_summary"] = cat
+
+    # Store validation summary
+    if store_diff is not None and not store_diff.is_empty():
+        if "Units_Diff_%" in store_diff.columns and "Sales_Diff_%" in store_diff.columns:
+            summary_df = store_diff.select([
+                pl.col("STORE_NUMBER"),
+                pl.col("Units_Diff_%").alias("Units Variance %"),
+                pl.col("Sales_Diff_%").alias("Sales Variance %"),
+            ])
+        else:
+            summary_df = store_diff.select([
+                pl.col(c) for c in store_diff.columns if c != "STORE_NUMBER"
+            ])
+        sheets["store_validation_summary"] = summary_df
+
+    return sheets
 
 
 def generate_migration_report(ctx) -> OutputResult:

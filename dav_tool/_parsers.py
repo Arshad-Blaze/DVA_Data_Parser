@@ -6,6 +6,15 @@ from typing import Iterator, List, Dict, Any, Optional, Union, BinaryIO
 
 import polars as pl
 
+from dav_tool._normalizer import (
+    apply_column_names,
+    store_normalize_exprs,
+    normalize_store_chunk,
+    item_normalize_exprs,
+    normalize_item_chunk,
+    upc_normalize_exprs,
+    normalize_upc_chunk,
+)
 from dav_tool._numeric import (  # noqa: F401 — re-exported for backward compat
     NumericHandling,
     NumericParsingConfig,
@@ -22,6 +31,11 @@ def load_layout(layout_file: str) -> List[Dict[str, Any]]:
     layout_df = pl.read_csv(layout_file, encoding=FALLBACK_ENCODING)
     cols = [c.strip().lower() for c in layout_df.columns]
     layout_df.columns = cols
+
+    required = {"from", "length", "field"}
+    missing = required - set(cols)
+    if missing:
+        raise ValueError(f"Layout file missing required columns: {missing}. Need: from, length, field")
 
     layout = []
     for row in layout_df.iter_rows(named=True):
@@ -314,6 +328,8 @@ def preview_raw_lines(
     splitting, no canonical conversion, no flattening, no column mapping.
     This is intended ONLY for understanding source data format.
     """
+    if file_paths is None:
+        return []
     if isinstance(file_paths, str):
         file_paths = [file_paths]
 
@@ -333,8 +349,8 @@ def preview_raw_lines(
                 line = line.rstrip("\n\r")
                 lines.append(line)
         return lines
-    except Exception:
-        logger.warning("preview_raw_lines failed for %s", fp)
+    except Exception as e:
+        logger.warning("preview_raw_lines failed for %s: %s", fp, e)
         return []
 
 
@@ -348,6 +364,8 @@ def preview_raw(
     record_type: Optional[str] = None,
     source: Optional[IDataSource] = None,
 ) -> pl.DataFrame:
+    if file_paths is None:
+        return pl.DataFrame()
     if isinstance(file_paths, str):
         file_paths = [file_paths]
 
@@ -394,7 +412,8 @@ def preview_raw(
                         continue
                     record = {}
                     for col in layout or []:
-                        raw = line[col["start"] : col["end"]].strip()
+                        end = min(col["end"], len(line))
+                        raw = line[col["start"] : end].strip()
                         record[col["field"]] = raw
                     records.append(record)
             return pl.DataFrame(records) if records else pl.DataFrame()
@@ -415,8 +434,8 @@ def preview_raw(
             )
 
         return pl.DataFrame()
-    except Exception:
-        logger.warning("preview_raw failed for %s (type=%s)", fp, file_type)
+    except Exception as e:
+        logger.warning("preview_raw failed for %s (type=%s): %s", fp, file_type, e)
         return pl.DataFrame()
 
 
@@ -497,6 +516,11 @@ def canonical_chunk_stream(
     weight_uom: str = "lb",
     weight_uom_col=None,
     numeric_config=None,
+    date_col: Optional[str] = None,
+    weight_qty_col: Optional[str] = None,
+    quantity_strategy: str = "auto",
+    units_uom: Optional[str] = None,
+    schema_template: str = "minimal",
 ):
     """Yield canonically-normalized DataFrames from file(s).
 
@@ -509,15 +533,6 @@ def canonical_chunk_stream(
     - ``"item"`` → ``UPC_CODE``, ``PRODUCT_DESCRIPTION``, ``UNITS_SOLD``, ``TOTAL_DOLLARS``
     - ``"upc"`` → ``UPC``, ``UNITS_SOLD``, ``TOTAL_DOLLARS``
     """
-    from dav_tool._normalizer import (
-        apply_column_names,
-        store_normalize_exprs,
-        normalize_store_chunk,
-        item_normalize_exprs,
-        normalize_item_chunk,
-        upc_normalize_exprs,
-        normalize_upc_chunk,
-    )
 
     if isinstance(file_paths, str):
         file_paths = [file_paths]
@@ -547,21 +562,30 @@ def canonical_chunk_stream(
                 store_normalize_exprs(store_col, units_col, price_col,
                                        implied_units, implied_dollars, price_type,
                                        quantity_type, weight_col, weight_uom, weight_uom_col,
-                                       numeric_config=numeric_config)
+                                       numeric_config=numeric_config,
+                                       date_col=date_col, weight_qty_col=weight_qty_col,
+                                       quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                       schema_template=schema_template)
             )
         elif level == "item":
             lazy = lazy.with_columns(
                 item_normalize_exprs(upc_col, desc_col, units_col, price_col,
                                       implied_units, implied_dollars,
                                       quantity_type, weight_col, weight_uom, weight_uom_col,
-                                      numeric_config=numeric_config)
+                                      numeric_config=numeric_config,
+                                      date_col=date_col, weight_qty_col=weight_qty_col,
+                                      quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                      schema_template=schema_template)
             )
         elif level == "upc":
             lazy = lazy.with_columns(
                 upc_normalize_exprs(upc_col, units_col, price_col,
                                      implied_units, implied_dollars,
                                      quantity_type, weight_col, weight_uom, weight_uom_col,
-                                     numeric_config=numeric_config)
+                                     numeric_config=numeric_config,
+                                     date_col=date_col, weight_qty_col=weight_qty_col,
+                                     quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                     schema_template=schema_template)
             )
         yield lazy.collect(engine="streaming")
         return
@@ -586,7 +610,10 @@ def canonical_chunk_stream(
             yield normalize_store_chunk(chunk, store_col, units_col, price_col,
                                          implied_units, implied_dollars, price_type,
                                          quantity_type, weight_col, weight_uom, weight_uom_col,
-                                         numeric_config=numeric_config)
+                                         numeric_config=numeric_config,
+                                         date_col=date_col, weight_qty_col=weight_qty_col,
+                                         quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                         schema_template=schema_template)
         elif level == "item":
             if upc_col not in chunk.columns:
                 logger.warning("Skipping chunk: column '%s' not found", upc_col)
@@ -595,7 +622,10 @@ def canonical_chunk_stream(
             yield normalize_item_chunk(chunk, upc_col, desc_col, units_col, price_col,
                                         implied_units, implied_dollars,
                                         quantity_type, weight_col, weight_uom, weight_uom_col,
-                                        numeric_config=numeric_config)
+                                        numeric_config=numeric_config,
+                                        date_col=date_col, weight_qty_col=weight_qty_col,
+                                        quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                        schema_template=schema_template)
         elif level == "upc":
             if upc_col not in chunk.columns:
                 logger.warning("Skipping chunk: column '%s' not found", upc_col)
@@ -604,7 +634,10 @@ def canonical_chunk_stream(
             yield normalize_upc_chunk(chunk, upc_col, units_col, price_col,
                                        implied_units, implied_dollars,
                                        quantity_type, weight_col, weight_uom, weight_uom_col,
-                                       numeric_config=numeric_config)
+                                       numeric_config=numeric_config,
+                                       date_col=date_col, weight_qty_col=weight_qty_col,
+                                       quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                       schema_template=schema_template)
         del chunk
 
 

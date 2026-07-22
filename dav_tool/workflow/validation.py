@@ -4,11 +4,14 @@ Moved from UI layer (onboarding.py:738-820, existing.py:1145-1265).
 No Streamlit imports. No rendering. Pure validation logic.
 """
 import logging
+import os
 import time
 from typing import Optional, Dict, List
 
 import polars as pl
 
+from dav_tool.datasource.manager import get_active_source
+from dav_tool.io import safe_read_csv
 from dav_tool.options import ParseOptions, ColumnMapping, ValidationOptions
 from dav_tool.validation.store import compare_files, storelevelvalidation
 from dav_tool.validation.item import run_item_validation
@@ -164,8 +167,6 @@ def _run_store_list_compare(store_agg, validation_opts, source=None):
     if not validation_opts.store_list_path:
         return {"missing_in_test": "", "missing_in_prod": ""}
 
-    from dav_tool.io import safe_read_csv
-    from dav_tool.datasource.manager import get_active_source
     _source = source or get_active_source()
     local_path = validation_opts.store_list_path
     if _source is not None:
@@ -174,8 +175,7 @@ def _run_store_list_compare(store_agg, validation_opts, source=None):
         except Exception as e:
             logger.warning("Failed to download storelist via source for %s: %s",
                            validation_opts.store_list_path, e)
-    import os as _os
-    ext = _os.path.splitext(local_path)[-1].lower()
+    ext = os.path.splitext(local_path)[-1].lower()
     if ext in [".xlsx", ".xls"]:
         storelist_df = pl.read_excel(local_path)
     else:

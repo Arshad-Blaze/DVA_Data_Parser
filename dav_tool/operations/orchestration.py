@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from dav_tool.operations.registry import get_workflow_op
+from dav_tool.operations.registry import get_workflow_op, list_workflow_ops
 
 logger = logging.getLogger(__name__)
 
@@ -60,5 +60,4 @@ class OperationExecutor:
 
 def list_workflow_op_types() -> list:
     """Return list of registered workflow operation type strings."""
-    from dav_tool.operations.registry import list_workflow_ops
     return list_workflow_ops()

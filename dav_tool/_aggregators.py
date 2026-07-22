@@ -10,10 +10,12 @@ No validation logic here. No UI rendering.
 """
 import gc
 import logging
+import time
 from typing import Any, Dict, List, Optional, Union
 
 import polars as pl
 
+from dav_tool._observability import log_phase, print_memory_snapshot
 from dav_tool._parsers import canonical_chunk_stream
 from dav_tool.datasource.base import IDataSource
 
@@ -50,6 +52,11 @@ def aggregate(
     weight_uom: str = "lb",
     weight_uom_col: Optional[str] = None,
     numeric_config: Any = None,
+    date_col: Optional[str] = None,
+    weight_qty_col: Optional[str] = None,
+    quantity_strategy: str = "auto",
+    units_uom: Optional[str] = None,
+    schema_template: str = "minimal",
 ) -> pl.DataFrame:
     """Config-driven aggregation at one of three levels.
 
@@ -58,6 +65,9 @@ def aggregate(
     This is the single entry point for the Aggregation Engine.
     Internally builds a canonical chunk stream and aggregates it.
     """
+    log_phase(f"Aggregation — STARTED ({level})")
+    t0 = time.time()
+    print_memory_snapshot("BEFORE AGGREGATION")
     stream = canonical_chunk_stream(
         file_paths, file_type, layout, start_line, record_type,
         multiline_record_types, multiline_delimiter,
@@ -72,15 +82,23 @@ def aggregate(
         quantity_type=quantity_type, weight_col=weight_col,
         weight_uom=weight_uom, weight_uom_col=weight_uom_col,
         numeric_config=numeric_config,
+        date_col=date_col, weight_qty_col=weight_qty_col,
+        quantity_strategy=quantity_strategy, units_uom=units_uom,
+        schema_template=schema_template,
     )
 
     if level == "store":
-        return _aggregate_store_stream(stream)
-    if level == "item":
-        return _aggregate_item_stream(stream)
-    if level == "upc":
-        return _aggregate_upc_stream(stream)
-    raise ValueError(f"Unknown aggregation level: {level}")
+        result = _aggregate_store_stream(stream)
+    elif level == "item":
+        result = _aggregate_item_stream(stream)
+    elif level == "upc":
+        result = _aggregate_upc_stream(stream)
+    else:
+        raise ValueError(f"Unknown aggregation level: {level}")
+    elapsed = time.time() - t0
+    print_memory_snapshot("AFTER AGGREGATION")
+    log_phase(f"Aggregation — COMPLETED ({level}, {elapsed:.2f}s, rows={len(result) if result is not None else 0})")
+    return result
 
 
 def aggregate_with_options(
@@ -122,6 +140,11 @@ def aggregate_with_options(
         weight_uom=mapping.weight_uom,
         weight_uom_col=mapping.weight_uom_col,
         numeric_config=getattr(parse_opts, 'numeric_config', None),
+        date_col=mapping.date_col,
+        weight_qty_col=mapping.weight_qty_col,
+        quantity_strategy=mapping.quantity_strategy,
+        units_uom=mapping.units_uom,
+        schema_template=mapping.schema_template,
     )
 
 
@@ -186,7 +209,21 @@ def aggregate_with_config(
         weight_col=getattr(config, "weight_col", None),
         weight_uom=getattr(config, "weight_uom", "lb"),
         weight_uom_col=getattr(config, "weight_uom_col", None),
+        date_col=getattr(config, "date_col", None),
+        weight_qty_col=getattr(config, "weight_qty_col", None),
+        quantity_strategy=getattr(config, "quantity_strategy", "auto"),
+        units_uom=getattr(config, "units_uom", None),
+        schema_template=getattr(config, "schema_template", "minimal"),
     )
+
+
+def _extra_agg_exprs(chunk: pl.DataFrame) -> List[pl.Expr]:
+    """Build pass-through aggregation expressions for extra canonical columns."""
+    extra = []
+    for col_name in ("QuantityType", "UOM", "Date", "Brand", "Category"):
+        if col_name in chunk.columns:
+            extra.append(pl.first(col_name).alias(col_name))
+    return extra
 
 
 def _aggregate_store_stream(stream) -> pl.DataFrame:
@@ -195,7 +232,9 @@ def _aggregate_store_stream(stream) -> pl.DataFrame:
     for chunk in stream:
         if "STORE_NUMBER" not in chunk.columns:
             continue
-        agg = chunk.group_by("STORE_NUMBER").agg([pl.sum("Units"), pl.sum("Totalprice")])
+        base_aggs = [pl.sum("Units"), pl.sum("Totalprice")]
+        base_aggs.extend(_extra_agg_exprs(chunk))
+        agg = chunk.group_by("STORE_NUMBER").agg(base_aggs)
         aggs.append(agg)
         del chunk
 
@@ -204,10 +243,14 @@ def _aggregate_store_stream(stream) -> pl.DataFrame:
 
     merged = pl.concat(aggs)
     aggs.clear()
+    base_aggs = [pl.sum("Units"), pl.sum("Totalprice")]
+    extra_cols = [c for c in merged.columns if c in ("QuantityType", "UOM", "Date", "Brand", "Category")]
+    for col_name in extra_cols:
+        base_aggs.append(pl.first(col_name).alias(col_name))
     result = (
         merged
         .group_by("STORE_NUMBER")
-        .agg([pl.sum("Units"), pl.sum("Totalprice")])
+        .agg(base_aggs)
         .sort("STORE_NUMBER")
     )
     del merged
@@ -221,9 +264,9 @@ def _aggregate_item_stream(stream) -> pl.DataFrame:
     for chunk in stream:
         if "UPC_CODE" not in chunk.columns:
             continue
-        agg = chunk.group_by(["UPC_CODE", "PRODUCT_DESCRIPTION"]).agg(
-            [pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")]
-        )
+        base_aggs = [pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")]
+        base_aggs.extend(_extra_agg_exprs(chunk))
+        agg = chunk.group_by(["UPC_CODE", "PRODUCT_DESCRIPTION"]).agg(base_aggs)
         aggs.append(agg)
         del chunk
 
@@ -232,10 +275,14 @@ def _aggregate_item_stream(stream) -> pl.DataFrame:
 
     merged = pl.concat(aggs)
     aggs.clear()
+    base_aggs = [pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")]
+    extra_cols = [c for c in merged.columns if c in ("QuantityType", "UOM", "Date", "Brand", "Category")]
+    for col_name in extra_cols:
+        base_aggs.append(pl.first(col_name).alias(col_name))
     result = (
         merged
         .group_by(["UPC_CODE", "PRODUCT_DESCRIPTION"])
-        .agg([pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")])
+        .agg(base_aggs)
         .sort(["UPC_CODE", "PRODUCT_DESCRIPTION"])
     )
     del merged
@@ -249,7 +296,9 @@ def _aggregate_upc_stream(stream) -> pl.DataFrame:
     for chunk in stream:
         if "UPC" not in chunk.columns:
             continue
-        agg = chunk.group_by("UPC").agg([pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")])
+        base_aggs = [pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")]
+        base_aggs.extend(_extra_agg_exprs(chunk))
+        agg = chunk.group_by("UPC").agg(base_aggs)
         aggs.append(agg)
         del chunk
 
@@ -258,10 +307,14 @@ def _aggregate_upc_stream(stream) -> pl.DataFrame:
 
     merged = pl.concat(aggs)
     aggs.clear()
+    base_aggs = [pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")]
+    extra_cols = [c for c in merged.columns if c in ("QuantityType", "UOM", "Date", "Brand", "Category")]
+    for col_name in extra_cols:
+        base_aggs.append(pl.first(col_name).alias(col_name))
     result = (
         merged
         .group_by("UPC")
-        .agg([pl.sum("UNITS_SOLD"), pl.sum("TOTAL_DOLLARS")])
+        .agg(base_aggs)
         .sort("UPC")
     )
     del merged

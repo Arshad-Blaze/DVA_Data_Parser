@@ -239,7 +239,7 @@ class DataAccessor:
                 )
                 total_size += stat.get("size", 0)
             except Exception as e:
-                logger.debug("Could not stat file, assuming 10MB: %s", e)
+                logger.warning("Could not stat %s, assuming 10MB: %s", p, e)
                 total_size += 10 * 1024 * 1024
 
         return {

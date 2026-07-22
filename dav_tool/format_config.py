@@ -320,8 +320,8 @@ def apply_format_config(
     if config.numeric_config:
         try:
             ctx.numeric_config = NumericParsingConfig(**config.numeric_config)
-        except Exception:
-            logger.warning("Failed to restore numeric_config from config dict")
+        except Exception as e:
+            logger.warning("Failed to restore numeric_config from config dict: %s", e)
 
     if config.canonical_schema:
         ctx.schema = config.canonical_schema
