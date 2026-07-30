@@ -1,0 +1,5 @@
+field,from,length,type
+RecordType,1,1,string
+Store,2,4,string
+Date,6,10,string
+StoreNum,16,4,string

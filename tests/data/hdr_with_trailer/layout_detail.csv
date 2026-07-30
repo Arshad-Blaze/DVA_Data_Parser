@@ -1,0 +1,6 @@
+field,from,length,type
+RecordType,1,3,string
+UPC,4,6,string
+Desc,10,20,string
+Units,30,5,integer
+Price,35,7,decimal

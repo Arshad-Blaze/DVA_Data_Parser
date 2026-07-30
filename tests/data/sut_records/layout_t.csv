@@ -1,0 +1,5 @@
+field,from,length,type
+RecordType,1,1,string
+RecCount,2,5,integer
+UnitSum,7,6,integer
+PriceSum,13,7,decimal
