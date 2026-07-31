@@ -22,7 +22,7 @@ from dav_tool.ui.helpers import (
     display_dev_diagnostics, record_execution,
     display_processing_history, smart_column_indices, validate_column_mapping,
     cached_preview_raw, cached_preview_raw_lines,
-    render_phase_progress, validate_config_before_processing, cleanup_dataframes,
+    render_phase_progress, cleanup_dataframes,
     display_confidence_breakdown,
 )
 from dav_tool.datasource.manager import get_active_source
@@ -113,10 +113,11 @@ def run():
 
 
 def _phase1_discovery(ctx):
-    st.markdown("### Step 2: Discovery — File Detection & Preview")
-
+    # Only show discovery UI if not yet configured
     if ctx.phase >= PHASE_CONFIG and ctx.prod.file_paths and ctx.test.file_paths:
         return
+
+    st.markdown("### Step 2: Discovery — File Detection & Preview")
 
     _ex_source = get_active_source()
 
@@ -489,6 +490,9 @@ def _phase2_configuration(ctx):
             st.warning("No columns detected for Test.")
 
     if ctx.prod.config_locked and ctx.test.config_locked:
+        # Also set mapping_confirmed so Phase 7 (Processing) can skip re-mapping
+        ctx.prod.mapping_confirmed = True
+        ctx.test.mapping_confirmed = True
         st.success("Both mappings confirmed. Ready to compare schemas.")
         if st.button("Compare Schemas \u2192", use_container_width=True):
             ctx.phase = PHASE_SCHEMA_COMPARE
@@ -555,25 +559,42 @@ def _phase3_config_validation(ctx):
 
     prod_cfg = config_from_ctx(ctx.prod)
     test_cfg = config_from_ctx(ctx.test)
-    prod_ok = True
-    test_ok = True
 
     st.subheader("BAU Configuration")
+    prod_errors = []
     if prod_cfg is not None:
-        prod_ok = validate_config_before_processing(prod_cfg, key_prefix="ex_prod_val")
+        prod_errors = validate_config(prod_cfg)
+        if prod_errors:
+            st.error("**BAU Configuration has errors:**")
+            for err in prod_errors:
+                st.warning(f"⚠ {err}")
+        else:
+            st.success("BAU Configuration is valid.")
     else:
         st.warning("No BAU configuration found.")
+        prod_errors = ["No config"]
 
     st.subheader("Test Configuration")
+    test_errors = []
     if test_cfg is not None:
-        test_ok = validate_config_before_processing(test_cfg, key_prefix="ex_test_val")
+        test_errors = validate_config(test_cfg)
+        if test_errors:
+            st.error("**Test Configuration has errors:**")
+            for err in test_errors:
+                st.warning(f"⚠ {err}")
+        else:
+            st.success("Test Configuration is valid.")
     else:
         st.warning("No Test configuration found.")
+        test_errors = ["No config"]
 
-    if prod_ok and test_ok and st.button("Proceed to Processing \u2192", use_container_width=True, type="primary"):
-        cleanup_dataframes(ctx)
-        ctx.phase = PHASE_PROCESSING
-        st.rerun()
+    if not prod_errors and not test_errors:
+        if st.button("Proceed to Processing \u2192", use_container_width=True, type="primary"):
+            cleanup_dataframes(ctx)
+            ctx.phase = PHASE_PROCESSING
+            st.rerun()
+    else:
+        st.info("Fix configuration errors above before proceeding.")
 
 
 def _phase4_processing(ctx):
