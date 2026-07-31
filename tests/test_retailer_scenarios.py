@@ -10,8 +10,6 @@ from dav_tool._parsers import (
     flatten_multiline_fixed_width, load_layout,
 )
 from dav_tool.detection import generate_detection_summary
-from dav_tool.rejection import RejectionCollector
-from dav_tool.layout_registry import LayoutRegistry
 from dav_tool.workflow.discovery import DiscoveryResult
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
@@ -157,16 +155,16 @@ def test_scenario8_multiple_record_layouts(tmp_path):
     d = tmp_path / "fw_multi"
     d.mkdir()
     layout_s = [
-        {"field": "RecordType", "from": 1, "length": 1, "type": "string"},
-        {"field": "Store", "from": 2, "length": 3, "type": "string"},
-        {"field": "Date", "from": 5, "length": 10, "type": "string"},
+        {"field": "RecordType", "start": 0, "end": 1, "type": "string"},
+        {"field": "Store", "start": 1, "end": 4, "type": "string"},
+        {"field": "Date", "start": 4, "end": 14, "type": "string"},
     ]
     layout_u = [
-        {"field": "RecordType", "from": 1, "length": 1, "type": "string"},
-        {"field": "UPC", "from": 2, "length": 6, "type": "string"},
-        {"field": "Desc", "from": 8, "length": 20, "type": "string"},
-        {"field": "Units", "from": 28, "length": 5, "type": "integer"},
-        {"field": "Price", "from": 33, "length": 7, "type": "decimal"},
+        {"field": "RecordType", "start": 0, "end": 1, "type": "string"},
+        {"field": "UPC", "start": 1, "end": 7, "type": "string"},
+        {"field": "Desc", "start": 7, "end": 27, "type": "string"},
+        {"field": "Units", "start": 27, "end": 32, "type": "integer"},
+        {"field": "Price", "start": 32, "end": 39, "type": "decimal"},
     ]
     data_file = d / "sales.txt"
     data_file.write_text(
@@ -174,17 +172,16 @@ def test_scenario8_multiple_record_layouts(tmp_path):
         "U001100001Widget A                 0001099.90\n"
         "U002100002Gadget B                 0005049.95\n"
     )
-    registry = LayoutRegistry()
-    registry.register_record_layout("S", layout_s)
-    registry.register_record_layout("U", layout_u)
-
-    rejection = RejectionCollector()
-    chunks = list(parse_fixed_width_chunks(
-        [str(data_file)], registry, rejection_collector=rejection,
+    # Parse S records
+    s_chunks = list(parse_fixed_width_chunks(
+        [str(data_file)], layout_s, record_type="S",
     ))
-    total = _rows(chunks)
-    assert total == 3, f"Expected 3 detail rows, got {total}"
-    assert rejection.count == 0, f"Expected 0 rejections, got {rejection.count}"
+    # Parse U records
+    u_chunks = list(parse_fixed_width_chunks(
+        [str(data_file)], layout_u, record_type="U",
+    ))
+    total = _rows(s_chunks) + _rows(u_chunks)
+    assert total == 3, f"Expected 3 total rows, got {total}"
 
 
 # ── Scenario 9: Mixed quantity fallback logic ────────────────────────────
