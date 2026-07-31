@@ -83,7 +83,10 @@ def run():
         st.session_state._detection_cache = {}
     ctx = st.session_state.ex_ctx
 
-    render_phase_progress(ctx.phase)
+    def _reset_existing():
+        _reset_phase()
+
+    render_phase_progress(ctx.phase, on_reset=_reset_existing)
 
     dev_mode = st.sidebar.checkbox("Developer Mode", key="ex_dev_mode")
     if dev_mode:
@@ -1013,6 +1016,9 @@ def _detect_and_set(file_paths, side_ctx: ProcessingContext, side_label: str = "
         elif discovery.file_type == "fixed":
             st.warning("Fixed-width file")
             side_ctx.file_type = "fixed"
+            if side_ctx.layout:
+                log_phase(f"Detection Completed — {side_label}: fixed-width (layout already confirmed)")
+                return True
             fw_layout = render_layout_builder(
                 file_paths,
                 existing_layout=side_ctx.layout or getattr(discovery, 'layout', None),

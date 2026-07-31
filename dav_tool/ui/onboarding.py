@@ -78,7 +78,10 @@ def run():
         st.session_state._detection_cache = {}
     ctx = st.session_state.onb_ctx
 
-    render_phase_progress(ctx.phase)
+    def _reset_onboarding():
+        _reset_phase()
+
+    render_phase_progress(ctx.phase, on_reset=_reset_onboarding)
 
     dev_mode = st.sidebar.checkbox("Developer Mode", key="onb_dev_mode")
     if dev_mode:
@@ -507,6 +510,7 @@ def _phase2_configuration(ctx):
             ctx.implied_units = implied_units
             ctx.config_locked = True
             ctx._show_config = False
+            ctx._generated_config = config_from_ctx(ctx)
             st.success("Column mapping confirmed. Proceed to validation.")
             st.rerun()
 

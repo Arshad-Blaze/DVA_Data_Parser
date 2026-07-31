@@ -181,6 +181,16 @@ def render_layout_builder(
         st.session_state[SESSION_KEY] = {}
     state = st.session_state[SESSION_KEY]
 
+    # Per-key state
+    if key_prefix not in state:
+        state[key_prefix] = {}
+
+    key_state = state[key_prefix]
+
+    # Return confirmed layout if already confirmed
+    if key_state.get("confirmed_layout") is not None:
+        return key_state["confirmed_layout"]
+
     # === RAW Preview with Character Ruler ===
     st.markdown("#### RAW Preview (unparsed lines)")
     st.caption("Character ruler above raw lines helps identify column boundaries.")
@@ -199,13 +209,13 @@ def render_layout_builder(
     st.markdown("#### Layout Builder")
     st.caption("Define each column's position in the fixed-width record. End Position is calculated automatically.")
 
-    if "layout_rows" not in state:
+    if "layout_rows" not in key_state:
         rows = _layout_to_rows(existing_layout or candidate_layout)
-        state["layout_rows"] = rows if rows else [
+        key_state["layout_rows"] = rows if rows else [
             {"field": "", "from": 1, "length": 10, "type": "text"},
         ]
 
-    rows = state["layout_rows"]
+    rows = key_state["layout_rows"]
 
     uploaded_file = st.file_uploader(
         "Upload existing Layout CSV",
@@ -226,7 +236,7 @@ def render_layout_builder(
                         "length": int(row.get("length", 1)),
                         "type": _normalize_type(str(row.get("type", "text"))),
                     })
-                state["layout_rows"] = uploaded_rows
+                key_state["layout_rows"] = uploaded_rows
                 st.success(f"Loaded {len(uploaded_rows)} columns from uploaded CSV.")
                 st.rerun()
             else:
@@ -283,7 +293,7 @@ def render_layout_builder(
 
     with col2:
         if st.button("Clear All", key=f"{key_prefix}_clear_btn", use_container_width=True):
-            state["layout_rows"] = [
+            key_state["layout_rows"] = [
                 {"field": "", "from": 1, "length": 10, "type": "text"},
             ]
             st.rerun()
@@ -335,17 +345,28 @@ def render_layout_builder(
                 st.error(err)
 
     confirm_disabled = bool(validation_errors)
-    layout_confirmed = st.button(
-        "Confirm Layout \u2192",
-        type="primary",
-        use_container_width=True,
-        disabled=confirm_disabled,
-        key=f"{key_prefix}_confirm_layout",
-    )
+    
+    col_confirm, col_reset = st.columns([3, 1])
+    with col_confirm:
+        layout_confirmed = st.button(
+            "Confirm Layout \u2192",
+            type="primary",
+            use_container_width=True,
+            disabled=confirm_disabled,
+            key=f"{key_prefix}_confirm_layout",
+        )
+    with col_reset:
+        if st.button("Reset", key=f"{key_prefix}_reset_layout", use_container_width=True):
+            key_state["layout_rows"] = [
+                {"field": "", "from": 1, "length": 10, "type": "text"},
+            ]
+            key_state["confirmed_layout"] = None
+            st.rerun()
 
     if layout_confirmed:
         layout = layout_preview
-        state["layout_rows"] = edited.to_dict("records")
+        key_state["layout_rows"] = edited.to_dict("records")
+        key_state["confirmed_layout"] = layout
         return layout
 
     return None

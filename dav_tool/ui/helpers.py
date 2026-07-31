@@ -917,7 +917,7 @@ def render_all_config_sections(cfg, detected_columns=None, key_prefix="", file_p
 
 
 
-def render_phase_progress(current_phase: int, max_phase: int = 6):
+def render_phase_progress(current_phase: int, max_phase: int = 6, on_reset=None):
     """Render a visual progress indicator for the 7-step workflow.
 
     Shows completed steps (clickable to revisit), current step highlighted,
@@ -970,7 +970,13 @@ def render_phase_progress(current_phase: int, max_phase: int = 6):
 
     steps_html += "</div>"
     st.markdown(steps_html, unsafe_allow_html=True)
-    st.markdown("---")
+
+    if on_reset:
+        if st.button("🔄 Start Over", use_container_width=True, type="secondary"):
+            on_reset()
+            st.rerun()
+    else:
+        st.markdown("---")
 
 
 def validate_config_before_processing(cfg, key_prefix=""):
