@@ -31,6 +31,7 @@ from dav_tool.format_config import load_format_config, apply_format_config
 from dav_tool.workflow.discovery import detect_file
 from dav_tool.ui.layout_builder import render_layout_builder
 from dav_tool.format_config import ValidationConfig, config_from_ctx
+from dav_tool.config_validator import validate_config
 from dav_tool.ui.certification_suite import render_certification_suite
 from dav_tool.workflow.flush import flush
 from dav_tool.workflow.discovery_compare import compare_discovery
