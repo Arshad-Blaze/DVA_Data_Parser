@@ -59,14 +59,29 @@ class ExecutionEngine:
         in ``ctx.warnings``.
         """
         errors = []
-        if not getattr(ctx, "file_type", None):
-            errors.append("File type not detected — run Detection phase first")
-        if not getattr(ctx, "columns", None) and not getattr(ctx, "schema", None):
-            errors.append("No schema detected — run Canonical phase first")
-        if getattr(ctx, "file_type", "") == "fixed":
-            layout = getattr(ctx, "layout", None)
-            if not layout:
-                errors.append("Fixed-width files require a layout definition")
+        
+        # For existing workflow, check prod and test sub-contexts
+        if hasattr(ctx, "prod") and hasattr(ctx, "test"):
+            for side_name, side_ctx in [("BAU", ctx.prod), ("Test", ctx.test)]:
+                if not getattr(side_ctx, "file_type", None):
+                    errors.append(f"{side_name}: File type not detected — run Detection phase first")
+                if not getattr(side_ctx, "columns", None) and not getattr(side_ctx, "schema", None):
+                    errors.append(f"{side_name}: No schema detected — run Canonical phase first")
+                if getattr(side_ctx, "file_type", "") == "fixed":
+                    layout = getattr(side_ctx, "layout", None)
+                    if not layout:
+                        errors.append(f"{side_name}: Fixed-width files require a layout definition")
+        else:
+            # Onboarding workflow
+            if not getattr(ctx, "file_type", None):
+                errors.append("File type not detected — run Detection phase first")
+            if not getattr(ctx, "columns", None) and not getattr(ctx, "schema", None):
+                errors.append("No schema detected — run Canonical phase first")
+            if getattr(ctx, "file_type", "") == "fixed":
+                layout = getattr(ctx, "layout", None)
+                if not layout:
+                    errors.append("Fixed-width files require a layout definition")
+        
         if errors:
             ctx._requirement_errors = errors
             logger.error("Requirement validation failed: %s", "; ".join(errors))
