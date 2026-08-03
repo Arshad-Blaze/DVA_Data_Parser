@@ -693,6 +693,28 @@ def is_multiline_record(file_path, source: Optional[IDataSource] = None):
         if repeated >= 1 and data_count >= 2 and not has_delimiter_data:
             return True
 
+        # Check for single-char record prefixes (e.g. S, U, D, T) on fixed-width files
+        # These are distinct from multi-char HDR prefixes and indicate multiline records
+        single_char_prefixes = set()
+        single_char_data_lines = 0
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if _is_fixed_width_line(stripped):
+                if len(stripped) >= 2 and stripped[0].isalpha() and stripped[0].isupper() and stripped[1].isdigit():
+                    single_char_prefixes.add(stripped[0])
+                single_char_data_lines += 1
+
+        # Case 1: Multiple single-char prefixes (S/U, S/U/T, D/U, etc.)
+        if len(single_char_prefixes) >= 2 and single_char_data_lines >= 2 and not has_delimiter_data:
+            return True
+
+        # Case 2: Multi-char HDR prefix (e.g. HDR) AND at least one single-char detail prefix (D, U, S)
+        # This handles HDR + D/U/S + TRL patterns
+        if repeated >= 1 and len(single_char_prefixes) >= 1 and not has_delimiter_data:
+            return True
+
         return False
     except Exception as e:
         logger.warning("Could not detect multiline record for %s: %s", file_path, e)
@@ -894,6 +916,10 @@ def generate_detection_summary(
 
     file_type, delimiter = detect_file_type(file_path, source=source)
     multiline = is_multiline_record(file_path, source=source) if file_type else False
+
+    # For multiline files, set file_type to "multiline" so downstream routing works
+    if multiline:
+        file_type = "multiline"
 
     encoding = detect_encoding(file_path, source=source)
 
