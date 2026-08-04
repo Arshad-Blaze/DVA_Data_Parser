@@ -17,9 +17,38 @@ from dav_tool._parsers import (
     scan_delimited as _scan_delimited,
 )
 from dav_tool.datasource.base import IDataSource
+from dav_tool.parser import ParserFactory, default_factory
+from dav_tool.workflow.discovery import DiscoveryResult
 
 
 DEFAULT_PREVIEW_ROWS = 10
+
+
+def parse_from_discovery(
+    discovery: DiscoveryResult,
+    factory: Optional[ParserFactory] = None,
+    **kwargs: Any,
+):
+    """Parse a file via the ParserFactory, driven entirely by DiscoveryResult.
+
+    This is the parser-driven entry point for the UI and workflow layers.
+    The UI provides only the discovery result; the factory picks the parser.
+    """
+    parser = (factory or default_factory).create(discovery)
+    return parser.parse(discovery, **kwargs)
+
+
+def preview_from_discovery(
+    discovery: DiscoveryResult,
+    factory: Optional[ParserFactory] = None,
+    n_rows: int = DEFAULT_PREVIEW_ROWS,
+    **kwargs: Any,
+) -> pl.DataFrame:
+    """Return a preview DataFrame for a discovered file via the factory."""
+    result = parse_from_discovery(discovery, factory=factory, **kwargs)
+    if result.canonical_data is None:
+        return pl.DataFrame()
+    return result.canonical_data.head(n_rows)
 
 
 def preview_raw(

@@ -17,6 +17,32 @@ from dav_tool.io import safe_read_csv
 logger = logging.getLogger(__name__)
 
 
+def recommend_parser(result: "DiscoveryResult") -> str:
+    """Choose the parser name best suited to a DiscoveryResult.
+
+    Pure logic — no UI, no mutation.  Surfaces *one* recommended parser that
+    the ParserFactory will instantiate.  Precedence:
+      1. record_based  — multi-record HEB-style files (HDR/S/U/T, applying
+                         parent→child and record tree construction)
+      2. parent_child  — delimited/fixed multi-record files being flattened
+                         (ml_flattened, header_prefix/detail_layout present)
+      3. fixed_width   — plain fixed-width records
+      4. delimited     — plain delimited (incl. header-only)
+    """
+    if result.file_type == "multiline":
+        return "record_based"
+    if result.ml_flattened or (
+        result.file_type == "multiline"
+        or (result.header_prefix and result.detail_layout)
+    ):
+        return "parent_child"
+    if result.file_type == "fixed":
+        return "fixed_width"
+    if result.file_type in ("delimited", "csv", "tsv", "tab"):
+        return "delimited"
+    return "delimited"
+
+
 class DiscoveryResult:
     """Result of file discovery — the single source of truth for detection metadata.
 
@@ -51,6 +77,8 @@ class DiscoveryResult:
         fixed_width_detail_prefixes: Optional[List[str]] = None,
         candidate_keys: Optional[List[Dict]] = None,
         suggested_joins: Optional[List[Dict]] = None,
+        recommended_parser: Optional[str] = None,
+        file_architecture: Optional[str] = None,
         error: Optional[str] = None,
         confidence: float = 0.0,
         candidate_columns: Optional[Dict[str, Optional[str]]] = None,
@@ -81,6 +109,8 @@ class DiscoveryResult:
         self.fixed_width_detail_prefixes = fixed_width_detail_prefixes or []
         self.candidate_keys = candidate_keys or []
         self.suggested_joins = suggested_joins or []
+        self.recommended_parser = recommended_parser
+        self.file_architecture = file_architecture
         self.error = error
         self.confidence = confidence
         self.candidate_columns = candidate_columns or {}
@@ -118,6 +148,8 @@ class DiscoveryResult:
             fixed_width_detail_prefixes=getattr(ctx, "fixed_width_detail_prefixes", []),
             candidate_keys=getattr(ctx, "candidate_keys", []),
             suggested_joins=getattr(ctx, "suggested_joins", []),
+            recommended_parser=getattr(ctx, "recommended_parser", None),
+            file_architecture=getattr(ctx, "file_architecture", None),
             confidence=getattr(ctx, "confidence", 0.0),
             candidate_columns=getattr(ctx, "candidate_columns", {}),
             warnings=getattr(ctx, "warnings", []),
@@ -154,6 +186,8 @@ class DiscoveryResult:
         ctx.fixed_width_detail_prefixes = self.fixed_width_detail_prefixes
         ctx.candidate_keys = self.candidate_keys
         ctx.suggested_joins = self.suggested_joins
+        ctx.recommended_parser = self.recommended_parser
+        ctx.file_architecture = self.file_architecture
         ctx.confidence = self.confidence
         ctx.confidence_breakdown = self.confidence_breakdown
         ctx.candidate_columns = self.candidate_columns
@@ -209,11 +243,26 @@ def detect_file(
         if result.columns:
             result.candidate_columns = detect_candidate_columns(result.columns)
 
+        # Recommend the parser (parser-driven pipeline entry point)
+        result.recommended_parser = recommend_parser(result)
+        result.file_architecture = _file_architecture(result)
+
         return result
 
     except Exception as e:
         logger.error("Detection failed: %s", str(e), exc_info=True)
         return DiscoveryResult(file_paths=file_paths, error=str(e))
+
+
+def _file_architecture(result: "DiscoveryResult") -> str:
+    """Describe the physical file architecture (informational)."""
+    if result.file_type == "multiline":
+        if result.header_layout:
+            return "multiline-fixed"
+        return "multiline-delimited"
+    if result.file_type == "fixed":
+        return "fixed-width"
+    return "flat-delimited"
 
 
 def _get_delimited_columns(

@@ -265,6 +265,48 @@ class CanonicalDataset:
         )
 
     @classmethod
+    def from_discovery(
+        cls,
+        discovery: DiscoveryResult,
+        level: str = "item",
+        schema_template: str = "minimal",
+        source: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> "CanonicalDataset":
+        """Build a dataset via the ParserFactory (record-based / HEB path).
+
+        The factory parses *discovery* into a :class:`ParsedResult` and the
+        resulting canonical DataFrame is streamed as a single chunk.  This is
+        the parser-driven pipeline: the UI only supplies the DiscoveryResult.
+        """
+        from dav_tool.parser import default_factory
+
+        log_phase(f"Canonical Dataset — parser-driven ({level}, template={schema_template})")
+        result = (kwargs.pop("factory", default_factory) or default_factory).parse(
+            discovery, source=source, **kwargs,
+        )
+        data = result.to_dataframe()
+
+        def _stream():
+            if not data.is_empty():
+                yield data
+
+        schema = _build_schema_for_level(level, template=schema_template)
+        return cls(
+            schema=schema,
+            level=level,
+            stream_factory=_stream,
+            file_paths=discovery.file_paths,
+            metadata={
+                "parser": result.metadata.get("parser"),
+                "file_type": discovery.file_type,
+                "record_types": result.metadata.get("record_types", []),
+                "file_count": len(discovery.file_paths or []),
+                "detail_row_count": result.metadata.get("detail_row_count"),
+            },
+        )
+
+    @classmethod
     def from_context(
         cls,
         ctx: Any,
