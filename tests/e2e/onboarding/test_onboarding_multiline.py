@@ -12,7 +12,6 @@ class TestOnboardingMultilineFlow:
         page.wait_for_timeout(2000)
 
     def _flatten_and_apply_schema(self, page: Page):
-        page.get_by_role("button", name="Flatten Records").click()
         page.wait_for_timeout(1500)
         page.get_by_role("button", name="Apply Schema").click()
         page.wait_for_timeout(1500)
@@ -27,7 +26,6 @@ class TestOnboardingMultilineFlow:
 
     def test_flatten_records(self, onb_page: Page, multiline_test_data: dict):
         self._fill_folder(onb_page, multiline_test_data["onboarding_ml_dir"])
-        onb_page.get_by_role("button", name="Flatten Records").click()
         onb_page.wait_for_timeout(1500)
         expect(onb_page.get_by_text("Define Column Schema")).to_be_visible()
 

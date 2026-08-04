@@ -16,7 +16,6 @@ class TestExistingMultilineFlow:
         page.wait_for_timeout(2000)
 
     def _flatten_and_apply_schema(self, page: Page):
-        page.get_by_role("button", name="Flatten Records").click()
         page.wait_for_timeout(2000)
         page.get_by_role("button", name="Apply Schema").click()
         page.wait_for_timeout(1500)
@@ -38,7 +37,6 @@ class TestExistingMultilineFlow:
         self._fill_paths(ex_page,
                          multiline_test_data["bau_ml_dir"],
                          multiline_test_data["test_ml_dir"])
-        ex_page.get_by_role("button", name="Flatten Records").click()
         ex_page.wait_for_timeout(2000)
         expect(ex_page.get_by_text("Define Column Schema")).to_be_visible()
 

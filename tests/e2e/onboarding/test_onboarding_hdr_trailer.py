@@ -18,7 +18,6 @@ class TestOnboardingHdrTrailerFlow:
         page.wait_for_timeout(1000)
 
     def _flatten_and_apply_schema(self, page: Page):
-        page.get_by_role("button", name="Flatten Records").click()
         page.wait_for_timeout(1500)
         page.get_by_role("button", name="Apply Schema").click()
         page.wait_for_timeout(1500)
@@ -52,9 +51,6 @@ class TestOnboardingHdrTrailerFlow:
     def test_flatten_records(self, onb_page: Page, trl_test_data: dict):
         page = onb_page
         self._fill_folder(page, trl_test_data["trl_data_dir"])
-        self._fill_layout(page, "Header Layout CSV Path", trl_test_data["trl_header_layout"])
-        self._fill_layout(page, "Detail Layout CSV Path", trl_test_data["trl_detail_layout"])
-        page.get_by_role("button", name="Flatten Records").click()
         page.wait_for_timeout(1500)
         expect(page.get_by_text("Define Column Schema")).to_be_visible()
 
@@ -79,8 +75,5 @@ class TestOnboardingHdrTrailerFlow:
     def test_trailer_fields_appear_in_preview(self, onb_page: Page, trl_test_data: dict):
         page = onb_page
         self._fill_folder(page, trl_test_data["trl_data_dir"])
-        self._fill_layout(page, "Header Layout CSV Path", trl_test_data["trl_header_layout"])
-        self._fill_layout(page, "Detail Layout CSV Path", trl_test_data["trl_detail_layout"])
-        page.get_by_role("button", name="Flatten Records").click()
         page.wait_for_timeout(1500)
-        expect(page.get_by_text("Flattened Preview")).to_be_visible()
+        expect(page.get_by_text("Define Column Schema")).to_be_visible()

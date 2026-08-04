@@ -13,9 +13,6 @@ from dav_tool._observability import (
     log_phase, setup_logging,
     print_memory_snapshot, log_dataframe_summary,
 )
-from dav_tool.detection import (
-    detect_record_types,
-)
 from dav_tool.ui.helpers import (
     clean_path, get_file_list, cached_get_column_names,
     display_execution_summary, _display_summary_sheets,
@@ -23,7 +20,7 @@ from dav_tool.ui.helpers import (
     display_processing_history, smart_column_indices, validate_column_mapping,
     cached_preview_raw, cached_preview_raw_lines,
     render_phase_progress, cleanup_dataframes,
-    display_confidence_breakdown,
+    display_confidence_breakdown, autoparse_context,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext, ExistingContext
@@ -315,13 +312,12 @@ def _phase1_discovery(ctx):
 
     if ctx.prod.file_type == "fixed" or ctx.test.file_type == "fixed":
         st.subheader("Fixed Width Settings")
-        colA, colB = st.columns(2)
-        with colA:
-            st.number_input("BAU Start Line", min_value=0, value=0, key="fw_start_prod")
-            st.text_input("BAU Record Type", value="", key="fw_rec_prod")
-        with colB:
-            st.number_input("Test Start Line", min_value=0, value=0, key="fw_start_test")
-            st.text_input("Test Record Type", value="", key="fw_rec_test")
+        st.caption("Start line and record type are applied from discovery automatically.")
+        for side_name, side in (("BAU", ctx.prod), ("Test", ctx.test)):
+            st.markdown(
+                f"- **{side_name}** start line: `{side.start_line or 0}` · "
+                f"record type: `{side.record_type or (side.record_prefix[0] if side.record_prefix else '—')}`"
+            )
 
     ml_delim = "|"
     if ctx.prod.file_type == "multiline" or ctx.test.file_type == "multiline":
@@ -333,10 +329,9 @@ def _phase1_discovery(ctx):
             ctx.prod.file_type, ctx.test.file_type,
             ctx.prod.delimiter, ctx.test.delimiter,
             ctx.prod.layout, ctx.test.layout,
-            st.session_state.get("fw_start_prod", 0),
-            st.session_state.get("fw_start_test", 0),
-            st.session_state.get("fw_rec_prod", ""),
-            st.session_state.get("fw_rec_test", ""),
+            ctx.prod.start_line or 0, ctx.test.start_line or 0,
+            ctx.prod.record_type or (ctx.prod.record_prefix[0] if ctx.prod.record_prefix else ""),
+            ctx.test.record_type or (ctx.test.record_prefix[0] if ctx.test.record_prefix else ""),
             source=_ex_source,
         )
 
@@ -614,10 +609,10 @@ def _phase4_processing(ctx):
     prod_layout_list = ctx.prod.layout
     test_layout_list = ctx.test.layout
 
-    prod_start_line = st.session_state.get("fw_start_prod", 0)
-    test_start_line = st.session_state.get("fw_start_test", 0)
-    prod_record_type = st.session_state.get("fw_rec_prod", "")
-    test_record_type = st.session_state.get("fw_rec_test", "")
+    prod_start_line = ctx.prod.start_line or 0
+    test_start_line = ctx.test.start_line or 0
+    prod_record_type = ctx.prod.record_type or (ctx.prod.record_prefix[0] if ctx.prod.record_prefix else "")
+    test_record_type = ctx.test.record_type or (ctx.test.record_prefix[0] if ctx.test.record_prefix else "")
 
     ml_delim_val = ctx.ml_delimiter
 
@@ -805,10 +800,10 @@ def _phase5_validation(ctx):
     test_delim = ctx.test.delimiter
     prod_layout_list = ctx.prod.layout
     test_layout_list = ctx.test.layout
-    prod_start_line = st.session_state.get("fw_start_prod", 0)
-    test_start_line = st.session_state.get("fw_start_test", 0)
-    prod_record_type = st.session_state.get("fw_rec_prod", "")
-    test_record_type = st.session_state.get("fw_rec_test", "")
+    prod_start_line = ctx.prod.start_line or 0
+    test_start_line = ctx.test.start_line or 0
+    prod_record_type = ctx.prod.record_type or (ctx.prod.record_prefix[0] if ctx.prod.record_prefix else "")
+    test_record_type = ctx.test.record_type or (ctx.test.record_prefix[0] if ctx.test.record_prefix else "")
 
     ml_delim_val = ctx.ml_delimiter
     eff_prod_type = (
@@ -1082,93 +1077,49 @@ def _multiline_section(prod_paths, test_paths, source=None):
             st.markdown("**BAU Multiline**")
             if getattr(ctx.prod, '_config_applied', False) and ctx.prod.ml_flattened:
                 st.success("Config loaded (flattened)")
-            else:
+            elif not ctx.prod.ml_flattened:
                 raw_p = cached_preview_raw(prod_paths, "multiline", n_rows=5, source=source)
                 if not raw_p.is_empty():
                     st.dataframe(raw_p.to_pandas(), height=150)
-                _multiline_side_inputs(prod_paths, ctx.prod, "BAU", "prod", source=source)
+                _multiline_side_auto(prod_paths, ctx.prod, "BAU", "prod", source=source)
 
     with mc2:
         if ctx.test.file_type == "multiline":
             st.markdown("**Test Multiline**")
             if getattr(ctx.test, '_config_applied', False) and ctx.test.ml_flattened:
                 st.success("Config loaded (flattened)")
-            else:
+            elif not ctx.test.ml_flattened:
                 raw_t = cached_preview_raw(test_paths, "multiline", n_rows=5, source=source)
                 if not raw_t.is_empty():
                     st.dataframe(raw_t.to_pandas(), height=150)
-                _multiline_side_inputs(test_paths, ctx.test, "Test", "test", source=source)
+                _multiline_side_auto(test_paths, ctx.test, "Test", "test", source=source)
 
-    ml_delim = st.selectbox("Multiline Delimiter", [",", "|", "\t", ";"], index=0, key="existing_ml_delim")
-
-    prod_configured = getattr(ctx.prod, '_config_applied', False) and ctx.prod.ml_flattened
-    test_configured = getattr(ctx.test, '_config_applied', False) and ctx.test.ml_flattened
-    both_pre_flattened = prod_configured and test_configured
-    if both_pre_flattened:
-        st.info("Both sides configured — ready to proceed.")
-    elif st.button("Flatten Records", key="existing_flatten"):
-        ctx.ml_delimiter = ml_delim
-        if ctx.prod.file_type == "multiline":
-            _store_ml_config(ctx.prod, "prod")
-        if ctx.test.file_type == "multiline":
-            _store_ml_config(ctx.test, "test")
-        st.rerun()
-
+    ml_delim = ctx.ml_delimiter or "|"
     if ctx.prod.ml_flattened or ctx.test.ml_flattened:
         _flattened_preview_and_schema(prod_paths, test_paths, ml_delim, source=source)
 
     return ml_delim
 
 
-def _multiline_side_inputs(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = "", source=None):
+def _multiline_side_auto(file_paths, side_ctx: ProcessingContext, side_label: str = "", key_prefix: str = "", source=None):
+    """Auto-parse a multiline side via the ParserFactory — no UI record decisions.
+
+    The parser understands the file, detects record types, builds the internal
+    record tree, and flattens automatically.  The UI only displays the result.
+    """
     if not file_paths:
         return
-    if side_ctx.header_prefix:
-        hp = side_ctx.header_prefix
-        st.info(f"HDR prefix: **{hp}**")
-        with st.expander(f"{side_label} Header Layout", expanded=not bool(side_ctx.header_layout)):
-            hdr_header = render_layout_builder(
-                file_paths,
-                existing_layout=side_ctx.header_layout,
-                source=source,
-                key_prefix=f"ex_{key_prefix}_hdr_header",
-            )
-            if hdr_header is not None:
-                side_ctx.header_layout = hdr_header
-        with st.expander(f"{side_label} Detail Layout", expanded=not bool(side_ctx.detail_layout)):
-            hdr_detail = render_layout_builder(
-                file_paths,
-                existing_layout=side_ctx.detail_layout,
-                source=source,
-                key_prefix=f"ex_{key_prefix}_hdr_detail",
-            )
-            if hdr_detail is not None:
-                side_ctx.detail_layout = hdr_detail
-        with st.expander(f"{side_label} Trailer Layout (optional)", expanded=False):
-            tr_prefix = st.text_input(f"{side_label} Trailer Prefix", value=side_ctx.trailer_prefix or "TRL", key=f"ex_tr_prefix_{key_prefix}")
-            hdr_trailer = render_layout_builder(
-                file_paths,
-                existing_layout=side_ctx.trailer_layout,
-                source=source,
-                key_prefix=f"ex_{key_prefix}_hdr_trailer",
-            )
-            if hdr_trailer is not None:
-                side_ctx.trailer_layout = hdr_trailer
-                side_ctx.trailer_prefix = tr_prefix.strip() or None
-    else:
-        detected = detect_record_types(file_paths[0], source=source)
-        rt_default = ",".join(detected) if detected else "H,D"
-        st.text_input(
-            f"{side_label} Record Type Flags",
-            value=rt_default, key=f"ml_rt_{key_prefix}"
-        )
-
-
-def _store_ml_config(side_ctx: ProcessingContext, key_prefix: str = ""):
-    if not side_ctx.header_prefix:
-        rt_val = st.session_state.get(f"ml_rt_{key_prefix}", "")
-        side_ctx.ml_record_types = [r.strip() for r in rt_val.split(",") if r.strip()]
+    result = autoparse_context(side_ctx, file_paths, source=source)
+    if result is None or result.record_tree is None:
+        st.info(f"{side_label}: Could not parse this structured file automatically.")
+        return
+    record_types = result.metadata.get("record_types", [])
+    side_ctx.ml_record_types = record_types
     side_ctx.ml_flattened = True
+    st.success(
+        f"{side_label}: parser identified record types "
+        f"**{', '.join(record_types) if record_types else '—'}** — flattened automatically."
+    )
 
 
 def _flattened_preview_and_schema(prod_paths, test_paths, ml_delim, source=None):

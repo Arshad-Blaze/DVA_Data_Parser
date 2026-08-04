@@ -15,7 +15,6 @@ from dav_tool._observability import (
     log_phase, setup_logging,
     print_memory_snapshot, log_dataframe_summary,
 )
-from dav_tool.detection import is_multiline_record, detect_record_types, detect_hdr_prefix
 from dav_tool.ui.helpers import (
     clean_path, get_file_list, load_storelist, get_column_names,
     display_execution_summary, _display_summary_sheets,
@@ -23,7 +22,7 @@ from dav_tool.ui.helpers import (
     display_processing_history, smart_column_indices, validate_column_mapping,
     render_phase_progress, validate_config_before_processing, cleanup_dataframes,
     cached_preview_raw, cached_preview_raw_lines,
-    display_confidence_breakdown,
+    display_confidence_breakdown, autoparse_context,
 )
 from dav_tool.datasource.manager import get_active_source
 from dav_tool.processing_context import ProcessingContext
@@ -395,8 +394,8 @@ def _phase1_discovery(ctx):
                         if fw_layout is not None:
                             layout_list = fw_layout
                             discovery.layout = fw_layout
-                            start_line = st.number_input("Start Line", min_value=0, value=start_line, key="onb_fw_start")
-                            record_type = st.text_input("Record Type (e.g., U)", value=record_type or "", key="onb_fw_rec")
+                            start_line = discovery.start_line or 0
+                            record_type = discovery.record_type or (discovery.record_prefix[0] if discovery.record_prefix else None)
                     elif file_type == "delimited":
                         st.success(f"Delimited ({prod_delim})")
                         _show_raw_preview(file_paths, source=_onb_source)
@@ -753,157 +752,56 @@ def _phase6_reports(ctx):
 def _multiline_flow(file_paths, source=None):
     ctx = st.session_state.onb_ctx
 
-    # If config already loaded, skip manual inputs
-    if getattr(ctx, '_config_applied', False) and ctx.ml_flattened and ctx.schema:
+    # If parser already flattened and schema defined, skip re-parsing.
+    if ctx.ml_flattened and ctx.schema:
         return
 
-    hdr_prefixes = detect_hdr_prefix(file_paths[0], source=source)
-
-    if hdr_prefixes:
-        _hdr_fixed_flow(file_paths, hdr_prefixes, source=source)
-    else:
-        _delimited_ml_flow(file_paths, source=source)
-
-
-def _delimited_ml_flow(file_paths, source=None):
-    ctx = st.session_state.onb_ctx
-
+    # Parser-driven: run the ParserFactory automatically. The UI never picks
+    # record types, flat; the parser understands the file and flattens itself.
     st.subheader("Raw Preview (with record-type prefixes)")
     raw_preview = cached_preview_raw(file_paths, "multiline", n_rows=10, source=source)
     if not raw_preview.is_empty():
         st.dataframe(raw_preview.to_pandas())
 
-    detected_types = detect_record_types(file_paths[0], source=source)
-    rt_default = ",".join(detected_types) if detected_types else "H,D"
-
-    ml_record_types = st.text_input(
-        "Record Type Flags (comma-separated, e.g. H,D,U,T)",
-        value=rt_default, key="onb_ml_rt"
-    )
-    ml_delim = st.selectbox(
-        "Multiline Delimiter", [",", "|", "\t", ";"], index=0, key="onb_ml_delim"
-    )
-
-    if st.button("Flatten Records", key="onb_flatten"):
-        rt_list = [r.strip() for r in ml_record_types.split(",") if r.strip()]
-        if rt_list:
-            ctx.ml_record_types = rt_list
-            ctx.ml_delimiter = ml_delim
-            ctx.ml_flattened = True
-            st.rerun()
-
-    if ctx.ml_flattened:
-        _show_ml_preview_and_schema(file_paths, source=source)
-
-
-def _hdr_fixed_flow(file_paths, hdr_prefixes, source=None):
-    ctx = st.session_state.onb_ctx
-    prefix = hdr_prefixes[0]
-    st.warning(f"HDR fixed-width file detected (prefix: {prefix})")
-
-    st.subheader("Raw Preview")
-    raw_preview = cached_preview_raw(file_paths, "multiline", n_rows=10, source=source)
-    if not raw_preview.is_empty():
-        st.dataframe(raw_preview.to_pandas())
-
-    with st.expander("Header Layout", expanded=not bool(ctx.header_layout)):
-        st.caption("Define fields for the header record lines.")
-        hdr_header_layout = render_layout_builder(
-            file_paths,
-            existing_layout=ctx.header_layout,
-            source=source,
-            key_prefix="onb_hdr_header",
-        )
-        if hdr_header_layout is not None:
-            ctx.header_layout = hdr_header_layout
-
-    with st.expander("Detail Layout", expanded=not bool(ctx.detail_layout)):
-        st.caption("Define fields for the detail (data) record lines.")
-        hdr_detail_layout = render_layout_builder(
-            file_paths,
-            existing_layout=ctx.detail_layout,
-            source=source,
-            key_prefix="onb_hdr_detail",
-        )
-        if hdr_detail_layout is not None:
-            ctx.detail_layout = hdr_detail_layout
-
-    with st.expander("Trailer Layout (optional)", expanded=False):
-        trailer_prefix_hint = ctx.trailer_prefix or "TRL"
-        trailer_prefix_val = st.text_input("Trailer Prefix", value=trailer_prefix_hint, key="onb_tr_prefix")
-        hdr_trailer_layout = render_layout_builder(
-            file_paths,
-            existing_layout=ctx.trailer_layout,
-            source=source,
-            key_prefix="onb_hdr_trailer",
-        )
-        if hdr_trailer_layout is not None:
-            ctx.trailer_layout = hdr_trailer_layout
-            ctx.trailer_prefix = trailer_prefix_val.strip() or None
-
-    if st.button("Flatten Records", key="onb_hdr_flatten"):
-        if ctx.header_layout and ctx.detail_layout:
-            ctx.header_prefix = prefix
-            ctx.ml_flattened = True
-            st.rerun()
-
-    if ctx.ml_flattened:
-        _show_hdr_fixed_preview_and_schema(file_paths, prefix, source=source)
-
-
-def _show_ml_preview_and_schema(file_paths, source=None):
-    ctx = st.session_state.onb_ctx
-
-    st.subheader("Flattened Preview")
-    rt_list = ctx.ml_record_types
-    flat_preview = preview_flattened_multiline(
-        file_paths, rt_list, ctx.ml_delimiter, n_rows=10, source=source,
-    )
-    if not flat_preview.is_empty():
-        st.dataframe(flat_preview.to_pandas())
-
-    if flat_preview.is_empty():
-        st.info("Flattened preview is empty — cannot define schema. Check record types and delimiter.")
+    result = autoparse_context(ctx, file_paths, source=source)
+    if result is None or result.record_tree is None:
+        st.info("Could not parse this structured file automatically. Ensure the file is valid and retry.")
         return
 
+    record_types = result.metadata.get("record_types", [])
+    ctx.ml_record_types = record_types
+    ctx.ml_delimiter = getattr(ctx, "ml_delimiter", "|")
+    ctx.ml_flattened = True
+
+    st.success(
+        f"Parser identified record types: **{', '.join(record_types) if record_types else '—'}** — "
+        f"flattened automatically."
+    )
+
+    _show_parsed_preview_and_schema(file_paths, result, source=source)
+
+
+def _show_parsed_preview_and_schema(file_paths, result, source=None):
+    """Show the parser's parsed preview and let the user define the schema."""
+    ctx = st.session_state.onb_ctx
+    parsed = result.expose_parsed_preview() if hasattr(result, "expose_parsed_preview") else None
+    flat_preview = parsed if parsed is not None and not parsed.is_empty() else result.to_dataframe()
+
+    if flat_preview.is_empty():
+        st.info("No detail rows parsed — cannot define schema.")
+        return
+
+    st.subheader("Parsed Preview")
+    st.dataframe(flat_preview.head(10).to_pandas())
+
     st.subheader("Define Column Schema")
-    default_cols = flat_preview.columns
+    default_cols = list(flat_preview.columns)
     schema_names = {}
     for i, col in enumerate(default_cols):
         schema_names[col] = st.text_input(
-            f"Rename '{col}' to:", value=col, key=f"onb_schema_{i}"
+            f"Rename '{col}' to:", value=col, key=f"onb_parsed_schema_{i}"
         )
-    if st.button("Apply Schema", key="onb_apply_schema", type="primary"):
-        ctx.schema = list(schema_names.values())
-        st.rerun()
-
-
-def _show_hdr_fixed_preview_and_schema(file_paths, prefix, source=None):
-    ctx = st.session_state.onb_ctx
-
-    st.subheader("Flattened Preview")
-    hdr_header_layout = ctx.header_layout
-    hdr_detail_layout = ctx.detail_layout
-    flat_preview = preview_flattened_multiline_fixed(
-        file_paths, prefix, hdr_header_layout, hdr_detail_layout, n_rows=10,
-        trailer_prefix=ctx.trailer_prefix, trailer_layout=ctx.trailer_layout,
-        source=source,
-    )
-    if not flat_preview.is_empty():
-        st.dataframe(flat_preview.to_pandas())
-
-    if flat_preview.is_empty():
-        st.info("Flattened preview is empty — cannot define schema. Check header/detail layout.")
-        return
-
-    st.subheader("Define Column Schema")
-    default_cols = flat_preview.columns
-    schema_names = {}
-    for i, col in enumerate(default_cols):
-        schema_names[col] = st.text_input(
-            f"Rename '{col}' to:", value=col, key=f"onb_hdr_schema_{i}"
-        )
-    if st.button("Apply Schema", key="onb_hdr_apply_schema", type="primary"):
+    if st.button("Apply Schema", key="onb_parsed_apply_schema", type="primary"):
         ctx.schema = list(schema_names.values())
         st.rerun()
 

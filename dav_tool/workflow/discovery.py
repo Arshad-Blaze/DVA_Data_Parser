@@ -38,6 +38,8 @@ def recommend_parser(result: "DiscoveryResult") -> str:
         return "parent_child"
     if result.file_type == "fixed":
         return "fixed_width"
+    if result.product_master_path and result.file_type in ("delimited", "csv", "tsv"):
+        return "sales_product"
     if result.file_type in ("delimited", "csv", "tsv", "tab"):
         return "delimited"
     return "delimited"
@@ -79,6 +81,7 @@ class DiscoveryResult:
         suggested_joins: Optional[List[Dict]] = None,
         recommended_parser: Optional[str] = None,
         file_architecture: Optional[str] = None,
+        product_master_path: Optional[str] = None,
         error: Optional[str] = None,
         confidence: float = 0.0,
         candidate_columns: Optional[Dict[str, Optional[str]]] = None,
@@ -111,6 +114,7 @@ class DiscoveryResult:
         self.suggested_joins = suggested_joins or []
         self.recommended_parser = recommended_parser
         self.file_architecture = file_architecture
+        self.product_master_path = product_master_path
         self.error = error
         self.confidence = confidence
         self.candidate_columns = candidate_columns or {}
@@ -188,6 +192,7 @@ class DiscoveryResult:
         ctx.suggested_joins = self.suggested_joins
         ctx.recommended_parser = self.recommended_parser
         ctx.file_architecture = self.file_architecture
+        ctx.product_master_path = self.product_master_path
         ctx.confidence = self.confidence
         ctx.confidence_breakdown = self.confidence_breakdown
         ctx.candidate_columns = self.candidate_columns

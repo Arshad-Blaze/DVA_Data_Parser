@@ -22,7 +22,6 @@ class TestExistingHdrTrailerFlow:
         page.wait_for_timeout(1000)
 
     def _flatten_and_apply_schema(self, page: Page):
-        page.get_by_role("button", name="Flatten Records").click()
         page.wait_for_timeout(2000)
         page.get_by_role("button", name="Apply Schema").click()
         page.wait_for_timeout(1500)
@@ -59,11 +58,6 @@ class TestExistingHdrTrailerFlow:
     def test_flatten_records(self, ex_page: Page, trl_test_data: dict):
         page = ex_page
         self._fill_paths(page, trl_test_data["bau_trl_dir"], trl_test_data["test_trl_dir"])
-        self._fill_layout(page, "BAU Header Layout CSV", trl_test_data["trl_header_layout"])
-        self._fill_layout(page, "BAU Detail Layout CSV", trl_test_data["trl_detail_layout"])
-        self._fill_layout(page, "Test Header Layout CSV", trl_test_data["trl_header_layout"])
-        self._fill_layout(page, "Test Detail Layout CSV", trl_test_data["trl_detail_layout"])
-        page.get_by_role("button", name="Flatten Records").click()
         page.wait_for_timeout(2000)
         expect(page.get_by_text("Define Column Schema")).to_be_visible()
 

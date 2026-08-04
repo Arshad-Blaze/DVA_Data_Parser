@@ -28,6 +28,7 @@ from dav_tool._column_utils import (
 from dav_tool.io import safe_read_csv
 from dav_tool.datasource.base import IDataSource
 from dav_tool.workflow import PHASE_LABELS, PHASE_ICONS
+from dav_tool.workflow.discovery import DiscoveryResult, recommend_parser
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +386,27 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
     except Exception as e:
         logger.warning("Could not determine column names: %s", e)
     return []
+
+
+def autoparse_context(ctx, file_paths, source=None):
+    """Parse the detected file via the ParserFactory — no UI parser decisions.
+
+    Builds a DiscoveryResult from *ctx* (or re-detects when unavailable),
+    lets the ParserFactory pick the parser, and populates *ctx* with the
+    flattened result + schema automatically.
+
+    Returns a :class:`~dav_tool.parser.base.ParsedResult` (or None on failure).
+    """
+    from dav_tool.parser import default_factory
+
+    discovery = getattr(ctx, "discovery", None) or DiscoveryResult.from_context(ctx)
+    if not discovery.file_paths:
+        discovery.file_paths = list(file_paths)
+    if not discovery.recommended_parser:
+        discovery.recommended_parser = recommend_parser(discovery)
+
+    parser = default_factory.create(discovery)
+    return parser.parse(discovery, source=source)
 
 
 def record_execution(metrics):

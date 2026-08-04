@@ -41,6 +41,7 @@ class ParsedResult:
     record_tree: Optional[Any] = None
     schema: Optional[List[str]] = None
     warnings: List[str] = field(default_factory=list)
+    _parsed_data: Optional[pl.DataFrame] = None
 
     @property
     def columns(self) -> List[str]:
@@ -62,6 +63,17 @@ class ParsedResult:
         if self.canonical_data is None:
             return pl.DataFrame()
         return self.canonical_data
+
+    def expose_parsed_preview(self) -> pl.DataFrame:
+        """Return the parsed (pre-canonical) detail rows for UI preview.
+
+        For record-based parses this is the flattened detail DataFrame; for
+        simpler parses it equals the canonical data.  The UI may display this
+        only — it never drives parser decisions from it.
+        """
+        if hasattr(self, "_parsed_data") and getattr(self, "_parsed_data") is not None:
+            return self._parsed_data
+        return self.to_dataframe()
 
 
 class BaseParser:

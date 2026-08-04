@@ -62,6 +62,7 @@ class RecordBasedParser(BaseParser):
             discovery=discovery,
             record_tree=tree,
             schema=list(data.columns),
+            _parsed_data=data,
         )
 
     # ------------------------------------------------------------------
@@ -78,6 +79,8 @@ class RecordBasedParser(BaseParser):
         """
         rtypes = list(discovery.ml_record_types or [])
         trailer_prefixes = list(discovery.record_prefix or [])
+        if discovery.trailer_prefix and discovery.trailer_prefix not in trailer_prefixes:
+            trailer_prefixes.append(discovery.trailer_prefix)
 
         # When discovery did not supply record types, sample the file to
         # discover leading alphabetic prefixes (HDR, S, U, T, D, ...).

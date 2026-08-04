@@ -1,0 +1,4 @@
+From,Length,Field,Type
+4,5,RecCount,numeric
+11,3,UnitSum,numeric
+16,8,PriceSum,numeric

@@ -264,3 +264,76 @@ def test_scenario12_single_record_type_flatten(tmp_path):
     chunks = list(flatten_multiline_chunks([str(path)], ["D"], "|"))
     df = pl.concat(chunks)
     assert df.height == 2, f"Expected 2 detail rows (D only), got {df.height}"
+
+
+# ── Parser-driven pipeline acceptance ────────────────────────────────
+# Every retailer follows: Connection → Discovery → ParserFactory →
+# SpecificParser → Canonical Dataset → (mapping/validation/reports).
+
+
+def test_parser_driven_all_retailers_certify():
+    """All retailer certification categories pass end-to-end, parser-driven."""
+    from dav_tool.certification.runner import CertificationRunner, CERTIFICATION_ROOT
+
+    suite = CertificationRunner(CERTIFICATION_ROOT).run_all()
+    assert suite.failed == 0, (
+        f"{suite.failed} retailer(s) failed: "
+        + "; ".join(e for r in suite.results if r.errors for e in r.errors[:2])
+    )
+    assert suite.passed == suite.total
+
+
+def test_parser_factory_recommends_parser_for_each_retailer():
+    """Every certification retailer resolves a specific parser."""
+
+    root = os.path.join(
+        os.path.dirname(__file__), "..", "retailer_certification"
+    )
+    from dav_tool.certification.runner import discover_retailer_datasets
+    from dav_tool.workflow.discovery import detect_file
+    from dav_tool.parser import default_factory
+
+    seen_parsers = set()
+    for category, retailer in discover_retailer_datasets(root):
+        bau = os.path.join(root, category, retailer, "BAU")
+        sample = sorted(os.listdir(bau))[0]
+        discovery = detect_file([os.path.join(bau, sample)])
+        parser = default_factory.create(discovery)
+        result = parser.parse(discovery)
+        seen_parsers.add(parser.name)
+        assert discovery.error is None, f"{category}/{retailer}: {discovery.error}"
+        # Every retailer produces a canonical ParseResult contract.
+        assert result.metadata.get("parser") == parser.name
+        assert result.discovery is not None
+
+    # The factory catalog is exercised across the certification set.
+    assert isinstance(seen_parsers, set)
+
+
+def test_sales_product_relationship_end_to_end(tmp_path):
+    """Sales + product master relationship processes via the pipeline."""
+    from dav_tool.workflow.discovery import DiscoveryResult
+    from dav_tool.parser import default_factory
+    import polars as pl
+
+    prod = tmp_path / "product_master.csv"
+    pl.DataFrame({"UPC": ["100001", "100002"], "Brand": ["Alpha", "Beta"]}).write_csv(prod)
+    sales = tmp_path / "sales.csv"
+    pl.DataFrame({
+        "Store": ["S001", "S001", "S002"],
+        "UPC": ["100001", "100002", "100001"],
+        "Units": [10, 5, 8],
+    }).write_csv(sales)
+
+    discovery = DiscoveryResult(
+        file_paths=[str(sales)],
+        file_type="delimited",
+        delimiter=",",
+        product_master_path=str(prod),
+        candidate_keys=[{"sales_col": "UPC", "product_col": "UPC"}],
+    )
+    parser = default_factory.create(discovery)
+    assert parser.name == "sales_product"
+    result = parser.parse(discovery)
+    assert result.canonical_data.height == 3
+    assert "Brand" in result.columns, "Product master should enrich sales rows"

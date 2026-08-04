@@ -137,3 +137,57 @@ def test_from_discovery_returns_canonical_dataset():
     chunks = list(ds.iter_chunks())
     assert chunks
     assert chunks[0].height >= 3
+
+
+# ── Excel parser ────────────────────────────────────────────────────
+def test_excel_parser_registered_and_selected(tmp_path):
+    xlsx = tmp_path / "book.xlsx"
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Store", "Units"])
+    ws.append(["S1", 5])
+    wb.save(xlsx)
+    d = DiscoveryResult(file_paths=[str(xlsx)], file_type="excel")
+    parser = default_factory.create(d)
+    assert parser.name == "excel"
+    out = parser.parse(d)
+    assert out.canonical_data.height == 1
+
+
+# ── Sales/Product parser ────────────────────────────────────────────
+def test_sales_product_parser_joins_master(tmp_path):
+    import polars as pl
+
+    prod = tmp_path / "product_master.csv"
+    pl.DataFrame({"UPC": ["1", "2"], "Brand": ["Alpha", "Beta"]}).write_csv(prod)
+
+    sales = tmp_path / "sales.csv"
+    pl.DataFrame({
+        "Store": ["S1", "S1", "S2"],
+        "UPC": ["1", "2", "1"],
+        "Units": [10, 5, 8],
+    }).write_csv(sales)
+
+    d = DiscoveryResult(
+        file_paths=[str(sales)],
+        file_type="delimited",
+        delimiter=",",
+        product_master_path=str(prod),
+        candidate_keys=[{"sales_col": "UPC", "product_col": "UPC"}],
+    )
+    parser = default_factory.create(d)
+    assert parser.name == "sales_product"
+    out = parser.parse(d)
+    assert "Brand" in out.columns
+    assert out.metadata["product_master_joined"] is True
+
+
+def test_hdr_records_trailer_excluded_from_details():
+    hdr = os.path.join(DATA, "hdr_with_trailer", "sales.txt")
+    d = detect_file([hdr])
+    assert d.recommended_parser == "record_based"
+    out = default_factory.create(d).parse(d)
+    # TRL is a trailer, not a detail row.
+    assert out.metadata["detail_row_count"] == 3
