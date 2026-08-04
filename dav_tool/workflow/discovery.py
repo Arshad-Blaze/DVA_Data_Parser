@@ -48,6 +48,7 @@ class DiscoveryResult:
         candidate_layout: Optional[List[Dict]] = None,
         disclaimer_lines: Optional[List[int]] = None,
         record_prefix: Optional[List[str]] = None,
+        fixed_width_detail_prefixes: Optional[List[str]] = None,
         candidate_keys: Optional[List[Dict]] = None,
         suggested_joins: Optional[List[Dict]] = None,
         error: Optional[str] = None,
@@ -77,6 +78,7 @@ class DiscoveryResult:
         self.candidate_layout = candidate_layout or []
         self.disclaimer_lines = disclaimer_lines or []
         self.record_prefix = record_prefix or []
+        self.fixed_width_detail_prefixes = fixed_width_detail_prefixes or []
         self.candidate_keys = candidate_keys or []
         self.suggested_joins = suggested_joins or []
         self.error = error
@@ -113,6 +115,7 @@ class DiscoveryResult:
             candidate_layout=getattr(ctx, "candidate_layout", []),
             disclaimer_lines=getattr(ctx, "disclaimer_lines", []),
             record_prefix=getattr(ctx, "record_prefix", []),
+            fixed_width_detail_prefixes=getattr(ctx, "fixed_width_detail_prefixes", []),
             candidate_keys=getattr(ctx, "candidate_keys", []),
             suggested_joins=getattr(ctx, "suggested_joins", []),
             confidence=getattr(ctx, "confidence", 0.0),
@@ -148,6 +151,7 @@ class DiscoveryResult:
         ctx.candidate_layout = self.candidate_layout
         ctx.disclaimer_lines = self.disclaimer_lines
         ctx.record_prefix = self.record_prefix
+        ctx.fixed_width_detail_prefixes = self.fixed_width_detail_prefixes
         ctx.candidate_keys = self.candidate_keys
         ctx.suggested_joins = self.suggested_joins
         ctx.confidence = self.confidence
@@ -190,6 +194,7 @@ def detect_file(
             start_line=summary.get("start_line", 0),
             disclaimer_lines=summary.get("disclaimer_lines", []),
             record_prefix=summary.get("record_prefix", []),
+            fixed_width_detail_prefixes=summary.get("fixed_width_detail_prefixes", []),
             candidate_keys=summary.get("candidate_keys", []),
             confidence=summary["confidence"],
             confidence_breakdown=summary.get("confidence_breakdown", []),

@@ -21,6 +21,7 @@ __all__ = [
     "detect_file_type",
     "is_multiline_record",
     "detect_hdr_prefix",
+    "detect_fixed_width_detail_prefixes",
     "detect_record_types",
     "has_header",
     "detect_trailer_prefix",
@@ -722,23 +723,60 @@ def is_multiline_record(file_path, source: Optional[IDataSource] = None):
 
 
 def detect_hdr_prefix(file_path, sample_lines=20, source: Optional[IDataSource] = None):
-    """Detect multi-character HDR prefix (e.g. HDR) in fixed-width multiline."""
+    """Detect multi-character HDR prefix (e.g. HDR) in fixed-width multiline.
+
+    Matches 2+ alpha chars followed by digit OR space — handles both
+    "HDR001..." (digit) and "HDR 2024..." (space) patterns.
+    Only returns prefixes that appear on 2+ lines to avoid matching
+    one-off confidential/metadata text.
+    """
     try:
         lines = _read_sample_lines(file_path, sample_lines, source)
 
-        prefixes = set()
+        prefix_counts = Counter()
         for line in lines:
             if not line:
                 continue
-            # Look for 2+ alpha chars followed by digit — common HDR pattern
+            # Look for 2+ alpha chars followed by digit or space — common HDR patterns
             for i in range(2, min(6, len(line))):
-                if line[:i].isalpha() and i < len(line) and line[i].isdigit():
-                    prefixes.add(line[:i])
+                if line[:i].isalpha() and i < len(line) and (line[i].isdigit() or line[i].isspace()):
+                    prefix_counts[line[:i]] += 1
                     break
 
+        # Only return prefixes that appear on 2+ lines
+        prefixes = [p for p, c in prefix_counts.items() if c >= 2]
         return sorted(prefixes, key=len, reverse=True)
     except Exception as e:
         logger.warning("Could not detect HDR prefix for %s: %s", file_path, e)
+        return []
+
+
+def detect_fixed_width_detail_prefixes(file_path, sample_lines=50, source: Optional[IDataSource] = None):
+    """Detect single-character detail record prefixes for fixed-width multiline files.
+
+    Finds single uppercase letters at position 0 followed by digit (e.g. S, U, D, T)
+    that appear on multiple data lines. Used for fixed-width multiline where
+    detail records have single-char prefixes (S=store header, U=detail, T=trailer).
+    """
+    try:
+        lines = _read_sample_lines(file_path, sample_lines, source)
+        if not lines:
+            return []
+
+        prefix_counts = Counter()
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if _is_fixed_width_line(stripped):
+                if len(stripped) >= 2 and stripped[0].isalpha() and stripped[0].isupper() and stripped[1].isdigit():
+                    prefix_counts[stripped[0]] += 1
+
+        # Valid if appears on >= 2 lines
+        prefixes = [p for p, c in prefix_counts.items() if c >= 2]
+        return sorted(prefixes)
+    except Exception as e:
+        logger.warning("Could not detect fixed-width detail prefixes for %s: %s", file_path, e)
         return []
 
 
@@ -1015,6 +1053,13 @@ def generate_detection_summary(
         hdr_prefixes = detect_hdr_prefix(file_path, source=source)
         if hdr_prefixes:
             result["header_prefix"] = hdr_prefixes[0]
+        
+        # Detect fixed-width detail prefixes (S, U, D, etc.) for HDR+detail fixed-width files
+        if file_type == "multiline":
+            detail_prefixes = detect_fixed_width_detail_prefixes(file_path, source=source)
+            if detail_prefixes:
+                result["fixed_width_detail_prefixes"] = detail_prefixes
+        
         record_types = detect_record_types(file_path, delimiter=delimiter, source=source)
         if record_types:
             result["ml_record_types"] = record_types

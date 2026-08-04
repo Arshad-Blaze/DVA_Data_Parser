@@ -1,71 +1,507 @@
-Sprint: Core Stabilization & Canonical Schema Implementation
+# DVA Platform RC2 - Functional Prototype Completion Sprint
 
-This sprint is NOT about adding new features. It is about making the DVA Platform stable, predictable, retailer-agnostic and production ready.
+This is NOT a code cleanup sprint.
 
-=========================
-PRIMARY GOAL
-=========================
+This is NOT an architecture audit sprint.
 
-The platform must have ONE internal schema.
+This is NOT a documentation sprint.
 
-Retailers may provide completely different column names, but after the Mapping phase every downstream layer must work ONLY on the canonical schema.
+This sprint exists for ONE purpose:
 
-Example:
+Build a completely working DVA prototype capable of onboarding and processing every retailer scenario collected during design without runtime errors.
 
-store
-store_num
-location
-site
-store_id
+Architecture Bible remains the ONLY source of truth.
 
-must all become
+============================================================
+PRIMARY OBJECTIVE
+============================================================
+
+Do not optimize.
+
+Do not refactor for style.
+
+Do not clean documentation.
+
+Do not change architecture unless absolutely necessary.
+
+Instead, complete the functional pipeline.
+
+A sprint is complete ONLY when every retailer scenario finishes end-to-end.
+
+============================================================
+SUCCESS CRITERIA
+============================================================
+
+The platform MUST successfully process all of the following.
+
+Retailer 1
+
+✓ Pipe delimited
+✓ Header
+✓ Mixed Units
+✓ Mixed Weight
+✓ Blank values
+✓ Type IDs
+
+Retailer 2
+
+✓ Pure Fixed Width
+✓ No Header
+✓ Layout Builder
+
+Retailer 3
+
+✓ Confidential text
+✓ Metadata
+✓ Blank lines
+✓ HDR
+✓ S
+✓ U
+✓ Fixed Width
+✓ Multiline
+✓ Parent → Child
+
+Retailer 4
+
+✓ Standard Pipe Delimited
+
+Retailer 5
+
+✓ Sales file
+✓ Product Master
+✓ Automatic relationship detection
+✓ Join
+✓ Canonical dataset
+
+Prototype is NOT complete until every scenario succeeds.
+
+============================================================
+PHASE 1
+REDESIGN DISCOVERY
+============================================================
+
+Discovery is NOT parsing.
+
+Discovery only understands the file.
+
+Discovery should determine:
+
+File Type
+
+Delimiter
+
+Encoding
+
+Header
+
+Metadata
+
+Blank Lines
+
+Trailer
+
+Record Width
+
+Record Types
+
+Data Start Line
+
+Parent/Child
+
+Multiple Layouts
+
+Candidate Business Keys
+
+Candidate Join Keys
+
+Flatten Required
+
+Relationship Required
+
+Confidence
+
+Warnings
+
+Recommendations
+
+Discovery produces
+
+DiscoveryResult
+
+and NOTHING else.
+
+============================================================
+PHASE 2
+DISCOVERY WORKFLOW
+============================================================
+
+The onboarding workflow should become
+
+Connection
+
+↓
+
+Discovery
+
+↓
+
+Discovery Report
+
+↓
+
+Record Analysis
+
+↓
+
+Layout Selection
+
+↓
+
+Layout Builder
+
+↓
+
+Parsed Preview
+
+↓
+
+Canonical Mapping
+
+↓
+
+Configuration
+
+↓
+
+Processing
+
+↓
+
+Validation
+
+↓
+
+Reports
+
+The Layout Builder must NEVER open before Discovery finishes.
+
+============================================================
+PHASE 3
+RECORD ANALYSIS
+============================================================
+
+After Discovery,
+
+analyze records.
+
+Support
+
+HDR
+
+H
+
+S
+
+D
+
+U
+
+T
+
+TRL
+
+Parent
+
+Child
+
+Parent → Multiple Children
+
+Determine
+
+Header Records
+
+Detail Records
+
+Trailer Records
+
+Default Data Record
+
+If multiple layouts exist,
+
+identify them.
+
+Do NOT parse yet.
+
+============================================================
+PHASE 4
+LAYOUT BUILDER
+============================================================
+
+The Layout Builder should consume ONLY
+
+DiscoveryResult.
+
+Never inspect the raw file again.
+
+Builder should only contain
+
+Column Name
+
+Start
+
+Length
+
+Type
+
+End Position is calculated automatically.
+
+Uploaded layouts and manually built layouts must generate the same LayoutDefinition.
+
+Only show ACTUAL DATA rows.
+
+Do NOT display
+
+Confidential text
+
+Metadata
+
+Headers
+
+Blank lines
+
+============================================================
+PHASE 5
+PARSER
+============================================================
+
+Parser consumes
+
+DiscoveryResult
+
++
+
+LayoutDefinition
+
+Support
+
+Delimited
+
+Quoted CSV
+
+Header/Data different delimiters
+
+Fixed Width
+
+Multiple Layouts
+
+Parent/Child
+
+Multiline
+
+Flattening
+
+Corrupted Rows
+
+Embedded Delimiters
+
+Variable Row Length
+
+Reject bad rows into rejection report.
+
+Never crash.
+
+============================================================
+PHASE 6
+RELATIONSHIP ENGINE
+============================================================
+
+Support
+
+Sales
+
++
+
+Product
+
++
+
+Store
+
++
+
+Promotion
+
+Discovery identifies
+
+Relationship
+
+Join Keys
+
+Confidence
+
+Parser performs joins.
+
+Produce ONE Canonical Dataset.
+
+============================================================
+PHASE 7
+CANONICAL MAPPING
+============================================================
+
+Every retailer must map into ONE schema.
+
+Retailer column names disappear completely.
+
+Canonical fields include
 
 STORE_NUMBER
 
-Similarly,
-
-upc
-barcode
-sku
-item_code
-
-must become
-
 UPC_CODE
 
-sales
-net_sales
-sales_amt
-total_sales
+PRODUCT_DESCRIPTION
 
-must become
+UNITS_SOLD
+
+WEIGHT_QTY
+
+WEIGHT_UOM
 
 TOTAL_DOLLARS
 
-etc.
+SALES_DATE
 
-No downstream code should ever know retailer-specific column names.
+CATEGORY
 
-After mapping there should only be canonical column names.
+BRAND
 
-Validation SHOULD continue using canonical names.
+DEPARTMENT
 
-DO NOT change validation to dynamically use retailer column names.
+Every downstream module consumes ONLY these canonical fields.
 
-Instead, fix the mapping layer so that every dataset entering Aggregation and Validation has already been renamed to the canonical schema.
+============================================================
+PHASE 8
+QUANTITY RESOLUTION
+============================================================
 
-This architecture must be enforced everywhere.
+Implement
 
-====================================================
-WORK ITEMS
-====================================================
+IF WeightQty > 0
 
-1. Review every pipeline layer.
+ResolvedQuantity = WeightQty
 
-Detection
-↓
+QuantityType = WEIGHT
 
-Preview
+ELSE IF Units > 0
+
+ResolvedQuantity = Units
+
+QuantityType = UNIT
+
+ELSE
+
+ResolvedQuantity = 0
+
+Carry
+
+ResolvedQuantity
+
+QuantityType
+
+WeightUOM
+
+OriginalUnits
+
+through the entire pipeline.
+
+============================================================
+PHASE 9
+PREVIEW PIPELINE
+============================================================
+
+Expose five distinct previews.
+
+1 Raw Preview
+
+2 Discovery Preview
+
+3 Parsed Preview
+
+4 Flatten Preview (when applicable)
+
+5 Canonical Preview
+
+Each preview represents one stage.
+
+Preview must NEVER rerun Discovery.
+
+============================================================
+PHASE 10
+STREAMLIT STABILITY
+============================================================
+
+Fix
+
+Repeated reruns
+
+Repeated Detection
+
+Repeated Preview
+
+Repeated Parsing
+
+Duplicate widgets
+
+Session corruption
+
+Detection executes ONCE.
+
+Preview reuses cached results.
+
+============================================================
+PHASE 11
+ERROR HANDLING
+============================================================
+
+No runtime exceptions.
+
+No
+
+NoneType
+
+list.to_dict
+
+UnboundLocalError
+
+KeyError
+
+AttributeError
+
+Handle
+
+Wrong delimiter
+
+Wrong encoding
+
+Missing layout
+
+Invalid layout
+
+Missing columns
+
+Permission errors
+
+Connection loss
+
+Gracefully.
+
+============================================================
+PHASE 12
+VALIDATION
+============================================================
+
+Drive every retailer scenario through
+
+Discovery
 
 ↓
 
@@ -73,11 +509,7 @@ Parser
 
 ↓
 
-Column Mapping
-
-↓
-
-Canonical Dataset
+Canonical
 
 ↓
 
@@ -91,334 +523,85 @@ Validation
 
 Reports
 
-Verify each layer has a single responsibility.
+Verify every stage succeeds.
 
-Remove duplicated logic.
+============================================================
+PHASE 13
+TESTING
+============================================================
 
-Remove unnecessary coupling.
+Build regression tests for
 
-Ensure each layer only communicates through defined contracts.
+Retailer 1
 
-====================================================
+Retailer 2
 
-2. Detection Stability
+Retailer 3
 
-Detection must execute ONLY once per dataset.
+Retailer 4
 
-No repeated detection during Streamlit reruns.
+Retailer 5
 
-Cache DiscoveryResult correctly.
+Header/Data different delimiters
 
-Invalidate cache ONLY when:
+Parent/Child flattening
 
-• files change
-• user clicks Re-detect
-• configuration changes
+Multiple layouts
 
-Never rerun because a widget changed.
+Mixed Weight
 
-====================================================
+Mixed Units
 
-3. Preview Pipeline
+Missing headers
 
-Make preview stages explicit.
+Duplicate headers
 
-Raw Preview
+Large streaming files
 
-↓
+Do not claim support without automated tests.
 
-Detected Preview
+============================================================
+FINAL ACCEPTANCE
+============================================================
 
-↓
+The sprint is complete ONLY if:
 
-Flattened Preview (multiline only)
+✓ All five retailer scenarios complete successfully.
 
-↓
+✓ Discovery correctly classifies every file.
 
-Parsed Preview
+✓ Layout Builder only opens after Discovery.
 
-↓
+✓ Parser never crashes.
 
-Canonical Preview
+✓ Parent/Child files flatten correctly.
 
-Each stage should clearly represent the output of the previous layer.
+✓ Sales + Product merge correctly.
 
-No mixed previews.
+✓ One Canonical Dataset is produced.
 
-====================================================
+✓ Validation begins from Canonical Dataset.
 
-4. Fixed Width Workflow
+✓ No unnecessary Streamlit reruns.
 
-Redesign the workflow as:
+✓ No runtime exceptions remain.
 
-Raw Preview
+============================================================
+DO NOT
+============================================================
 
-↓
+Do NOT perform documentation cleanup.
 
-Detection Summary
+Do NOT reorganize markdown files.
 
-↓
+Do NOT optimize imports.
 
-Layout Upload OR Layout Builder
+Do NOT refactor for style.
 
-↓
+Do NOT perform package cleanup.
 
-Parsed Preview
+Do NOT perform architecture scoring.
 
-↓
+Those activities belong to the next sprint.
 
-Column Mapping
-
-↓
-
-Canonical Preview
-
-Simplify Layout Builder.
-
-Keep only:
-
-• Column Name
-• Start
-• Length
-• Type
-
-End should be calculated automatically.
-
-Remove all unnecessary columns.
-
-Ensure uploaded layouts and manually created layouts produce identical LayoutDefinition objects.
-
-====================================================
-
-5. Session State
-
-Audit every session state key.
-
-Ensure:
-
-• no duplicate initialization
-• no missing widget keys
-• no unnecessary reruns
-• no stale previews
-• proper cleanup
-• deterministic behavior
-
-====================================================
-
-6. Detection Audit
-
-Review every detection algorithm.
-
-Delimiter detection
-
-Header detection
-
-Record type detection
-
-Fixed width detection
-
-Multiline detection
-
-Date detection
-
-Quantity detection
-
-Weight detection
-
-UOM detection
-
-Ensure every retailer sample works.
-
-====================================================
-
-7. Retailer Compatibility
-
-Validate against every retailer sample collected.
-
-Delimited
-
-Quoted CSV
-
-Pipe-delimited
-
-Fixed Width
-
-HDR
-
-Multiline
-
-Header/Trailer
-
-Sales + Product Master
-
-Mixed Units + Weight
-
-No retailer should require code changes.
-
-Only configuration should differ.
-
-====================================================
-
-8. Quantity Resolution
-
-Implement and verify the rule:
-
-IF Weight Quantity exists
-
-AND Weight Quantity > 0
-
-Use Weight Quantity.
-
-Else
-
-If Weight Quantity is blank or zero
-
-Use Units.
-
-Weight takes priority.
-
-Units are fallback only.
-
-Carry Weight UOM through aggregation.
-
-Support mixed retailers correctly.
-
-====================================================
-
-9. Logging
-
-Replace print() with structured logging.
-
-Every major phase should log:
-
-START
-
-COMPLETE
-
-WARN
-
-ERROR
-
-Include timing.
-
-Include row counts.
-
-Include detection confidence.
-
-====================================================
-
-10. Exception Handling
-
-Every workflow should fail gracefully.
-
-Never expose Python tracebacks in the UI.
-
-Display meaningful user messages.
-
-Write detailed diagnostics to logs.
-
-====================================================
-
-11. Imports
-
-Audit the entire repository.
-
-Imports only at module level.
-
-No local imports unless absolutely required to break circular dependencies.
-
-Remove unused imports.
-
-Verify package compatibility.
-
-Remove unnecessary dependencies.
-
-Investigate pyiceberg dependency and ensure optional packages degrade gracefully if unavailable (no admin-only installation requirements).
-
-====================================================
-
-12. UI Audit
-
-Perform complete UI testing.
-
-Execute:
-
-Onboarding
-
-Existing Validation
-
-Format Change
-
-Detection
-
-Layout Builder
-
-Mapping
-
-Processing
-
-Validation
-
-Reports
-
-No broken navigation.
-
-No dead buttons.
-
-No repeated execution.
-
-No hidden crashes.
-
-====================================================
-
-13. Detection Confidence
-
-Show WHY a file was detected.
-
-Example:
-
-Detected Fixed Width
-
-Confidence: 97%
-
-Reason:
-
-✓ Constant record length
-
-✓ Character boundaries detected
-
-✓ No delimiter pattern
-
-✓ Fixed-width score exceeded threshold
-
-Do similar reasoning for all file types.
-
-====================================================
-
-14. Documentation Cleanup
-
-Move ALL developer markdowns, review reports and architecture notes into a dedicated docs/developer/ folder.
-
-Delete obsolete documentation.
-
-Remove duplicate markdowns.
-
-Keep only user-facing documentation in the root.
-
-====================================================
-
-SUCCESS CRITERIA
-
-• One canonical schema after mapping.
-• Validation uses ONLY canonical column names.
-• Detection runs once.
-• No unnecessary reruns.
-• Stable UI.
-• All retailer samples supported.
-• Fixed-width workflow simplified.
-• Preview pipeline clearly staged.
-• Proper logging.
-• Graceful exception handling.
-• Global imports only.
-• Clean documentation.
-• Platform ready for the next feature sprint.
+The ONLY goal of this sprint is to produce a stable, end-to-end, fully working DVA prototype capable of handling every real retailer scenario collected during design.

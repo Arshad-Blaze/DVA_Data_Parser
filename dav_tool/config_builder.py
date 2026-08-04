@@ -129,6 +129,8 @@ def build_config(
 
             if header_prefix:
                 cfg.header_prefix = header_prefix
+                if trailer_prefix:
+                    cfg.trailer_prefix = trailer_prefix
             else:
                 if not ml_record_types:
                     ml_record_types = detect_record_types(fp_local) if fp_local else ["H", "D"]
