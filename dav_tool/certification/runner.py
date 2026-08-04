@@ -266,12 +266,6 @@ class CertificationRunner:
         test_mapping: Optional[ColumnMapping] = None
 
         if result.config_ok:
-            if _is_delimited_multiline(ctx.prod):
-                result.errors.append(_MULTILINE_DELIMITED_HINT)
-                result.details = {"bau_files": len(bau_files), "test_files": len(test_files)}
-                result.duration = time.perf_counter() - t0
-                return result
-
             try:
                 prod_parse = ParseOptions.from_context(ctx.prod)
                 test_parse = ParseOptions.from_context(ctx.test)

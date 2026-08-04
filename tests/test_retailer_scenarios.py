@@ -7,7 +7,7 @@ import pytest
 
 from dav_tool._parsers import (
     parse_delimited_chunks, parse_fixed_width_chunks,
-    flatten_multiline_fixed_width, load_layout,
+    flatten_multiline_fixed_width, flatten_multiline_chunks, load_layout,
 )
 from dav_tool.detection import generate_detection_summary
 from dav_tool.workflow.discovery import DiscoveryResult
@@ -203,3 +203,64 @@ def test_scenario10_large_streaming():
     assert len(chunks) >= 1, "Should produce at least 1 chunk"
     total = sum(c.height for c in chunks)
     assert total == 3, f"Expected 3 total rows across chunks, got {total}"
+
+
+# ── Scenario 11: Delimited multiline H/D parent→child flattening ────────
+
+
+def test_scenario11_delimited_multiline_flat(tmp_path):
+    """Parent (H) rows are carried forward into child (D) rows, never emitted.
+
+    Mirrors the Retailer Wholesale certification dataset: a pipe-delimited
+    multiline file where ``H`` records are parents and ``D`` records are
+    children.  Only detail rows should appear; the parent header must not be
+    emitted as a standalone row.
+    """
+    path = tmp_path / "wholesale.txt"
+    path.write_text(
+        "H|S001|2024-01-15\n"
+        "D|S001|100001|Widget A|10|99.90\n"
+        "D|S001|100002|Gadget B|5|49.95\n"
+        "H|S002|2024-01-15\n"
+        "D|S002|100001|Widget A|8|79.92\n"
+        "H|S003|2024-01-15\n"
+        "D|S003|100003|Doohickey|20|199.80\n"
+    )
+
+    chunks = list(flatten_multiline_chunks([str(path)], ["H", "D"], "|"))
+    assert len(chunks) > 0, "No chunks produced"
+
+    df = pl.concat(chunks)
+    # Only the 4 D (detail) rows should survive — H rows are parents, not data.
+    assert df.height == 4, f"Expected 4 detail rows, got {df.height}"
+    assert len(df.columns) == 5, f"Expected 5 detail fields, got {len(df.columns)}"
+
+    upc_count = df["Column_1"].n_unique()
+    assert upc_count == 3, f"Expected 3 distinct UPCs, got {upc_count}"
+    assert "Column_0" in df.columns
+
+
+def test_scenario11b_delimited_multiline_certification():
+    """The delimited multiline wholesale certification runs end-to-end."""
+    from dav_tool.certification.runner import CertificationRunner, CERTIFICATION_ROOT
+
+    runner = CertificationRunner(CERTIFICATION_ROOT)
+    result = runner.run_one("multiline", "retailer_wholesale")
+    assert result.passed, f"Wholesale certification failed: {result.errors}"
+    assert result.processing_ok and result.validation_ok
+
+
+# ── Scenario 12: Single record type emits all matching rows ─────────────
+
+
+def test_scenario12_single_record_type_flatten(tmp_path):
+    """Without a parent/child split (single record type), every line is a row."""
+    path = tmp_path / "detail_only.txt"
+    path.write_text(
+        "H|S001|2024-01-15\n"
+        "D|S001|100001|Widget A|10|99.90\n"
+        "D|S002|100002|Gadget B|5|49.95\n"
+    )
+    chunks = list(flatten_multiline_chunks([str(path)], ["D"], "|"))
+    df = pl.concat(chunks)
+    assert df.height == 2, f"Expected 2 detail rows (D only), got {df.height}"

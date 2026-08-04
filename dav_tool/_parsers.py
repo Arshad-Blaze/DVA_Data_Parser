@@ -2,7 +2,7 @@ import csv
 import io
 import logging
 import os
-from typing import Iterator, List, Dict, Any, Optional, Union, BinaryIO
+from typing import Iterator, List, Dict, Any, Optional, Union, BinaryIO, Tuple
 
 import polars as pl
 
@@ -208,28 +208,54 @@ def flatten_multiline_chunks(
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     source: Optional[IDataSource] = None,
 ) -> Iterator[pl.DataFrame]:
+    """Flatten delimited multiline files (parent/child record types).
+
+    The first entry in *record_types* is treated as the parent/header prefix
+    (e.g. ``"H"``); the remaining entries are detail/child prefixes (e.g.
+    ``"D"``).  Parent fields are carried forward and merged into every
+    subsequent child row — the parent line itself is never emitted as a row.
+
+    When only a single record type is given (e.g. ``["D"]``), there is no
+    parent/child split: every matching line is emitted as a data row.
+
+    Column names are assigned generically (``Column_N``); nearby layers
+    (``apply_column_names``) rename them to the canonical schema by position.
+    """
     if isinstance(file_paths, str):
         file_paths = [file_paths]
+
+    if not record_types:
+        record_types = ["H", "D"]
+
+    if len(record_types) > 1:
+        header_prefix, detail_prefixes = _split_parent_child(
+            file_paths[0], record_types, delimiter, source=source,
+        )
+    else:
+        header_prefix = None
+        detail_prefixes = list(record_types)
 
     for file_path in file_paths:
         if source is None and not os.path.exists(file_path):
             continue
 
         with _open_text_stream(file_path, source) as f:
-            buffer = []
+            buffer: List[List[str]] = []
+            parent_fields: List[str] = []
+
             for line in f:
                 line = line.rstrip("\n\r")
                 if not line:
                     continue
 
-                for rt in record_types:
+                if header_prefix and line.startswith(header_prefix):
+                    parent_fields = _strip_prefix_fields(line, header_prefix, delimiter)
+                    continue
+
+                for rt in detail_prefixes:
                     if line.startswith(rt):
-                        rest = line[len(rt) :]
-                        if rest.startswith(delimiter):
-                            rest = rest[len(delimiter) :]
-                        if rest:
-                            fields = rest.split(delimiter)
-                            buffer.append(fields)
+                        child_fields = _strip_prefix_fields(line, rt, delimiter)
+                        buffer.append(_merge_parent_child(parent_fields, child_fields))
                         break
 
                 if len(buffer) >= chunk_size:
@@ -238,6 +264,80 @@ def flatten_multiline_chunks(
 
             if buffer:
                 yield _fields_to_df(buffer)
+
+
+def _split_parent_child(
+    file_path: str,
+    record_types: List[str],
+    delimiter: str = "|",
+    sample_lines: int = 50,
+    source: Optional[IDataSource] = None,
+) -> Tuple[str, List[str]]:
+    """Determine the parent/header prefix vs detail prefixes.
+
+    The parent is the record type whose lines carry the FEWER fields on
+    average — parent/header records describe a transaction (a store header)
+    while child/detail records carry the granular line items.  This makes
+    the split robust regardless of the order in which record types are
+    supplied (discovery may return them alphabetically sorted, e.g.
+    ``['D', 'H']``).
+
+    Falls back to the first supplied type as parent when the file cannot
+    be sampled.
+    """
+    avg_fields: Dict[str, int] = {}
+    counts: Dict[str, int] = {}
+    try:
+        with _open_text_stream(file_path, source) as f:
+            for i, line in enumerate(f):
+                if i >= sample_lines:
+                    break
+                for rt in record_types:
+                    if line.startswith(rt):
+                        fields = _strip_prefix_fields(line.rstrip("\n\r"), rt, delimiter)
+                        avg_fields[rt] = avg_fields.get(rt, 0) + len(fields)
+                        counts[rt] = counts.get(rt, 0) + 1
+                        break
+    except Exception:
+        logger.exception("Failed to sample lines for parent/child split")
+
+    if counts:
+        parent = min(
+            record_types,
+            key=lambda rt: (avg_fields.get(rt, 0) / counts.get(rt, 1), rt),
+        )
+    else:
+        parent = record_types[0]
+    detail = [rt for rt in record_types if rt != parent]
+    if not detail:
+        detail = list(record_types)
+    return parent, detail
+
+
+def _strip_prefix_fields(line: str, prefix: str, delimiter: str) -> List[str]:
+    """Strip *prefix* (+ delimiter) from *line* and split into fields."""
+    rest = line[len(prefix) :]
+    if rest.startswith(delimiter):
+        rest = rest[len(delimiter) :]
+    return rest.split(delimiter) if rest else []
+
+
+def _merge_parent_child(parent: List[str], child: List[str]) -> List[str]:
+    """Merge parent fields into a child row.
+
+    Child fields take precedence at their own positions; any parent field
+    beyond the child's width is carried forward and appended.  This lets a
+    parent header (e.g. ``H|Store|Date``) enrich children that omit it while
+    never emitting the parent line itself.
+    """
+    width = max(len(parent), len(child))
+    merged = [""] * width
+    for i in range(width):
+        if i < len(child) and child[i] != "":
+            merged[i] = child[i]
+        elif i < len(parent):
+            merged[i] = parent[i]
+    return merged
 
 
 def _parse_fields(line: str, layout: List[Dict[str, Any]]) -> Dict[str, str]:
