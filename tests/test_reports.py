@@ -2,8 +2,20 @@
 import csv
 import polars as pl
 from dav_tool._reports import generate_file_review
+from dav_tool._aggregators import stream_store_aggregate, stream_upc_summary
 from dav_tool.validation.store import storelevelvalidation
 from dav_tool.validation.item import run_item_validation
+
+
+def _aggregate_for_review(paths, upc_col="UPC"):
+    """Aggregate first (Aggregation layer), then hand summaries to Reports."""
+    store_agg = stream_store_aggregate(
+        paths, "delimited", "Store", "Units", "Price", delimiter=",",
+    )
+    upc_summary = stream_upc_summary(
+        paths, "delimited", upc_col, "Units", "Price", delimiter=",",
+    )
+    return store_agg, upc_summary
 
 
 def test_generate_file_review_basic(tmp_path):
@@ -13,9 +25,12 @@ def test_generate_file_review_basic(tmp_path):
         w.writerow(["Store", "UPC", "Desc", "Units", "Price"])
         w.writerow(["S1", "1001", "Widget", "10", "50"])
         w.writerow(["S2", "1002", "Gadget", "5", "25"])
+    store_agg, upc_summary = _aggregate_for_review([str(file)])
     result = generate_file_review(
         [str(file)], "delimited", "Store", "UPC", "Units", "Price",
         delimiter=",",
+        precomputed_store_agg=store_agg,
+        precomputed_upc_summary=upc_summary,
     )
     assert not result.is_empty()
     assert "filename" in result.columns
@@ -27,9 +42,12 @@ def test_generate_file_review_basic(tmp_path):
 def test_generate_file_review_empty(tmp_path):
     file = tmp_path / "empty.csv"
     file.write_text("Store,UPC,Desc,Units,Price\n")
+    store_agg, upc_summary = _aggregate_for_review([str(file)])
     result = generate_file_review(
         [str(file)], "delimited", "Store", "UPC", "Units", "Price",
         delimiter=",",
+        precomputed_store_agg=store_agg,
+        precomputed_upc_summary=upc_summary,
     )
     assert not result.is_empty()
     assert result["store_count"].to_list()[0] == 0
@@ -44,11 +62,29 @@ def test_generate_file_review_multiple_files(tmp_path):
             w.writerow(["Store", "UPC", "Desc", "Units", "Price"])
             w.writerow([f"S{i}", f"10{i:03d}", "Item", "5", "25"])
         paths.append(str(p))
+    store_agg, upc_summary = _aggregate_for_review(paths)
     result = generate_file_review(
         paths, "delimited", "Store", "UPC", "Units", "Price",
         delimiter=",",
+        precomputed_store_agg=store_agg,
+        precomputed_upc_summary=upc_summary,
     )
-    assert len(result) == 3
+    assert len(result) == 1
+
+
+def test_generate_file_review_requires_precomputed(tmp_path):
+    """Reports must not aggregate on its own — precomputed summaries are required."""
+    file = tmp_path / "data.csv"
+    file.write_text("Store,UPC,Desc,Units,Price\nS1,1001,Widget,10,50\n")
+    try:
+        generate_file_review(
+            [str(file)], "delimited", "Store", "UPC", "Units", "Price",
+            delimiter=",",
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError when summaries are missing")
 
 
 def test_generate_file_review_precomputed_single_row(tmp_path):

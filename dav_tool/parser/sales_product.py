@@ -38,6 +38,25 @@ class SalesProductParser(BaseParser):
 
     def parse(self, discovery: DiscoveryResult, **kwargs: Any) -> ParsedResult:
         warnings: List[str] = []
+
+        transformed = kwargs.get("transformed")
+        if transformed is not None and transformed.records is not None:
+            sales_df = transformed.records
+            joined = bool(transformed.join_operations)
+            return ParsedResult(
+                canonical_data=sales_df,
+                metadata={
+                    "parser": self.name,
+                    "file_type": discovery.file_type,
+                    "rows": sales_df.height,
+                    "product_master_joined": joined,
+                    "transformed": True,
+                },
+                discovery=discovery,
+                schema=list(sales_df.columns),
+                warnings=warnings,
+            )
+
         sales_df = _read_delimited(discovery, kwargs.get("source"))
         product_df = kwargs.get("product_master")
         if product_df is None:

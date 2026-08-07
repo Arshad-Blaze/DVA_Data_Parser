@@ -1,75 +1,19 @@
-"""Progressive Configuration Builder & Configuration Validator.
+"""Configuration Validator.
 
-Builds configuration in stages (A-E), validates completeness
-before processing, and provides section-level UI helpers.
+Validates configuration completeness for the selected OutputMode and
+provides section-level validation helpers.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import List
 
-from dav_tool.format_config import (
-    FormatConfig, ConfigSection, ValidationConfig, ValidationRule, OutputConfig,
-    iter_sections, get_section_fields,
-)
+from dav_tool.format_config import FormatConfig, ConfigSection
 from dav_tool.options import OutputMode
 
 logger = logging.getLogger(__name__)
 
 
-# ── Progressive Builder Stages ──────────────────────────────────────
-
-STAGE_LABELS = {
-    ConfigSection.GENERAL: "Stage A: General Information",
-    ConfigSection.FILE: "Stage B: File Format",
-    ConfigSection.PHYSICAL_SCHEMA: "Stage C: Physical Schema (read-only)",
-    ConfigSection.CANONICAL_SCHEMA: "Stage D: Canonical Schema (editable)",
-    ConfigSection.BUSINESS_MAPPING: "Stage E: Business Mapping",
-    ConfigSection.QUANTITY: "Stage F: Quantity Configuration",
-    ConfigSection.VALIDATION: "Stage G: Validation Settings",
-    ConfigSection.OUTPUT: "Stage H: Output Settings",
-}
-
-
-def get_current_stage(cfg: FormatConfig) -> ConfigSection:
-    """Return the next incomplete config section (stage)."""
-    return cfg.next_incomplete_section()
-
-
-def stage_fields(cfg: FormatConfig, section: ConfigSection) -> List[str]:
-    """Return field names for the given config section that are relevant."""
-    return list(get_section_fields(section))
-
-
-def stage_summary(cfg: FormatConfig, section: ConfigSection) -> Dict[str, Any]:
-    """Return a human-readable summary of fields in a section."""
-    summary = {}
-    fields = stage_fields(cfg, section)
-
-    for field in fields:
-        val = getattr(cfg, field, None)
-        if field == "validation_config":
-            vc: ValidationConfig = val
-            for rule_name in ["store_validation", "item_validation", "compare_store_list", "file_review"]:
-                rule: ValidationRule = getattr(vc, rule_name)
-                summary[f"{rule_name}_enabled"] = rule.enabled
-                if rule.group_by_columns:
-                    summary[f"{rule_name}_group_by"] = ", ".join(rule.group_by_columns)
-                if rule.aggregation_columns:
-                    summary[f"{rule_name}_agg_cols"] = ", ".join(rule.aggregation_columns)
-        elif field == "output_config" and isinstance(val, OutputConfig):
-            summary["format"] = val.format
-            summary["include_file_review"] = val.include_file_review
-            summary["include_validation_details"] = val.include_validation_details
-        elif val is not None:
-            summary[field] = val
-    return summary
-
-
 # ── Configuration Validation ────────────────────────────────────────
-
-
-class ConfigValidationError(Exception):
-    """Raised when configuration fails validation."""
 
 
 def validate_config(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE) -> List[str]:
@@ -155,15 +99,6 @@ def validate_config(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE) -
         errors.append(f"Invalid quantity type '{cfg.quantity_type}'. Must be: units, weight, or mixed.")
 
     return errors
-
-
-def assert_config_valid(cfg: FormatConfig, mode: OutputMode = OutputMode.VALIDATE):
-    """Raise ConfigValidationError if config is invalid for the given mode."""
-    errors = validate_config(cfg, mode=mode)
-    if errors:
-        raise ConfigValidationError(
-            "Configuration validation failed:\n  - " + "\n  - ".join(errors)
-        )
 
 
 def validate_section(cfg: FormatConfig, section: ConfigSection) -> List[str]:

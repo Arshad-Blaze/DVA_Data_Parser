@@ -621,6 +621,8 @@ def canonical_chunk_stream(
     quantity_strategy: str = "auto",
     units_uom: Optional[str] = None,
     schema_template: str = "minimal",
+    quantity_provenance: bool = False,
+    extra_cols: Optional[Dict[str, str]] = None,
 ):
     """Yield canonically-normalized DataFrames from file(s).
 
@@ -632,6 +634,10 @@ def canonical_chunk_stream(
     - ``"store"`` → ``Units``, ``Totalprice``, ``STORE_NUMBER``
     - ``"item"`` → ``UPC_CODE``, ``PRODUCT_DESCRIPTION``, ``UNITS_SOLD``, ``TOTAL_DOLLARS``
     - ``"upc"`` → ``UPC``, ``UNITS_SOLD``, ``TOTAL_DOLLARS``
+
+    When *quantity_provenance* is True, the normalizer additionally emits
+    ``OriginalUnits``, ``OriginalWeight``, ``ResolvedQuantity``,
+    ``QuantitySource`` and ``WeightUOM``.
     """
 
     if isinstance(file_paths, str):
@@ -650,10 +656,12 @@ def canonical_chunk_stream(
             cols_for_scan = [upc_col, desc_col, units_col, price_col]
         elif level == "upc":
             cols_for_scan = [upc_col, units_col, price_col]
-        if weight_col and quantity_type in ("weight", "mixed"):
-            cols_for_scan.append(weight_col)
+        if weight_qty_col or weight_col:
+            cols_for_scan.append(weight_qty_col or weight_col)
         if weight_uom_col:
             cols_for_scan.append(weight_uom_col)
+        if extra_cols:
+            cols_for_scan.extend(v for v in extra_cols.values() if v)
         cols_for_scan = list(dict.fromkeys(cols for cols in cols_for_scan if cols))
 
         lazy = scan_delimited(file_paths, delimiter, columns=cols_for_scan)
@@ -665,7 +673,8 @@ def canonical_chunk_stream(
                                        numeric_config=numeric_config,
                                        date_col=date_col, weight_qty_col=weight_qty_col,
                                        quantity_strategy=quantity_strategy, units_uom=units_uom,
-                                       schema_template=schema_template)
+                                       schema_template=schema_template,
+                                       quantity_provenance=quantity_provenance)
             )
         elif level == "item":
             lazy = lazy.with_columns(
@@ -675,7 +684,8 @@ def canonical_chunk_stream(
                                       numeric_config=numeric_config,
                                       date_col=date_col, weight_qty_col=weight_qty_col,
                                       quantity_strategy=quantity_strategy, units_uom=units_uom,
-                                      schema_template=schema_template)
+                                      schema_template=schema_template,
+                                      quantity_provenance=quantity_provenance)
             )
         elif level == "upc":
             lazy = lazy.with_columns(
@@ -685,8 +695,11 @@ def canonical_chunk_stream(
                                      numeric_config=numeric_config,
                                      date_col=date_col, weight_qty_col=weight_qty_col,
                                      quantity_strategy=quantity_strategy, units_uom=units_uom,
-                                     schema_template=schema_template)
+                                     schema_template=schema_template,
+                                     quantity_provenance=quantity_provenance)
             )
+        if extra_cols:
+            lazy = lazy.with_columns(_extra_col_exprs(extra_cols))
         yield lazy.collect(engine="streaming")
         return
 
@@ -707,38 +720,54 @@ def canonical_chunk_stream(
                 logger.warning("Skipping chunk: column '%s' not found", store_col)
                 del chunk
                 continue
-            yield normalize_store_chunk(chunk, store_col, units_col, price_col,
-                                         implied_units, implied_dollars, price_type,
-                                         quantity_type, weight_col, weight_uom, weight_uom_col,
-                                         numeric_config=numeric_config,
-                                         date_col=date_col, weight_qty_col=weight_qty_col,
-                                         quantity_strategy=quantity_strategy, units_uom=units_uom,
-                                         schema_template=schema_template)
+            normalized = normalize_store_chunk(chunk, store_col, units_col, price_col,
+                                                implied_units, implied_dollars, price_type,
+                                                quantity_type, weight_col, weight_uom, weight_uom_col,
+                                                numeric_config=numeric_config,
+                                                date_col=date_col, weight_qty_col=weight_qty_col,
+                                                quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                                schema_template=schema_template,
+                                                quantity_provenance=quantity_provenance)
         elif level == "item":
             if upc_col not in chunk.columns:
                 logger.warning("Skipping chunk: column '%s' not found", upc_col)
                 del chunk
                 continue
-            yield normalize_item_chunk(chunk, upc_col, desc_col, units_col, price_col,
-                                        implied_units, implied_dollars,
-                                        quantity_type, weight_col, weight_uom, weight_uom_col,
-                                        numeric_config=numeric_config,
-                                        date_col=date_col, weight_qty_col=weight_qty_col,
-                                        quantity_strategy=quantity_strategy, units_uom=units_uom,
-                                        schema_template=schema_template)
-        elif level == "upc":
+            normalized = normalize_item_chunk(chunk, upc_col, desc_col, units_col, price_col,
+                                               implied_units, implied_dollars,
+                                               quantity_type, weight_col, weight_uom, weight_uom_col,
+                                               numeric_config=numeric_config,
+                                               date_col=date_col, weight_qty_col=weight_qty_col,
+                                               quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                               schema_template=schema_template,
+                                               quantity_provenance=quantity_provenance)
+        else:  # level == "upc"
             if upc_col not in chunk.columns:
                 logger.warning("Skipping chunk: column '%s' not found", upc_col)
                 del chunk
                 continue
-            yield normalize_upc_chunk(chunk, upc_col, units_col, price_col,
-                                       implied_units, implied_dollars,
-                                       quantity_type, weight_col, weight_uom, weight_uom_col,
-                                       numeric_config=numeric_config,
-                                       date_col=date_col, weight_qty_col=weight_qty_col,
-                                       quantity_strategy=quantity_strategy, units_uom=units_uom,
-                                       schema_template=schema_template)
+            normalized = normalize_upc_chunk(chunk, upc_col, units_col, price_col,
+                                              implied_units, implied_dollars,
+                                              quantity_type, weight_col, weight_uom, weight_uom_col,
+                                              numeric_config=numeric_config,
+                                              date_col=date_col, weight_qty_col=weight_qty_col,
+                                              quantity_strategy=quantity_strategy, units_uom=units_uom,
+                                              schema_template=schema_template,
+                                              quantity_provenance=quantity_provenance)
+        if extra_cols:
+            normalized = normalized.with_columns(_extra_col_exprs(extra_cols))
+        yield normalized
         del chunk
+
+
+def _extra_col_exprs(extra_cols: Dict[str, str]) -> List[pl.Expr]:
+    """Build passthrough expressions for plain canonical columns."""
+    exprs: List[pl.Expr] = []
+    for canonical, physical in extra_cols.items():
+        if not physical:
+            continue
+        exprs.append(pl.col(physical).cast(pl.Utf8).alias(canonical))
+    return exprs
 
 
 def preview_flattened_multiline_fixed(

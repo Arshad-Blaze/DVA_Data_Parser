@@ -34,14 +34,15 @@ from dav_tool.workflow.discovery import detect_file
 from dav_tool.workflow.flush import flush
 from dav_tool.workflow.orchestration import run_onboarding_processing, run_onboarding_validation
 from dav_tool.workflow.output import generate_onboarding_output
+from dav_tool.workflow import WorkflowPhase
 
-# Phase constants matching the 7-step workflow
-PHASE_DISCOVERY = 1
-PHASE_CONFIG = 2
-PHASE_CONFIG_VALIDATED = 3
-PHASE_PROCESSING = 4
-PHASE_VALIDATION = 5
-PHASE_REPORTS = 6
+# Phase constants — aligned 1:1 with the workflow-owned WorkflowPhase enum.
+PHASE_DISCOVERY = int(WorkflowPhase.DISCOVERY)
+PHASE_CONFIG = int(WorkflowPhase.CONFIGURATION)
+PHASE_CONFIG_VALIDATED = int(WorkflowPhase.CONFIG_VALIDATED)
+PHASE_PROCESSING = int(WorkflowPhase.PROCESSING)
+PHASE_VALIDATION = int(WorkflowPhase.VALIDATION)
+PHASE_REPORTS = int(WorkflowPhase.REPORTS)
 
 
 def _get_validation_config(ctx):

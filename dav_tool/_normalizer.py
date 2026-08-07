@@ -11,6 +11,7 @@ from dav_tool._numeric import (
 )
 from dav_tool.quantity import (
     QuantityStrategy,
+    convert_to_lb,
     map_quantity_type_to_strategy,
     resolve_quantity,
 )
@@ -52,6 +53,109 @@ def _effective_qty_expr(
         units_uom=units_uom,
         numeric_config=numeric_config,
     )
+
+
+def _quantity_source_expr(
+    units_col: str,
+    weight_qty_col: Optional[str] = None,
+    weight_uom: str = "lb",
+    weight_uom_col: Optional[str] = None,
+    quantity_strategy: str = "auto",
+    quantity_type: str = "units",
+    numeric_config: Optional[NumericParsingConfig] = None,
+) -> pl.Expr:
+    """Return an expression yielding ``"weight"`` / ``"units"`` / ``"none"``."""
+    strategy = (
+        QuantityStrategy(quantity_strategy)
+        if quantity_strategy
+        else map_quantity_type_to_strategy(quantity_type)
+    )
+    units = numeric_parse_expr(units_col, numeric_config)
+
+    if strategy == QuantityStrategy.UNITS_ONLY:
+        return (
+            pl.when(units.is_not_null() & (units > 0))
+            .then(pl.lit("units", pl.Utf8))
+            .otherwise(pl.lit("none", pl.Utf8))
+        )
+
+    if strategy == QuantityStrategy.WEIGHT_ONLY:
+        if weight_qty_col:
+            w = numeric_parse_expr(weight_qty_col, numeric_config)
+            return (
+                pl.when(w.is_not_null() & (w > 0))
+                .then(pl.lit("weight", pl.Utf8))
+                .otherwise(pl.lit("none", pl.Utf8))
+            )
+        return pl.lit("none", pl.Utf8)
+
+    if weight_qty_col:
+        w = numeric_parse_expr(weight_qty_col, numeric_config)
+        w_lb = convert_to_lb(w, weight_uom_col, weight_uom)
+        if strategy == QuantityStrategy.PREFER_UNITS:
+            return (
+                pl.when(units.is_not_null() & (units > 0))
+                .then(pl.lit("units", pl.Utf8))
+                .when(w_lb.is_not_null() & (w_lb > 0))
+                .then(pl.lit("weight", pl.Utf8))
+                .otherwise(pl.lit("none", pl.Utf8))
+            )
+        return (
+            pl.when(w_lb.is_not_null() & (w_lb > 0))
+            .then(pl.lit("weight", pl.Utf8))
+            .when(units.is_not_null() & (units > 0))
+            .then(pl.lit("units", pl.Utf8))
+            .otherwise(pl.lit("none", pl.Utf8))
+        )
+
+    return (
+        pl.when(units.is_not_null() & (units > 0))
+        .then(pl.lit("units", pl.Utf8))
+        .otherwise(pl.lit("none", pl.Utf8))
+    )
+
+
+def _provenance_exprs(
+    units_col: str,
+    weight_col: Optional[str] = None,
+    weight_uom: str = "lb",
+    weight_uom_col: Optional[str] = None,
+    quantity_strategy: str = "auto",
+    quantity_type: str = "units",
+    numeric_config: Optional[NumericParsingConfig] = None,
+    weight_qty_col: Optional[str] = None,
+    units_uom: Optional[str] = None,
+) -> List[pl.Expr]:
+    """Build the quantity-provenance expressions.
+
+    Preserves the original units/weight values plus the resolved quantity and
+    its source, so the Quantity Resolution provenance is explicit rather than
+    fused into the units column.
+    """
+    units = numeric_parse_expr(units_col, numeric_config)
+    wq = weight_qty_col or weight_col
+    weight = numeric_parse_expr(wq, numeric_config) if wq else pl.lit(None, pl.Float64)
+
+    resolved = _effective_qty_expr(
+        units_col, weight_col, quantity_type, weight_uom_col, weight_uom,
+        numeric_config, quantity_strategy=quantity_strategy,
+        weight_qty_col=weight_qty_col, units_uom=units_uom,
+    )
+    source = _quantity_source_expr(
+        units_col, weight_qty_col, weight_uom, weight_uom_col,
+        quantity_strategy, quantity_type, numeric_config,
+    )
+    uom = _uom_expr(
+        units_col, weight_qty_col, weight_uom, weight_uom_col,
+        units_uom, quantity_strategy, quantity_type, numeric_config,
+    )
+    return [
+        units.alias("OriginalUnits"),
+        weight.alias("OriginalWeight"),
+        resolved.alias("ResolvedQuantity"),
+        source.alias("QuantitySource"),
+        uom.alias("WeightUOM"),
+    ]
 
 
 def _date_expr(date_col: Optional[str]) -> Optional[pl.Expr]:
@@ -228,6 +332,7 @@ def store_normalize_exprs(
     quantity_strategy: str = "auto",
     units_uom: Optional[str] = None,
     schema_template: str = "minimal",
+    quantity_provenance: bool = False,
 ) -> List[pl.Expr]:
     u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config, weight_qty_col=weight_qty_col, quantity_strategy=quantity_strategy, units_uom=units_uom)
     d = numeric_parse_expr(price_col, numeric_config)
@@ -237,11 +342,14 @@ def store_normalize_exprs(
         d = d / 100
     if price_type == "Unit Price":
         d = u * d
+    extra = _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    if quantity_provenance:
+        extra = extra + _provenance_exprs(units_col, weight_col, weight_uom, weight_uom_col, quantity_strategy, quantity_type, numeric_config, weight_qty_col, units_uom)
     return [
         u.alias("Units"),
         d.alias("Totalprice"),
         pl.col(store_col).cast(pl.Utf8).alias("STORE_NUMBER"),
-    ] + _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    ] + extra
 
 
 def normalize_store_chunk(
@@ -258,6 +366,7 @@ def normalize_store_chunk(
     quantity_strategy: str = "auto",
     units_uom: Optional[str] = None,
     schema_template: str = "minimal",
+    quantity_provenance: bool = False,
 ) -> pl.DataFrame:
     u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config, weight_qty_col=weight_qty_col, quantity_strategy=quantity_strategy, units_uom=units_uom)
     d = numeric_parse_expr(price_col, numeric_config)
@@ -273,6 +382,8 @@ def normalize_store_chunk(
         d.alias("Totalprice"),
     ]
     extra = _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    if quantity_provenance:
+        extra = extra + _provenance_exprs(units_col, weight_col, weight_uom, weight_uom_col, quantity_strategy, quantity_type, numeric_config, weight_qty_col, units_uom)
     if extra:
         exprs.extend(extra)
     return chunk.select(exprs)
@@ -291,6 +402,7 @@ def item_normalize_exprs(
     quantity_strategy: str = "auto",
     units_uom: Optional[str] = None,
     schema_template: str = "minimal",
+    quantity_provenance: bool = False,
 ) -> List[pl.Expr]:
     u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config, weight_qty_col=weight_qty_col, quantity_strategy=quantity_strategy, units_uom=units_uom)
     d = numeric_parse_expr(dollars_col, numeric_config)
@@ -298,12 +410,15 @@ def item_normalize_exprs(
         u = u / 100
     if implied_dollars:
         d = d / 100
+    extra = _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    if quantity_provenance:
+        extra = extra + _provenance_exprs(units_col, weight_col, weight_uom, weight_uom_col, quantity_strategy, quantity_type, numeric_config, weight_qty_col, units_uom)
     return [
         pl.col(upc_col).cast(pl.Utf8).str.strip_chars().alias("UPC_CODE"),
         pl.col(desc_col).cast(pl.Utf8).str.strip_chars().alias("PRODUCT_DESCRIPTION"),
         u.alias("UNITS_SOLD"),
         d.alias("TOTAL_DOLLARS"),
-    ] + _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    ] + extra
 
 
 def normalize_item_chunk(
@@ -319,6 +434,7 @@ def normalize_item_chunk(
     quantity_strategy: str = "auto",
     units_uom: Optional[str] = None,
     schema_template: str = "minimal",
+    quantity_provenance: bool = False,
 ) -> pl.DataFrame:
     u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config, weight_qty_col=weight_qty_col, quantity_strategy=quantity_strategy, units_uom=units_uom)
     d = numeric_parse_expr(dollars_col, numeric_config)
@@ -333,6 +449,8 @@ def normalize_item_chunk(
         d.alias("TOTAL_DOLLARS"),
     ]
     extra = _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    if quantity_provenance:
+        extra = extra + _provenance_exprs(units_col, weight_col, weight_uom, weight_uom_col, quantity_strategy, quantity_type, numeric_config, weight_qty_col, units_uom)
     if extra:
         exprs.extend(extra)
     return chunk.select(exprs)
@@ -351,6 +469,7 @@ def upc_normalize_exprs(
     quantity_strategy: str = "auto",
     units_uom: Optional[str] = None,
     schema_template: str = "minimal",
+    quantity_provenance: bool = False,
 ) -> List[pl.Expr]:
     u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config, weight_qty_col=weight_qty_col, quantity_strategy=quantity_strategy, units_uom=units_uom)
     d = numeric_parse_expr(dollars_col, numeric_config)
@@ -358,11 +477,14 @@ def upc_normalize_exprs(
         u = u / 100
     if implied_dollars:
         d = d / 100
+    extra = _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    if quantity_provenance:
+        extra = extra + _provenance_exprs(units_col, weight_col, weight_uom, weight_uom_col, quantity_strategy, quantity_type, numeric_config, weight_qty_col, units_uom)
     return [
         pl.col(upc_col).cast(pl.Utf8).str.strip_chars().alias("UPC"),
         u.alias("UNITS_SOLD"),
         d.alias("TOTAL_DOLLARS"),
-    ] + _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    ] + extra
 
 
 def normalize_upc_chunk(
@@ -378,6 +500,7 @@ def normalize_upc_chunk(
     quantity_strategy: str = "auto",
     units_uom: Optional[str] = None,
     schema_template: str = "minimal",
+    quantity_provenance: bool = False,
 ) -> pl.DataFrame:
     u = _effective_qty_expr(units_col, weight_col, quantity_type, weight_uom_col, weight_uom, numeric_config, weight_qty_col=weight_qty_col, quantity_strategy=quantity_strategy, units_uom=units_uom)
     d = numeric_parse_expr(dollars_col, numeric_config)
@@ -391,6 +514,8 @@ def normalize_upc_chunk(
         d.alias("TOTAL_DOLLARS"),
     ]
     extra = _extra_cols(units_col, date_col, quantity_type, quantity_strategy, weight_col, weight_qty_col, weight_uom, weight_uom_col, units_uom, numeric_config, schema_template=schema_template)
+    if quantity_provenance:
+        extra = extra + _provenance_exprs(units_col, weight_col, weight_uom, weight_uom_col, quantity_strategy, quantity_type, numeric_config, weight_qty_col, units_uom)
     if extra:
         exprs.extend(extra)
     return chunk.select(exprs)

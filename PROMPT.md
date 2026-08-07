@@ -1,96 +1,35 @@
-# DVA Platform Sprint
-## Architecture Refactoring + Record-Based Parser (HEB)
+# DVA Platform
+## RC3 - Architecture Finalization & Retailer Certification Sprint
 
-This sprint is NOT about adding new features.
+STOP.
 
-This sprint is about correcting a fundamental architectural flaw that is affecting onboarding, preview, layout building, flattening and retailer support.
+Do not introduce any new architectural abstractions.
 
-The objective is to make the DVA Platform parser-driven instead of UI-driven.
+Do not redesign Workflow Engine.
 
-The UI must never participate in parsing.
+Do not redesign Pipeline Registry.
 
-The parser must completely understand the input before the UI renders downstream steps.
+Do not redesign Pipeline Context.
 
-==========================================================
-PRIMARY GOAL
-==========================================================
+The architecture has reached sufficient maturity.
 
-Refactor the architecture so that:
+This sprint focuses on proving that the architecture works with real retailer datasets and filling the last architectural gaps.
 
-Connection
+====================================================================
+PRIMARY OBJECTIVE
+====================================================================
 
-↓
+The platform must become a fully working retailer-agnostic ingestion platform.
 
-Discovery
+The objective is NOT code compilation.
 
-↓
+The objective is NOT documentation.
 
-Parser
+The objective is NOT architecture experimentation.
 
-↓
+The objective is to prove that the current architecture successfully supports every retailer scenario discussed.
 
-Canonical Dataset
-
-↓
-
-Column Mapping
-
-↓
-
-Validation
-
-↓
-
-Reports
-
-becomes the ONLY processing pipeline.
-
-Every retailer must follow this pipeline.
-
-No retailer-specific workflow should exist inside the UI.
-
-==========================================================
-PROBLEM 1
-Current Architecture
-==========================================================
-
-The current architecture leaks parser logic into the UI.
-
-Example
-
-User selects HEB
-
-↓
-
-Detection
-
-↓
-
-UI asks for Record Types
-
-↓
-
-User clicks Flatten
-
-↓
-
-Parser resumes
-
-↓
-
-Preview
-
-This architecture is incorrect.
-
-The parser is waiting for UI interaction before it can continue.
-
-The UI should NEVER participate in parser decisions.
-
-==========================================================
-REQUIRED ARCHITECTURE
-==========================================================
-
-The new architecture must be
+Every retailer must successfully execute
 
 Connection
 
@@ -100,519 +39,644 @@ Discovery
 
 ↓
 
-Parser Factory
+Dataset Graph
 
 ↓
 
-Specific Parser
+Transformation Planner
 
 ↓
 
-Canonical Dataset
+Transformation Engine
 
 ↓
 
-Column Mapping
-
-↓
-
-Validation
-
-↓
-
-Reports
-
-The UI simply consumes results.
-
-==========================================================
-DISCOVERY
-==========================================================
-
-Discovery becomes the intelligence layer.
-
-Discovery must determine
-
-• File Type
-• Encoding
-• Delimiter
-• Record Length
-• Header
-• Trailer
-• Disclaimer
-• Metadata
-• Blank Lines
-• Record Types
-• Parent Child Relationships
-• Multi-file Relationships
-• Join Keys
-• Candidate Layouts
-• Data Start Line
-• Parser Recommendation
-• Confidence
-• Detection Reasoning
-
-Discovery MUST NOT parse.
-
-Discovery MUST NOT flatten.
-
-Discovery MUST ONLY understand the file.
-
-==========================================================
-PARSER FACTORY
-==========================================================
-
-Create a ParserFactory.
-
-ParserFactory selects parser automatically.
-
-Examples
-
-DelimitedParser
-
-FixedWidthParser
-
-RecordBasedParser
-
-ParentChildParser
-
-ExcelParser
-
-SalesProductParser
-
-No UI logic decides parser.
-
-ParserFactory owns parser selection.
-
-==========================================================
-RECORD-BASED PARSER
-==========================================================
-
-HEB is NOT a multiline problem.
-
-HEB is a Record-Based file.
-
-Implement a dedicated RecordBasedParser.
-
-Pipeline
-
-Read
-
-↓
-
-Identify Record Types
-
-↓
-
-Build Record Tree
-
-↓
-
-Resolve Relationships
-
-↓
-
-Flatten
-
-↓
-
-Generate Parsed Dataset
-
-↓
-
-Infer Schema
-
-↓
-
-Generate Canonical Dataset
-
-↓
-
-Return
-
-The parser must complete all these stages automatically.
-
-==========================================================
-RECORD TREE
-==========================================================
-
-Build an internal hierarchical model.
-
-Example
-
-File
-
-├── Disclaimer
-
-├── Header
-
-├── Store
-
-│      ├── Detail
-
-│      ├── Detail
-
-│      └── Detail
-
-├── Store
-
-│      ├── Detail
-
-│      └── Detail
-
-└── Trailer
-
-The tree is INTERNAL.
-
-The UI must never know it exists.
-
-==========================================================
-FLATTENING
-==========================================================
-
-Flattening is NOT a UI action.
-
-Flattening is an internal parser stage.
-
-Remove the "Flatten Records" concept from the UI.
-
-The parser automatically flattens whenever required.
-
-Users should never manually flatten data.
-
-==========================================================
-DISCOVERY RESULT
-==========================================================
-
-DiscoveryResult becomes the single contract.
-
-DiscoveryResult must contain
-
-File Architecture
-
-Record Types
-
-Relationships
-
-Candidate Layouts
-
-Data Start
-
-Confidence
-
-Recommended Parser
-
-Warnings
-
-Metadata
-
-DiscoveryResult is passed downstream.
-
-No downstream phase performs detection again.
-
-==========================================================
-CANONICAL DATASET
-==========================================================
-
-Every parser returns
-
-CanonicalDataFrame
-
-CanonicalMetadata
-
-DiscoveryResult
-
-Every parser must return identical contracts.
-
-No retailer-specific schemas beyond this point.
-
-==========================================================
-COLUMN MAPPING
-==========================================================
-
-Retailer columns are mapped only once.
-
-Examples
-
-Store
-
-Store_Number
-
-Location
-
-Site
-
-↓
-
-STORE_NUMBER
-
-UPC
-
-Barcode
-
-SKU
-
-↓
-
-UPC_CODE
-
-Description
-
-Item Description
-
-Product
-
-↓
-
-PRODUCT_DESCRIPTION
-
-Units
-
-Qty
-
-Sales Qty
-
-↓
-
-UNITS_SOLD
-
-Weight
-
-Weight Qty
-
-↓
-
-WEIGHT_QTY
-
-Sales
-
-Retail
-
-Total
-
-↓
-
-TOTAL_DOLLARS
-
-After mapping
-
-Validation
-
-Aggregation
-
-Reports
-
-must ONLY use canonical names.
-
-==========================================================
-HEB REQUIREMENTS
-==========================================================
-
-The HEB retailer must process automatically.
-
-Parser responsibilities
-
-Ignore disclaimer.
-
-Ignore metadata.
-
-Detect HDR.
-
-Detect Store records.
-
-Detect Detail records.
-
-Detect Trailer.
-
-Build hierarchy.
-
-Flatten hierarchy.
-
-Generate Parsed Preview.
-
-Generate Canonical Preview.
-
-No user interaction required.
-
-The UI must never ask
-
-Record Prefixes
-
-Flatten
-
-Record Types
-
-Parser Selection
-
-These are parser responsibilities.
-
-==========================================================
-LAYOUT BUILDER
-==========================================================
-
-Layout Builder is moved later.
-
-Correct flow
-
-Discovery
-
-↓
-
-Parser
-
-↓
-
-Determine Detail Record
-
-↓
-
-Candidate Layout
-
-↓
-
-Layout Builder
-
-↓
-
-Parsed Preview
+Parser Pipeline
 
 ↓
 
 Canonical Mapping
 
-Do NOT ask users to build layouts before parser understands the records.
+↓
 
-==========================================================
-PREVIEW PIPELINE
-==========================================================
-
-Preview stages
-
-Raw Preview
+Quantity Resolution
 
 ↓
 
-Discovery Summary
+Canonical Dataset
 
 ↓
 
-Parsed Preview
+Data Quality
 
 ↓
 
-Canonical Preview
+Aggregation
 
-No duplicate previews.
+↓
 
-No stale previews.
+Validation Rule Engine
 
-No reruns.
+↓
 
-==========================================================
-UI RESPONSIBILITIES
-==========================================================
+Insights Engine
 
-UI should ONLY
+↓
 
-Display previews
+Reporting
 
-Display discovery summary
+↓
 
-Display parser results
+Downloads
 
-Allow column mapping
+Every retailer must use the SAME architecture.
 
-Allow validation
+Only DiscoveryResult, DatasetGraph and TransformationPlan should differ.
 
-The UI never decides
+====================================================================
+ARCHITECTURAL COMPLETION ITEMS
+====================================================================
+
+Complete the remaining missing architecture.
+
+------------------------------------------------------------
+1. Canonical Mapping Stage
+------------------------------------------------------------
+
+Introduce an explicit Canonical Mapping stage.
+
+Current
 
 Parser
 
-Flattening
+↓
 
-Relationships
+Canonical Dataset
 
-Hierarchy
+Required
 
-Record Types
+Parser
 
-==========================================================
-RETAILER SUPPORT
-==========================================================
+↓
 
-The platform MUST successfully support
+Canonical Mapper
+
+↓
+
+Canonical Dataset
+
+Responsibilities
+
+Map retailer-specific physical columns into platform canonical columns.
+
+Support aliases.
+
+Support confidence scoring.
+
+Support mapping suggestions.
+
+Support user overrides.
+
+Canonical schema must include
+
+STORE_NUMBER
+
+UPC_CODE
+
+PRODUCT_DESCRIPTION
+
+TRANSACTION_DATE
+
+UNITS_SOLD
+
+WEIGHT_QTY
+
+WEIGHT_UOM
+
+TOTAL_DOLLARS
+
+CATEGORY
+
+BRAND
+
+DEPARTMENT
+
+STORE_NAME
+
+ITEM_SIZE
+
+ITEM_UOM
+
+No downstream layer may depend on retailer column names.
+
+------------------------------------------------------------
+2. Quantity Resolution Stage
+------------------------------------------------------------
+
+Create an explicit Quantity Resolution stage.
+
+Responsibilities
+
+Resolve mixed quantity retailers.
+
+Rules
+
+IF WeightQty > 0
+
+    Use WeightQty
+
+ELSE IF WeightQty == 0 AND Units > 0
+
+    Use Units
+
+ELSE
+
+    Use Units
+
+Preserve
+
+OriginalUnits
+
+OriginalWeight
+
+ResolvedQuantity
+
+QuantitySource
+
+WeightUOM
+
+Support every retailer.
+
+No aggregation layer should implement quantity rules.
+
+------------------------------------------------------------
+3. Data Quality Stage
+------------------------------------------------------------
+
+Introduce a Data Quality stage.
+
+Run BEFORE Aggregation.
+
+Checks include
+
+Duplicate Keys
+
+Missing Mandatory Columns
+
+Missing UPC
+
+Missing Store
+
+Invalid Dates
+
+Invalid Quantity
+
+Negative Sales
+
+Invalid UOM
+
+Corrupted Records
+
+Malformed Rows
+
+Unsupported Encoding
+
+Unexpected Nulls
+
+Output
+
+DataQualityReport
+
+Warnings
+
+Reject Dataset
+
+Data Quality should NOT stop the pipeline unless configured.
+
+------------------------------------------------------------
+4. Insights Engine
+------------------------------------------------------------
+
+Separate Insights from Reporting.
+
+Insights Engine responsibilities
+
+Top 5 Stores by Sales
+
+Top 5 Stores by Quantity
+
+Bottom 5 Stores
+
+Top Categories
+
+Top Brands
+
+Top Departments
+
+Sales Distribution
+
+Quantity Distribution
+
+Missing Store Statistics
+
+Validation Summary KPIs
+
+Insights Engine outputs
+
+InsightsDataset
+
+Reporting only renders.
+
+------------------------------------------------------------
+5. Reporting
+------------------------------------------------------------
+
+Reporting consumes
+
+ValidationDataset
+
+InsightsDataset
+
+Reporting never calculates business metrics.
+
+Reporting only formats.
+
+Support
+
+CSV
+
+Excel (future)
+
+Summary Sheets
+
+Downloads
+
+====================================================================
+RETAILER CERTIFICATION
+====================================================================
+
+Run complete certification against all known scenarios.
+
+Scenario 1
 
 Retailer 1
 
-Delimited with Units + Weight
+Delimited
+
+Weight
+
+Units
+
+Scenario 2
 
 Retailer 2
 
 Pure Fixed Width
 
+Scenario 3
+
 Retailer 3
 
 HEB Record-Based
+
+Disclaimer
+
+HDR
+
+Store
+
+Detail
+
+Trailer
+
+Scenario 4
 
 Retailer 4
 
 Simple Delimited
 
-Sales + Product Master
+Scenario 5
+
+Sales + Product
+
+Scenario 6
+
+Header delimiter different from detail delimiter
+
+Scenario 7
 
 Parent Child
 
-Header Detail Trailer
+Scenario 8
 
-Different header/data delimiters
+Header Trailer
 
-Metadata before data
+Scenario 9
 
-Disclaimer blocks
+Metadata Blocks
 
-Blank lines
+Scenario 10
 
-Mixed record types
+Blank Lines
 
-Variable layouts
+Scenario 11
 
-Future retailers should require ONLY parser extensions.
+Mixed Quantity
 
-No UI modifications.
+Scenario 12
 
-==========================================================
-ACCEPTANCE CRITERIA
-==========================================================
+Different Encodings
 
-The sprint is complete ONLY when
+Scenario 13
 
-✓ UI contains no parser logic.
+Variable Width Records
 
-✓ No Flatten button exists.
+Scenario 14
 
-✓ ParserFactory selects parser automatically.
+Large Files
 
-✓ RecordBasedParser handles HEB completely.
+Scenario 15
 
-✓ Discovery produces a complete DiscoveryResult.
+Quoted Delimiters
 
-✓ Parser consumes DiscoveryResult.
+Scenario 16
 
-✓ Parser builds an internal record tree.
+Missing Headers
 
-✓ Flattening happens automatically.
+Scenario 17
 
-✓ Canonical Dataset is generated for every retailer.
+Duplicate Headers
 
-✓ Validation receives identical schema regardless of retailer.
+Scenario 18
 
-✓ Onboarding flow is identical for every retailer.
+Multiple Sheets
 
-✓ No retailer-specific UI code exists.
+Scenario 19
 
-✓ All four retailer samples complete end-to-end without runtime errors.
+Relationship Datasets
 
-✓ Sales + Product relationship scenario completes successfully.
+Scenario 20
 
-Do not stop when the code compiles.
+Future Unknown Retailer
 
-Continue until the complete onboarding workflow successfully processes every retailer sample and the architecture matches the design described above.
+Every scenario must be executed.
+
+Every scenario must be documented.
+
+====================================================================
+END-TO-END CERTIFICATION
+====================================================================
+
+For every retailer generate
+
+Connection Report
+
+↓
+
+Discovery Report
+
+↓
+
+Dataset Graph
+
+↓
+
+Transformation Plan
+
+↓
+
+Transformation Summary
+
+↓
+
+Parser Report
+
+↓
+
+Canonical Mapping Report
+
+↓
+
+Quantity Resolution Report
+
+↓
+
+Data Quality Report
+
+↓
+
+Aggregation Report
+
+↓
+
+Validation Report
+
+↓
+
+Insights Report
+
+↓
+
+Reporting Output
+
+Every stage must indicate
+
+Input
+
+Output
+
+Execution Time
+
+Warnings
+
+Errors
+
+Recovery
+
+====================================================================
+PIPELINE VALIDATION
+====================================================================
+
+Validate
+
+No duplicate detection.
+
+No duplicate parsing.
+
+No duplicate transformations.
+
+No duplicate previews.
+
+No duplicate joins.
+
+No duplicated mapping.
+
+No retailer-specific logic beyond Discovery, DatasetGraph and TransformationPlan.
+
+====================================================================
+FRONTEND VALIDATION
+====================================================================
+
+Confirm
+
+UI performs only presentation.
+
+UI never performs
+
+Detection
+
+Flattening
+
+Joining
+
+Transformation
+
+Aggregation
+
+Validation
+
+Reporting
+
+Parser selection
+
+Record selection
+
+====================================================================
+PERFORMANCE VALIDATION
+====================================================================
+
+Measure
+
+Discovery Time
+
+Transformation Time
+
+Parser Time
+
+Canonical Time
+
+Aggregation Time
+
+Validation Time
+
+Report Time
+
+Memory Usage
+
+Peak Memory
+
+Streaming Behaviour
+
+Chunk Processing
+
+====================================================================
+OUTPUT DOCUMENTS
+====================================================================
+
+Generate
+
+Retailer_Certification_Report.md
+
+Architecture_Completion_Report.md
+
+Canonical_Mapping_Design.md
+
+Quantity_Resolution_Design.md
+
+Data_Quality_Design.md
+
+Insights_Engine_Design.md
+
+Pipeline_Performance_Report.md
+
+End_To_End_Certification.md
+
+Regression_Test_Report.md
+
+Production_Readiness_Report.md
+
+====================================================================
+FINAL SCORECARD
+====================================================================
+
+Produce a scorecard.
+
+Architecture
+
+Discovery
+
+Dataset Graph
+
+Transformation Planner
+
+Transformation Engine
+
+Parser Pipeline
+
+Canonical Mapping
+
+Quantity Resolution
+
+Data Quality
+
+Aggregation
+
+Validation
+
+Insights
+
+Reporting
+
+Frontend / Backend Separation
+
+Retailer Agnosticism
+
+Performance
+
+Scalability
+
+Maintainability
+
+Test Coverage
+
+Production Readiness
+
+Give each score out of 100.
+
+====================================================================
+SUCCESS CRITERIA
+====================================================================
+
+The sprint is complete ONLY if
+
+✓ Every retailer sample completes successfully.
+
+✓ All four real retailer datasets execute without manual intervention.
+
+✓ Sales + Product relationship works.
+
+✓ HEB works automatically.
+
+✓ Canonical Mapping is explicit.
+
+✓ Quantity Resolution is isolated.
+
+✓ Data Quality runs before Aggregation.
+
+✓ Insights are separated from Reporting.
+
+✓ Reporting performs rendering only.
+
+✓ UI contains zero business logic.
+
+✓ No duplicate pipeline execution exists.
+
+✓ No retailer-specific logic exists outside Discovery, DatasetGraph and TransformationPlan.
+
+✓ Every architectural document matches the actual implementation.
+
+Only after ALL of the above pass should RC3 be considered complete.
+
+Do not mark the sprint complete because the code compiles.
+
+Mark it complete only when the platform demonstrates end-to-end success on every retailer scenario and the architecture is functionally validated.

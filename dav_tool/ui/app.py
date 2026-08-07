@@ -2,9 +2,15 @@ import streamlit as st
 from dav_tool.ui.onboarding import run as run_onboarding
 from dav_tool.ui.existing import run as run_existing
 from dav_tool.ui.connection_manager import render_connection_manager
+from dav_tool.ui.platform import ensure_bootstrap, get_workflow_engine
 
 
 st.set_page_config(page_title="DVA Platform", layout="wide")
+
+services = ensure_bootstrap()
+workflow_engine = get_workflow_engine()
+st.session_state["_platform_services"] = services
+st.session_state["_workflow_engine"] = workflow_engine
 
 if "page" not in st.session_state:
     st.session_state.page = "existing"

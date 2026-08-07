@@ -87,7 +87,13 @@ def run_onboarding_validation(
     if run_upc_summary and ctx.item_agg is not None:
         ctx.upc_summary = ctx.item_agg
     if run_onb_file_review:
-        ctx.file_review = val_result.file_review
+        ctx.file_review = _generate_file_review(
+            file_paths, parse_opts, mapping,
+            precomputed_store_agg=ctx.store_agg,
+            precomputed_upc_summary=ctx.item_agg,
+            source=source,
+            metrics=ctx.metrics,
+        )
 
 
 def run_existing_validation(
@@ -184,10 +190,77 @@ def run_existing_validation(
         ctx.summary_df = val_result.item_summary
     if val_result.store_list_result is not None:
         ctx.compare_result = val_result.store_list_result
-    if val_result.file_review is not None:
-        ctx.fr_prod = val_result.file_review
-    if val_result.file_review_test is not None:
-        ctx.fr_test = val_result.file_review_test
+    if run_file_review_existing:
+        ctx.fr_prod = _generate_file_review(
+            prod_paths, prod_parse, prod_mapping,
+            precomputed_store_agg=ctx.prod.store_agg,
+            precomputed_upc_summary=ctx.prod.item_agg,
+            source=source,
+            metrics=ctx.metrics,
+        )
+        ctx.fr_test = _generate_file_review(
+            test_paths, test_parse, test_mapping,
+            precomputed_store_agg=ctx.test.store_agg,
+            precomputed_upc_summary=ctx.test.item_agg,
+            source=source,
+            metrics=ctx.metrics,
+        )
 
     for err in val_result.errors:
         ctx.metrics.errors.append(err)
+
+
+def _generate_file_review(
+    file_paths,
+    parse_opts: "ParseOptions",
+    mapping: "ColumnMapping",
+    precomputed_store_agg=None,
+    precomputed_upc_summary=None,
+    source=None,
+    metrics=None,
+):
+    """Generate the file review report (Reporting layer).
+
+    The orchestration layer coordinates Validation then Reporting; it never
+    embeds reporting logic inside the Validation layer.
+    """
+    import time
+
+    from dav_tool._reports import generate_file_review
+
+    t0 = time.perf_counter()
+    try:
+        fr = generate_file_review(
+            file_paths, parse_opts.file_type,
+            mapping.store, mapping.upc, mapping.units, mapping.price,
+            delimiter=parse_opts.delimiter,
+            layout=parse_opts.layout,
+            price_type=mapping.price_type,
+            implied_dollars=mapping.implied_dollars,
+            implied_units=mapping.implied_units,
+            start_line=parse_opts.start_line,
+            record_type=parse_opts.record_type,
+            multiline_record_types=parse_opts.multiline_record_types,
+            multiline_delimiter=parse_opts.multiline_delimiter,
+            column_names=parse_opts.column_names,
+            header_prefix=parse_opts.header_prefix,
+            header_layout=parse_opts.header_layout,
+            trailer_prefix=parse_opts.trailer_prefix,
+            trailer_layout=parse_opts.trailer_layout,
+            precomputed_store_agg=precomputed_store_agg,
+            precomputed_upc_summary=precomputed_upc_summary,
+            source=source,
+            quantity_type=mapping.quantity_type,
+            weight_col=mapping.weight_col,
+            weight_uom=mapping.weight_uom,
+            weight_uom_col=mapping.weight_uom_col,
+        )
+        elapsed = time.perf_counter() - t0
+        if metrics is not None:
+            metrics.record("report", "generate_file_review", elapsed)
+        return fr
+    except Exception as e:
+        logger.error("File review failed: %s", str(e), exc_info=True)
+        if metrics is not None:
+            metrics.errors.append(f"File review failed: {e}")
+        return None

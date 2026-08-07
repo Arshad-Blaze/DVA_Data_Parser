@@ -14,12 +14,6 @@ from dav_tool.workflow.preview import load_layout, preview_flattened_multiline, 
 from dav_tool.processing_context import ProcessingContext
 
 
-class QuantityType(str, Enum):
-    UNITS = "units"
-    WEIGHT = "weight"
-    MIXED = "mixed"
-
-
 class ConfigSection(Enum):
     """Logical sections of a FormatConfig, in progressive order."""
     GENERAL = "GENERAL"

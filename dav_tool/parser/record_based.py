@@ -40,6 +40,10 @@ class RecordBasedParser(BaseParser):
         return discovery.file_type == "multiline"
 
     def parse(self, discovery: DiscoveryResult, **kwargs: Any) -> ParsedResult:
+        transformed = kwargs.get("transformed")
+        if transformed is not None and transformed.records is not None:
+            return self._parse_transformed(discovery, transformed, kwargs.get("column_names"))
+
         tree = self._build_tree(discovery, kwargs.get("source"))
         rows = tree.flatten_details()
         data = pl.DataFrame(rows) if rows else pl.DataFrame()
@@ -61,6 +65,33 @@ class RecordBasedParser(BaseParser):
             },
             discovery=discovery,
             record_tree=tree,
+            schema=list(data.columns),
+            _parsed_data=data,
+        )
+
+    def _parse_transformed(self, discovery, transformed, column_names):
+        """Parse pre-transformed records (Transformation Engine output).
+
+        The Transformation Engine has already flattened, removed headers/
+        trailers/metadata, and applied joins.  This parser only interprets
+        fields and produces the ParsedDataset — it never reshapes records.
+        """
+        data = transformed.records
+        if column_names and not data.is_empty():
+            data = _rename_columns(data, column_names)
+
+        return ParsedResult(
+            canonical_data=data,
+            metadata={
+                "parser": self.name,
+                "file_type": discovery.file_type,
+                "transformed": True,
+                "operations": list(transformed.operations),
+                "detail_row_count": data.height,
+                "header_count": 0,
+            },
+            discovery=discovery,
+            record_tree=None,
             schema=list(data.columns),
             _parsed_data=data,
         )

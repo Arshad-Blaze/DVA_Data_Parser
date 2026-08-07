@@ -1,9 +1,7 @@
-import gc
 import os
 import polars as pl
 from typing import List, Dict, Optional, Union
 
-from dav_tool._aggregators import stream_store_aggregate, stream_upc_summary
 from dav_tool.datasource.base import IDataSource
 
 
@@ -62,89 +60,30 @@ def generate_file_review(
 ) -> pl.DataFrame:
     """Generate per-file summary statistics.
 
-    When *precomputed_store_agg* and *precomputed_upc_summary* are provided
-    (from a previous aggregate pass), they are used directly instead of
-    re-parsing the dataset. These summaries are global (aggregated across all
-    input files), so the report returns a single consolidated row rather than
-    repeating the same global totals once per file.
+    Requires *precomputed_store_agg* and *precomputed_upc_summary* (produced
+    by the Aggregation layer).  The Reports layer never parses or aggregates;
+    callers are responsible for aggregating before generating the report.
 
-    When precomputed summaries are NOT provided, each file is streamed
-    sequentially (opening a remote stream when *source* is given) and
-    aggregated independently, producing one correct row per file.
+    These summaries are global (aggregated across all input files), so the
+    report returns a single consolidated row rather than repeating the same
+    global totals once per file.
     """
+    if precomputed_store_agg is None or precomputed_upc_summary is None:
+        raise ValueError(
+            "generate_file_review requires precomputed aggregation summaries. "
+            "Aggregate the dataset first (Aggregation layer) before reporting."
+        )
+
     if isinstance(file_paths, str):
         file_paths = [file_paths]
     file_list = list(file_paths)
 
-    if precomputed_store_agg is not None and precomputed_upc_summary is not None:
-        summary = _summarize(precomputed_store_agg, precomputed_upc_summary)
-        if len(file_list) == 1:
-            fname = os.path.basename(file_list[0])
-        else:
-            fname = f"{len(file_list)} files (aggregated)"
-        return pl.DataFrame([{"filename": fname, **summary}])
-
-    rows = []
-    for f in file_list:
-        fname = os.path.basename(f)
-
-        sa = stream_store_aggregate(
-            [f], file_type, store_col, units_col, dollars_col,
-            delimiter=delimiter, layout=layout,
-            price_type=price_type,
-            implied_dollars=implied_dollars, implied_units=implied_units,
-            start_line=start_line, record_type=record_type,
-            multiline_record_types=multiline_record_types,
-            multiline_delimiter=multiline_delimiter,
-            column_names=column_names,
-            header_prefix=header_prefix,
-            header_layout=header_layout,
-            detail_layout=detail_layout,
-            trailer_prefix=trailer_prefix,
-            trailer_layout=trailer_layout,
-            source=source,
-            quantity_type=quantity_type,
-            weight_col=weight_col,
-            weight_uom=weight_uom,
-            weight_uom_col=weight_uom_col,
-        )
-        
-        ua = stream_upc_summary(
-            [f], file_type, upc_col, units_col, dollars_col,
-            delimiter=delimiter, layout=layout,
-            implied_units=implied_units, implied_dollars=implied_dollars,
-            start_line=start_line, record_type=record_type,
-            multiline_record_types=multiline_record_types,
-            multiline_delimiter=multiline_delimiter,
-            column_names=column_names,
-            header_prefix=header_prefix,
-            header_layout=header_layout,
-            detail_layout=detail_layout,
-            trailer_prefix=trailer_prefix,
-            trailer_layout=trailer_layout,
-            source=source,
-            quantity_type=quantity_type,
-            weight_col=weight_col,
-            weight_uom=weight_uom,
-            weight_uom_col=weight_uom_col,
-        )
-
-        store_count = sa.height if sa is not None and not sa.is_empty() else 0
-        upc_count = ua.height if ua is not None and not ua.is_empty() else 0
-        total_units = ua["UNITS_SOLD"].sum() if ua is not None and "UNITS_SOLD" in ua.columns else 0.0
-        total_dollars = ua["TOTAL_DOLLARS"].sum() if ua is not None and "TOTAL_DOLLARS" in ua.columns else 0.0
-
-        rows.append({
-            "filename": fname,
-            "store_count": store_count,
-            "upc_count": upc_count,
-            "total_units": float(total_units),
-            "total_dollars": round(float(total_dollars), 2),
-        })
-        del sa, ua
-        gc.collect()
-
-    return pl.DataFrame(rows)
+    summary = _summarize(precomputed_store_agg, precomputed_upc_summary)
+    if len(file_list) == 1:
+        fname = os.path.basename(file_list[0])
+    else:
+        fname = f"{len(file_list)} files (aggregated)"
+    return pl.DataFrame([{"filename": fname, **summary}])
 
 
 def generate_summary_analytics(

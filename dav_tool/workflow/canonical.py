@@ -87,6 +87,11 @@ class CanonicalDataset:
     HDR, record types) behind a uniform streaming iterator of canonically-named
     DataFrames.
 
+    **Immutability:** the dataset is immutable after construction.  No layer may
+    modify it once created — Aggregation, Validation, and Reporting consume it
+    read-only.  Any attempt to write an attribute post-construction raises
+    :class:`AttributeError`.
+
     Processing only sees:
     - ``schema`` — canonical column names
     - ``iter_chunks()`` — streaming iterator yielding ``pl.DataFrame``
@@ -95,6 +100,8 @@ class CanonicalDataset:
     Construction requires ``ParseOptions`` + ``ColumnMapping`` (CanonicalContext),
     but those are internal — downsteam layers never reference them.
     """
+
+    _FROZEN = False
 
     def __init__(
         self,
@@ -112,6 +119,20 @@ class CanonicalDataset:
         self._metadata = dict(metadata) if metadata else {}
         self._capabilities = capabilities or {"store", "item"}
         self._statistics: Optional[Dict[str, Any]] = None
+        # Freeze the instance after construction.
+        self._FROZEN = True
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if getattr(self, "_FROZEN", False) and name != "_FROZEN":
+            raise AttributeError(
+                f"CanonicalDataset is immutable — cannot set '{name}' after construction."
+            )
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(
+            f"CanonicalDataset is immutable — cannot delete '{name}'."
+        )
 
     # ── Public API ──────────────────────────────────────────────────
 

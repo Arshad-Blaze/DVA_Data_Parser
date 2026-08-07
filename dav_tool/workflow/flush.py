@@ -12,9 +12,7 @@ This is the FINAL layer in the pipeline. Called once per workflow execution.
 """
 import gc
 import logging
-import os
-import tempfile
-from typing import List, Optional, Set
+from typing import List, Optional
 
 from dav_tool._observability import (
     ProcessingMetrics, log_phase, print_memory_snapshot,
@@ -24,14 +22,6 @@ from dav_tool.datasource.manager import disconnect, is_connected, get_active_sou
 from dav_tool.workflow.data_access import cleanup_all as cleanup_data_access
 
 logger = logging.getLogger(__name__)
-
-_TRACKED_TEMP_DIRS: Set[str] = set()
-
-
-def track_temp_dir(path: str):
-    """Register a temp directory for later cleanup by flush()."""
-    if path and os.path.isdir(path):
-        _TRACKED_TEMP_DIRS.add(path)
 
 
 def flush(
@@ -51,7 +41,6 @@ def flush(
     log_phase("Flush Layer STARTED")
     print_memory_snapshot("FLUSH START")
 
-    _flush_temp_files()
     cleanup_data_access()
     _flush_connection()
     _flush_dataframes(ctx_objects)
@@ -65,24 +54,6 @@ def flush(
     if metrics:
         _log_metrics(metrics)
     log_phase("Flush Layer COMPLETED")
-
-
-def _flush_temp_files():
-    """Delete tracked temporary directories."""
-    global _TRACKED_TEMP_DIRS
-    dirs = list(_TRACKED_TEMP_DIRS)
-    for d in dirs:
-        try:
-            for root, dirs_inner, files_inner in os.walk(d, topdown=False):
-                for f in files_inner:
-                    os.unlink(os.path.join(root, f))
-                for sd in dirs_inner:
-                    os.rmdir(os.path.join(root, sd))
-            os.rmdir(d)
-            logger.debug("Removed temp dir: %s", d)
-        except Exception as e:
-            logger.warning("Could not remove temp dir %s: %s", d, e)
-    _TRACKED_TEMP_DIRS.clear()
 
 
 def _flush_connection():

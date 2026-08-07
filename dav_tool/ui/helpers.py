@@ -1,6 +1,5 @@
 import datetime
 import hashlib
-import json
 import os
 import glob
 import logging
@@ -9,13 +8,8 @@ from typing import Optional
 import streamlit as st
 import polars as pl
 from dav_tool._observability import ProcessingRecord, MAX_HISTORY, release_df
-from dav_tool.config_builder import config_to_summary_dict
-from dav_tool.config_validator import validate_config, validate_section
+from dav_tool.config_validator import validate_config
 from dav_tool.datasource.manager import is_connected, get_active_source
-from dav_tool.format_config import (
-    ConfigSection, get_section_fields, OutputConfig,
-    asdict, iter_sections,
-)
 from dav_tool.options import OutputMode
 from dav_tool.workflow.preview import (
     parse_fixed_width_chunks, preview_flattened_multiline,
@@ -121,11 +115,6 @@ def cached_preview_raw_lines(paths, n_rows=10, source=None):
     result = preview_raw_lines(paths, n_rows=n_rows, source=source)
     _cache_put(cache, key, result)
     return result
-
-
-def invalidate_preview_caches():
-    st.session_state.pop(_COLUMN_CACHE_KEY, None)
-    st.session_state.pop(_PREVIEW_CACHE_KEY, None)
 
 
 def _display_summary_sheets(output, side_label: str = "BAU"):
@@ -234,6 +223,9 @@ def display_dev_diagnostics(ctx):
 
         st.markdown(f"**Current Phase:** {ctx.phase}")
         st.markdown(f"**Current Operation:** {output_mode}")
+
+        _engine_info(ctx)
+
         source = get_active_source()
         conn_status = "Connected" if is_connected() and source is not None else "Disconnected"
         if source is not None:
@@ -264,6 +256,32 @@ def display_dev_diagnostics(ctx):
         st.markdown(f"**Validation Status:** {'Done' if val_done else 'Pending'}")
 
 
+
+
+def _engine_info(ctx):
+    """Show the bootstrapped WorkflowEngine state (presentation only)."""
+    try:
+        from dav_tool.ui.platform import get_workflow_engine, get_pipeline_registry
+    except Exception:
+        return
+    try:
+        engine = get_workflow_engine()
+        reg = get_pipeline_registry()
+    except Exception:
+        st.markdown("**Platform Engine:** unavailable")
+        return
+
+    if engine is None:
+        st.markdown("**Platform Engine:** not registered")
+        return
+
+    pipelines = sorted(reg.names()) if reg is not None else []
+    st.markdown(f"**Platform Engine:** ready")
+    st.markdown(f"**Registered Pipelines:** {len(pipelines)}")
+    for name in pipelines[:8]:
+        st.markdown(f"- `{name}`")
+    if len(pipelines) > 8:
+        st.markdown(f"  … and {len(pipelines) - 8} more")
 
 
 def find_best_column_index(cols, target, synonyms):
@@ -326,22 +344,6 @@ def get_file_list(path: str, source: Optional[IDataSource] = None) -> list:
     return []
 
 
-def resolve_source_paths(paths, source=None):
-    """Convert remote paths to local paths the parser can use.
-
-    For LocalDataSource the paths are returned as-is.
-    For remote sources (SSH) files are downloaded to temp dirs.
-    """
-    if source is None:
-        source = get_active_source()
-    if source is None:
-        return paths
-    local = []
-    for p in paths:
-        local.append(source.download_if_required(p))
-    return local
-
-
 def load_storelist(path, delimiter, source=None):
     if source is None:
         source = get_active_source()
@@ -389,15 +391,15 @@ def get_column_names(paths, file_type, delimiter=",", layout=None, start_line=0,
 
 
 def autoparse_context(ctx, file_paths, source=None):
-    """Parse the detected file via the ParserFactory — no UI parser decisions.
+    """Parse the detected file via the Parsing Service — no UI parser decisions.
 
     Builds a DiscoveryResult from *ctx* (or re-detects when unavailable),
-    lets the ParserFactory pick the parser, and populates *ctx* with the
-    flattened result + schema automatically.
+    lets the Parser Factory pick the parser through the workflow Parsing
+    Service, and returns the parsed result.
 
     Returns a :class:`~dav_tool.parser.base.ParsedResult` (or None on failure).
     """
-    from dav_tool.parser import default_factory
+    from dav_tool.workflow.parsing import parse_from_discovery
 
     discovery = getattr(ctx, "discovery", None) or DiscoveryResult.from_context(ctx)
     if not discovery.file_paths:
@@ -405,8 +407,11 @@ def autoparse_context(ctx, file_paths, source=None):
     if not discovery.recommended_parser:
         discovery.recommended_parser = recommend_parser(discovery)
 
-    parser = default_factory.create(discovery)
-    return parser.parse(discovery, source=source)
+    try:
+        return parse_from_discovery(discovery, source=source)
+    except Exception as e:
+        logger.error("Parsing via workflow service failed: %s", str(e), exc_info=True)
+        return None
 
 
 def record_execution(metrics):
@@ -443,496 +448,6 @@ def display_processing_history():
                 f"{r.peak_cpu}% CPU, "
                 f"{r.warnings}w, {r.errors}e"
             )
-
-
-def display_config_review(cfg):
-    """Render a read-only configuration summary in the UI."""
-    sections = config_to_summary_dict(cfg)
-
-    editable = not cfg.locked
-    st.subheader("Configuration" + (" (Locked)" if cfg.locked else ""))
-
-    for section_name, items in sections.items():
-        with st.expander(section_name, expanded=not cfg.locked):
-            for key, val in items.items():
-                st.markdown(f"**{key}:** {val}")
-
-    with st.expander("Validation Configuration", expanded=not cfg.locked):
-        vc = cfg.validation_config
-        for rule_name in ["store_validation", "item_validation", "compare_store_list", "file_review"]:
-            rule = getattr(vc, rule_name)
-            st.markdown(f"- **{rule_name}**: {'Enabled' if rule.enabled else 'Disabled'}")
-
-    with st.expander("Raw JSON", expanded=False):
-        st.json(asdict(cfg) if hasattr(cfg, 'locked') else {})
-
-    if not cfg.locked:
-        st.download_button(
-            "Download Config as JSON",
-            json.dumps(asdict(cfg), indent=2, default=str),
-            file_name=f"{cfg.name or 'config'}.json",
-            mime="application/json",
-        )
-
-
-def edit_and_accept_config(cfg, key_prefix=""):
-    """Render editable configuration fields and an Accept button.
-
-    User can edit column mapping, price settings, and validation toggles
-    directly in the UI. Returns True when the user accepts.
-    """
-    changed = False
-
-    with st.expander("Column Mapping", expanded=True):
-        if cfg.detected_columns:
-            cols = cfg.detected_columns
-        elif cfg.schema:
-            cols = cfg.schema
-        else:
-            cols = []
-
-        if cols:
-            idx_map = {}
-            if cfg.suggested_mapping:
-                for role, col in cfg.suggested_mapping.items():
-                    if col in cols:
-                        idx_map[role] = cols.index(col)
-
-            c1, c2 = st.columns(2)
-            with c1:
-                new_store = st.selectbox(
-                    "Store Column", cols,
-                    index=idx_map.get("store", 0),
-                    key=f"{key_prefix}_cfg_store",
-                )
-                new_upc = st.selectbox(
-                    "UPC Column", cols,
-                    index=idx_map.get("upc", 0),
-                    key=f"{key_prefix}_cfg_upc",
-                )
-                new_desc = st.selectbox(
-                    "Description Column", cols,
-                    index=idx_map.get("description", 0),
-                    key=f"{key_prefix}_cfg_desc",
-                )
-            with c2:
-                new_units = st.selectbox(
-                    "Units Column", cols,
-                    index=idx_map.get("units", 0),
-                    key=f"{key_prefix}_cfg_units",
-                )
-                new_price = st.selectbox(
-                    "Price Column", cols,
-                    index=idx_map.get("price", 0),
-                    key=f"{key_prefix}_cfg_price",
-                )
-
-            if new_store != cfg.store_col:
-                cfg.store_col = new_store; changed = True
-            if new_upc != cfg.upc_col:
-                cfg.upc_col = new_upc; changed = True
-            if new_desc != cfg.desc_col:
-                cfg.desc_col = new_desc; changed = True
-            if new_units != cfg.units_col:
-                cfg.units_col = new_units; changed = True
-            if new_price != cfg.price_col:
-                cfg.price_col = new_price; changed = True
-
-        new_price_type = st.radio(
-            "Price Type", ["Total Price", "Unit Price"],
-            index=0 if cfg.price_type == "Total Price" else 1,
-            key=f"{key_prefix}_cfg_price_type",
-        )
-        if new_price_type != cfg.price_type:
-            cfg.price_type = new_price_type; changed = True
-
-        c1, c2 = st.columns(2)
-        with c1:
-            new_imp_dol = st.checkbox("Implied Dollars", value=cfg.implied_dollars, key=f"{key_prefix}_cfg_imp_dol")
-            if new_imp_dol != cfg.implied_dollars:
-                cfg.implied_dollars = new_imp_dol; changed = True
-        with c2:
-            new_imp_unt = st.checkbox("Implied Units", value=cfg.implied_units, key=f"{key_prefix}_cfg_imp_unt")
-            if new_imp_unt != cfg.implied_units:
-                cfg.implied_units = new_imp_unt; changed = True
-
-    with st.expander("Validation Configuration", expanded=False):
-        vc = cfg.validation_config
-        for rule_name, label in [
-            ("store_validation", "Store Level Validation"),
-            ("item_validation", "Item Level Validation"),
-            ("compare_store_list", "Compare Store List"),
-            ("file_review", "File Review Report"),
-        ]:
-            rule = getattr(vc, rule_name)
-            enabled = st.checkbox(
-                label, value=rule.enabled,
-                key=f"{key_prefix}_cfg_val_{rule_name}",
-            )
-            if enabled != rule.enabled:
-                rule.enabled = enabled; changed = True
-
-    accepted = st.button(
-        "Accept Configuration" if not cfg.locked else "Configuration Locked",
-        use_container_width=True, type="primary",
-        disabled=cfg.locked,
-        key=f"{key_prefix}_accept_cfg",
-    )
-
-    return accepted
-
-
-# ── Progressive Stage Helpers ──────────────────────────────────────
-
-
-def _render_section_fields(
-    cfg,
-    section,
-    key_prefix="",
-    detected_columns=None,
-    file_paths=None,
-):
-    """Render editable fields for one config section. Returns section errors."""
-    fields = get_section_fields(section)
-    changed = False
-
-    if section == ConfigSection.GENERAL:
-        st.markdown("**General Settings**")
-        cols = st.columns(2)
-        with cols[0]:
-            new_name = st.text_input("Configuration Name", value=cfg.name or "", key=f"{key_prefix}_g_name")
-            if new_name != cfg.name:
-                cfg.name = new_name; changed = True
-            new_ft = st.selectbox(
-                "File Type", ["delimited", "fixed", "multiline"],
-                index=["delimited", "fixed", "multiline"].index(cfg.file_type) if cfg.file_type in ["delimited", "fixed", "multiline"] else 0,
-                key=f"{key_prefix}_g_ft",
-            )
-            if new_ft != cfg.file_type:
-                cfg.file_type = new_ft; changed = True
-        with cols[1]:
-            new_enc = st.text_input("Encoding", value=cfg.encoding or "utf-8", key=f"{key_prefix}_g_enc")
-            if new_enc != cfg.encoding:
-                cfg.encoding = new_enc; changed = True
-            new_hdr = st.checkbox("Has Header", value=cfg.has_header, key=f"{key_prefix}_g_hdr")
-            if new_hdr != cfg.has_header:
-                cfg.has_header = new_hdr; changed = True
-
-    elif section == ConfigSection.FILE:
-        st.markdown("**File Format Settings**")
-        if cfg.file_type == "delimited":
-            new_delim = st.selectbox(
-                "Delimiter", [",", "|", "\t", ";"],
-                index=[",", "|", "\t", ";"].index(cfg.delimiter) if cfg.delimiter in [",", "|", "\t", ";"] else 0,
-                key=f"{key_prefix}_f_delim",
-            )
-            if new_delim != cfg.delimiter:
-                cfg.delimiter = new_delim; changed = True
-
-        elif cfg.file_type == "fixed":
-            new_layout = st.text_input("Layout CSV Path", value=cfg.layout_file or "", key=f"{key_prefix}_f_layout")
-            if new_layout != cfg.layout_file:
-                cfg.layout_file = new_layout; changed = True
-            new_start = st.number_input("Start Line", min_value=0, value=cfg.start_line, key=f"{key_prefix}_f_start")
-            if new_start != cfg.start_line:
-                cfg.start_line = new_start; changed = True
-
-        elif cfg.file_type == "multiline":
-            new_ml_delim = st.selectbox(
-                "Multiline Delimiter", [",", "|", "\t", ";"],
-                index=[",", "|", "\t", ";"].index(cfg.delimiter) if cfg.delimiter in [",", "|", "\t", ";"] else (0 if not cfg.ml_delimiter else [",", "|", "\t", ";"].index(cfg.ml_delimiter) if cfg.ml_delimiter in [",", "|", "\t", ";"] else 0),
-                key=f"{key_prefix}_f_ml_delim",
-            )
-            if cfg.file_type == "multiline":
-                cfg.ml_delimiter = new_ml_delim; changed = True
-
-            if cfg.header_prefix:
-                st.info(f"HDR prefix: **{cfg.header_prefix}**")
-                hp = st.text_input("Header Prefix", value=cfg.header_prefix or "", key=f"{key_prefix}_f_hp")
-                if hp != cfg.header_prefix:
-                    cfg.header_prefix = hp; changed = True
-                hf = st.text_input("Header Layout CSV", value="", key=f"{key_prefix}_f_hl")
-            else:
-                new_rts = st.text_input(
-                    "Record Types (comma-separated, e.g. H,D)",
-                    value=",".join(cfg.ml_record_types or ["H", "D"]),
-                    key=f"{key_prefix}_f_rts",
-                )
-                if new_rts != ",".join(cfg.ml_record_types or []):
-                    cfg.ml_record_types = [r.strip() for r in new_rts.split(",") if r.strip()]; changed = True
-
-    elif section == ConfigSection.PHYSICAL_SCHEMA:
-        st.markdown("**Physical Schema (from Discovery — read-only)**")
-        st.caption("This schema represents exactly what was found during file discovery. It never changes.")
-        phys_cols = cfg.physical_schema or []
-        if phys_cols:
-            st.markdown(f"**{len(phys_cols)} columns detected:**")
-            st.markdown(", ".join(phys_cols))
-        else:
-            st.info("Physical schema not yet populated. Complete discovery first.")
-
-        if cfg.detected_data_types:
-            st.markdown("**Data Types:**")
-            for k, v in cfg.detected_data_types.items():
-                st.markdown(f"- {k}: `{v}`")
-
-    elif section == ConfigSection.CANONICAL_SCHEMA:
-        st.markdown("**Canonical Schema (editable)**")
-        st.caption("Business-friendly column names. Changes propagate to Business Mapping, Operations, Validation, and Reports.")
-        phys = cfg.physical_schema or []
-        canon = cfg.canonical_schema or phys[:]
-        if phys:
-            st.markdown(f"**Physical columns ({len(phys)}):** {', '.join(phys)}")
-            new_canon = st.text_area(
-                "Edit canonical names (one per line, order matches physical schema)",
-                value="\n".join(canon),
-                key=f"{key_prefix}_c_canon",
-            )
-            parsed = [c.strip() for c in new_canon.replace("\n", ",").split(",") if c.strip()]
-            if parsed and parsed != cfg.canonical_schema:
-                cfg.canonical_schema = parsed
-                changed = True
-        else:
-            st.info("No physical schema available. Complete discovery first.")
-
-    elif section == ConfigSection.BUSINESS_MAPPING:
-        st.markdown("**Business Mapping**")
-        cols_list = cfg.canonical_schema or cfg.physical_schema or []
-        if cols_list:
-            suggested = cfg.suggested_mapping or {}
-            idx_map = {}
-            for role in ["store", "upc", "description", "quantity", "price"]:
-                col = suggested.get(role)
-                if col in cols_list:
-                    idx_map[role] = cols_list.index(col)
-
-            c1, c2 = st.columns(2)
-            with c1:
-                new_store = st.selectbox("Store Column", cols_list, index=idx_map.get("store", 0), key=f"{key_prefix}_b_store")
-                new_upc = st.selectbox("UPC Column", cols_list, index=idx_map.get("upc", 0), key=f"{key_prefix}_b_upc")
-                new_desc = st.selectbox("Description Column", cols_list, index=idx_map.get("description", 0), key=f"{key_prefix}_b_desc")
-            with c2:
-                new_quantity = st.selectbox("Quantity Column", cols_list, index=idx_map.get("quantity", idx_map.get("units", 0)), key=f"{key_prefix}_b_quantity")
-                new_price = st.selectbox("Price Column", cols_list, index=idx_map.get("price", 0), key=f"{key_prefix}_b_price")
-
-            if new_store != cfg.store_col:
-                cfg.store_col = new_store; changed = True
-            if new_upc != cfg.upc_col:
-                cfg.upc_col = new_upc; changed = True
-            if new_desc != cfg.desc_col:
-                cfg.desc_col = new_desc; changed = True
-            if new_quantity != cfg.quantity_col:
-                cfg.quantity_col = new_quantity; changed = True
-            if new_price != cfg.price_col:
-                cfg.price_col = new_price; changed = True
-
-            new_pt = st.radio("Price Type", ["Total Price", "Unit Price"], index=0 if cfg.price_type == "Total Price" else 1, key=f"{key_prefix}_b_pt", horizontal=True)
-            if new_pt != cfg.price_type:
-                cfg.price_type = new_pt; changed = True
-
-            cc1, cc2 = st.columns(2)
-            with cc1:
-                new_imp_dol = st.checkbox("Implied Dollars", value=cfg.implied_dollars, key=f"{key_prefix}_b_imp_dol")
-                if new_imp_dol != cfg.implied_dollars:
-                    cfg.implied_dollars = new_imp_dol; changed = True
-            with cc2:
-                new_imp_unt = st.checkbox("Implied Units", value=cfg.implied_units, key=f"{key_prefix}_b_imp_unt")
-                if new_imp_unt != cfg.implied_units:
-                    cfg.implied_units = new_imp_unt; changed = True
-
-    elif section == ConfigSection.QUANTITY:
-        st.markdown("**Quantity Configuration**")
-        st.caption("Configure how quantities are handled — units, weight, or mixed datasets.")
-        new_qt = st.selectbox(
-            "Quantity Type",
-            ["units", "weight", "mixed"],
-            index=["units", "weight", "mixed"].index(cfg.quantity_type) if cfg.quantity_type in ["units", "weight", "mixed"] else 0,
-            key=f"{key_prefix}_q_type",
-        )
-        if new_qt != cfg.quantity_type:
-            cfg.quantity_type = new_qt; changed = True
-
-        cols_list = cfg.canonical_schema or cfg.physical_schema or []
-        if cfg.quantity_type in ("weight", "mixed") and cols_list:
-            wt_idx = 0
-            if cfg.weight_col and cfg.weight_col in cols_list:
-                wt_idx = cols_list.index(cfg.weight_col)
-            new_wt = st.selectbox("Weight Column", cols_list, index=wt_idx, key=f"{key_prefix}_q_wt")
-            if new_wt != cfg.weight_col:
-                cfg.weight_col = new_wt; changed = True
-
-            cols_for_uom = ["(none)"] + cols_list
-            uom_col_idx = 0
-            if cfg.weight_uom_col and cfg.weight_uom_col in cols_list:
-                uom_col_idx = cols_list.index(cfg.weight_uom_col) + 1
-            new_uom_col = st.selectbox(
-                "UOM Column (optional — reads UOM from data)",
-                cols_for_uom, index=uom_col_idx, key=f"{key_prefix}_q_uom_col",
-            )
-            resolved_uom_col = new_uom_col if new_uom_col != "(none)" else None
-            if resolved_uom_col != cfg.weight_uom_col:
-                cfg.weight_uom_col = resolved_uom_col; changed = True
-
-            if not cfg.weight_uom_col:
-                new_uom = st.selectbox(
-                    "Default Weight UOM (fallback)",
-                    ["lb", "oz", "kg", "g"],
-                    index=["lb", "oz", "kg", "g"].index(cfg.weight_uom) if cfg.weight_uom in ["lb", "oz", "kg", "g"] else 0,
-                    key=f"{key_prefix}_q_uom",
-                )
-                if new_uom != cfg.weight_uom:
-                    cfg.weight_uom = new_uom; changed = True
-
-        if cfg.quantity_type == "mixed":
-            new_rule = st.selectbox(
-                "Resolution Rule",
-                ["units_preferred", "weight_preferred", "average"],
-                index=["units_preferred", "weight_preferred", "average"].index(cfg.resolution_rule) if cfg.resolution_rule in ["units_preferred", "weight_preferred", "average"] else 0,
-                key=f"{key_prefix}_q_rule",
-                help="How to resolve rows that have both units and weight values",
-            )
-            if new_rule != cfg.resolution_rule:
-                cfg.resolution_rule = new_rule; changed = True
-
-    elif section == ConfigSection.VALIDATION:
-        st.markdown("**Validation Settings**")
-        vc = cfg.validation_config
-        for rule_name, label in [
-            ("store_validation", "Store Level Validation"),
-            ("item_validation", "Item Level Validation"),
-            ("compare_store_list", "Compare Store List"),
-            ("file_review", "File Review Report"),
-        ]:
-            rule = getattr(vc, rule_name)
-            enabled = st.checkbox(label, value=rule.enabled, key=f"{key_prefix}_v_{rule_name}")
-            if enabled != rule.enabled:
-                rule.enabled = enabled; changed = True
-            if enabled:
-                gb = st.text_input(
-                    f"Group By Columns for {rule_name}",
-                    value=", ".join(rule.group_by_columns or []),
-                    key=f"{key_prefix}_v_gb_{rule_name}",
-                )
-                new_gb = [c.strip() for c in gb.split(",") if c.strip()]
-                if new_gb != rule.group_by_columns:
-                    rule.group_by_columns = new_gb; changed = True
-
-    elif section == ConfigSection.OUTPUT:
-        st.markdown("**Output Settings**")
-        oc = cfg.output_config
-        new_fmt = st.selectbox(
-            "Output Format", ["csv", "parquet", "excel"],
-            index=["csv", "parquet", "excel"].index(oc.format) if oc.format in ["csv", "parquet", "excel"] else 0,
-            key=f"{key_prefix}_o_fmt",
-        )
-        if new_fmt != oc.format:
-            oc.format = new_fmt; changed = True
-        new_fr = st.checkbox("Include File Review in Output", value=oc.include_file_review, key=f"{key_prefix}_o_fr")
-        if new_fr != oc.include_file_review:
-            oc.include_file_review = new_fr; changed = True
-        new_vd = st.checkbox("Include Validation Details", value=oc.include_validation_details, key=f"{key_prefix}_o_vd")
-        if new_vd != oc.include_validation_details:
-            oc.include_validation_details = new_vd; changed = True
-        new_dl = st.checkbox("Download Results After Processing", value=oc.download_results, key=f"{key_prefix}_o_dl")
-        if new_dl != oc.download_results:
-            oc.download_results = new_dl; changed = True
-
-    return validate_section(cfg, section)
-
-
-def render_progressive_stage(
-    cfg,
-    section,
-    key_prefix="",
-    detected_columns=None,
-    file_paths=None,
-):
-    """Render editable fields for one config section (stage).
-
-    Returns True when the user confirms this stage.
-    """
-    section_errors = _render_section_fields(
-        cfg, section,
-        key_prefix=key_prefix,
-        detected_columns=detected_columns,
-        file_paths=file_paths,
-    )
-    for err in section_errors:
-        st.warning(f"⚠ {err}")
-
-    confirmed = st.button(
-        f"Confirm {cfg.section_label(section)}",
-        use_container_width=True, type="primary",
-        disabled=bool(section_errors),
-        key=f"{key_prefix}_confirm_{section.value}",
-    )
-    return confirmed
-
-
-def progressive_config_wizard(cfg, detected_columns=None, key_prefix="", file_paths=None):
-    """Run the full progressive config wizard for a FormatConfig.
-
-    Returns True when all stages are complete.
-    """
-    for section in iter_sections():
-        if cfg.section_complete(section):
-            continue
-
-        st.markdown(f"### {cfg.section_label(section)}")
-        confirmed = render_progressive_stage(
-            cfg, section,
-            key_prefix=key_prefix,
-            detected_columns=detected_columns,
-            file_paths=file_paths,
-        )
-        if confirmed:
-            cfg.mark_section_complete(section)
-            st.rerun()
-        break  # only show one incomplete section
-
-    if cfg.is_config_complete():
-        return True
-    return False
-
-
-def render_all_config_sections(cfg, detected_columns=None, key_prefix="", file_paths=None):
-    """Render all config sections in a single page.
-
-    Returns True when the user accepts the configuration.
-    """
-    all_errors = {}
-
-    for section in iter_sections():
-        st.markdown(f"### {cfg.section_label(section)}")
-        section_errors = _render_section_fields(
-            cfg, section,
-            key_prefix=key_prefix,
-            detected_columns=detected_columns,
-            file_paths=file_paths,
-        )
-        if section_errors:
-            all_errors[section] = section_errors
-            for err in section_errors:
-                st.warning(f"⚠ {err}")
-        st.divider()
-
-    total_errors = sum(len(errs) for errs in all_errors.values())
-    disabled = total_errors > 0
-    if disabled:
-        st.error(f"Resolve {total_errors} issue(s) before accepting.")
-
-    accepted = st.button(
-        "Accept Configuration",
-        use_container_width=True, type="primary",
-        disabled=disabled,
-        key=f"{key_prefix}_accept_all",
-    )
-
-    if accepted:
-        for section in iter_sections():
-            cfg.mark_section_complete(section)
-        return True
-    return False
 
 
 # ── Phase 8-9: UI Steps + Memory ──────────────────────────────────

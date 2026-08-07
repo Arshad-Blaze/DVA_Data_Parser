@@ -148,45 +148,6 @@ class ColumnMapping:
 
 
 @dataclass(frozen=True)
-class CanonicalContext:
-    """Internal construction contract — consolidated into ``CanonicalDataset``.
-
-    RC2: Downstream layers should prefer ``CanonicalDataset``
-    (``dav_tool.workflow.canonical``) as the single input contract.
-    This class remains as a construction helper for the Operation Layer
-    and is not consumed directly by Processing.
-    """
-    parse: ParseOptions
-    mapping: ColumnMapping
-    canonical_schema: List[str] = field(default_factory=list)
-
-    @classmethod
-    def from_context(cls, ctx, canonical_schema=None) -> "CanonicalContext":
-        """Build CanonicalContext from a ProcessingContext."""
-        from dav_tool.workflow.canonical import CanonicalSchema
-        parse = ParseOptions.from_context(ctx)
-        mapping = ColumnMapping.from_context(ctx)
-        if canonical_schema is None:
-            schema = getattr(ctx, 'schema', None) or getattr(ctx, 'columns', None) or []
-        else:
-            schema = canonical_schema
-        return cls(
-            parse=parse,
-            mapping=mapping,
-            canonical_schema=list(schema),
-        )
-
-    def to_dataset(self, file_paths, level: str, source=None) -> "CanonicalDataset":
-        """Convert to a ``CanonicalDataset`` for Processing consumption."""
-        from dav_tool.workflow.canonical import CanonicalDataset
-        return CanonicalDataset.from_parse_options(
-            file_paths, self.parse, self.mapping, level, source=source,
-            schema_template=self.mapping.schema_template,
-        )
-
-
-
-@dataclass(frozen=True)
 class ValidationOptions:
     """Options for running validations.
 
